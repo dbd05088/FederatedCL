@@ -25,13 +25,16 @@ from methods.trire import TriRE
 logger = logging.getLogger()
 
 
-def select_method(args, train_datalist, test_datalist, device):
+def select_method(args, train_datalist, test_datalist, device, model_args=None, training_args=None, bnb_model_from_pretrained_args=None):
     kwargs = vars(args)
     if args.mode == "er":
         method = ER(
             train_datalist=train_datalist,
             test_datalist=test_datalist,
             device=device,
+            model_args=model_args,
+            training_args=training_args,
+            bnb_model_from_pretrained_args=bnb_model_from_pretrained_args,
             **kwargs,
         )
     elif args.mode == "bic":

@@ -15,48 +15,48 @@ from torch.utils.tensorboard import SummaryWriter
 from flops_counter.ptflops import get_model_complexity_info
 from utils.data_loader import ImageDataset, cutmix_data, MultiProcessLoader, get_statistics
 from utils.augment import get_transform
-from utils.train_utils import select_model, select_optimizer, select_scheduler
+from utils.train_utils import select_model, select_optimizer, select_scheduler, get_llavamodel
 from utils.block_utils import MODEL_BLOCK_DICT, get_blockwise_flops
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
 class CLManagerBase:
-    def __init__(self, train_datalist, test_datalist, device, **kwargs):
+    def __init__(self, train_datalist, test_datalist, device, model_args, training_args, bnb_model_from_pretrained_args, **kwargs):
 
         self.device = device
         self.task_id = 0
         self.method_name = kwargs["mode"]
         self.dataset = kwargs["dataset"]
-        self.sigma = kwargs["sigma"]
-        self.repeat = kwargs["repeat"]
-        self.init_cls = kwargs["init_cls"]
-        self.samples_per_task = kwargs["samples_per_task"]
-        self.memory_size = kwargs["memory_size"]
+        # self.sigma = kwargs["sigma"]
+        # self.repeat = kwargs["repeat"]
+        # self.init_cls = kwargs["init_cls"]
+        # self.samples_per_task = kwargs["samples_per_task"]
+        # self.memory_size = kwargs["memory_size"]
         self.online_iter = kwargs["online_iter"]
 
-        self.model_name = kwargs["model_name"]
-        self.opt_name = kwargs["opt_name"]
-        self.sched_name = kwargs["sched_name"]
+        # self.model_name = kwargs["model_name"]
+        self.opt_name = kwargs["optim"]
+        self.sched_name = kwargs["lr_scheduler_type"]
         if self.sched_name == "default":
             self.sched_name = 'const'
-        self.lr = kwargs["lr"]
-        self.block_names = MODEL_BLOCK_DICT[self.model_name]
-        self.num_blocks = len(self.block_names) - 1
+        self.lr = kwargs["learning_rate"]
+        # self.block_names = MODEL_BLOCK_DICT[self.model_name]
+        # self.num_blocks = len(self.block_names) - 1
 
-        assert kwargs["temp_batchsize"] <= kwargs["batchsize"]
-        self.batch_size = kwargs["batchsize"]
+        assert kwargs["temp_batchsize"] <= kwargs["per_gpu_train_batch_size"]
+        self.batch_size = kwargs["per_gpu_train_batch_size"]
         self.temp_batch_size = kwargs["temp_batchsize"]
         self.memory_batch_size = self.batch_size - self.temp_batch_size
-        self.memory_size -= self.temp_batch_size
+        # self.memory_size -= self.temp_batch_size
         self.transforms = kwargs["transforms"]
 
         self.criterion = nn.CrossEntropyLoss(reduction="mean").to(self.device)
 
-        self.data_dir = kwargs["data_dir"]
-        if self.data_dir is None:
-            self.data_dir = os.path.join("dataset", self.dataset)
-        self.n_worker = kwargs["n_worker"]
+        # self.data_dir = kwargs["data_dir"]
+        # if self.data_dir is None:
+        self.data_dir = os.path.join("dataset", self.dataset)
+        self.n_worker = kwargs["dataloader_num_workers"]
         self.future_steps = kwargs["future_steps"]
         self.transform_on_gpu = kwargs["transform_on_gpu"]
         self.use_kornia = kwargs["use_kornia"]
@@ -66,22 +66,24 @@ class CLManagerBase:
         self.topk = kwargs["topk"]
         self.f_period = kwargs["f_period"]
 
-        self.use_amp = kwargs["use_amp"]
-        if self.use_amp:
-            self.scaler = torch.cuda.amp.GradScaler()
+        # self.use_amp = kwargs["use_amp"]
+        # if self.use_amp:
+        #     self.scaler = torch.cuda.amp.GradScaler()
 
         self.train_datalist = train_datalist
         self.test_datalist = test_datalist
         self.cls_dict = {}
-        self.total_samples = len(self.train_datalist)
+        # self.total_samples = len(self.train_datalist)
         
-        if self.model_name == 'vit':
-            self.train_transform, self.test_transform, self.cpu_transform, self.n_classes = get_transform(self.dataset, self.transforms, self.method_name, self.transform_on_gpu, 224)
-        else:
-            self.train_transform, self.test_transform, self.cpu_transform, self.n_classes = get_transform(self.dataset, self.transforms, self.method_name, self.transform_on_gpu)
+        # if self.model_name == 'vit':
+        #     self.train_transform, self.test_transform, self.cpu_transform, self.n_classes = get_transform(self.dataset, self.transforms, self.method_name, self.transform_on_gpu, 224)
+        # else:
+        self.train_transform, self.test_transform, self.cpu_transform, self.n_classes = get_transform(self.dataset, self.transforms, self.method_name, self.transform_on_gpu)
         self.cutmix = "cutmix" in kwargs["transforms"]
         
-        self.model = select_model(self.model_name, self.dataset, num_classes = 1, channel_constant=kwargs["channel_constant"], kwinner=kwargs["kwinner"]).to(self.device)
+        # self.model = select_model(self.model_name, self.dataset, num_classes = 1, channel_constant=kwargs["channel_constant"], kwinner=kwargs["kwinner"]).to(self.device)
+        self.model = get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args)
+        breakpoint()
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer)
 

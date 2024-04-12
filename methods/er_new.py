@@ -16,10 +16,10 @@ writer = SummaryWriter("tensorboard")
 
 
 class ER(CLManagerBase):
-    def __init__(self,  train_datalist, test_datalist, device, **kwargs):
+    def __init__(self,  train_datalist, test_datalist, device, model_args, training_args, bnb_model_from_pretrained_args, **kwargs):
         if kwargs["temp_batchsize"] is None:
-            kwargs["temp_batchsize"] = kwargs["batchsize"]//2
-        super().__init__(train_datalist, test_datalist, device, **kwargs)
+            kwargs["temp_batchsize"] = kwargs["per_gpu_train_batch_size"]//2
+        super().__init__(train_datalist, test_datalist, device, model_args, training_args, bnb_model_from_pretrained_args, **kwargs)
 
     def update_memory(self, sample):
         self.reservoir_memory(sample)
