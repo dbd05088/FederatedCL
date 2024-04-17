@@ -21,13 +21,15 @@ import torch.multiprocessing as multiprocessing
 
 from utils.augment import DataAugmentation, Preprocess, get_statistics
 
-from utils.data_worker import worker_loop
+from utils.data_worker import worker_loop, worker_loop_multimodal, worker, worker_multimodal
 
 logger = logging.getLogger()
 
+import queue
+TIMEOUT = 5.0
 
 class MultiProcessLoader():
-    def __init__(self, n_workers, cls_dict, transform, data_dir, transform_on_gpu=False, cpu_transform=None, device='cpu', use_kornia=False, transform_on_worker=True, init=True):
+    def __init__(self, n_workers, cls_dict, transform, data_dir, transform_on_gpu=False, cpu_transform=None, device='cpu', use_kornia=False, transform_on_worker=True, init=True, tokenizer=None, data_args=None):
         self.n_workers = n_workers
         self.cls_dict = cls_dict
         self.transform = transform
@@ -39,12 +41,16 @@ class MultiProcessLoader():
         self.result_queues = []
         self.workers = []
         self.index_queues = []
+        self.tokenizer = tokenizer
+        self.data_args = data_args
+        self.data_dir = data_dir
         if init:
             for i in range(self.n_workers):
                 index_queue = multiprocessing.Queue()
                 index_queue.cancel_join_thread()
                 result_queue = multiprocessing.Queue()
                 result_queue.cancel_join_thread()
+                # w = multiprocessing.Process(target=worker_loop_multimodal, args=(index_queue, result_queue, data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, use_kornia, transform_on_worker, self.tokenizer, self.data_args))
                 w = multiprocessing.Process(target=worker_loop, args=(index_queue, result_queue, data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, use_kornia, transform_on_worker))
                 w.daemon = True
                 w.start()
@@ -92,7 +98,68 @@ class MultiProcessLoader():
             return data
         else:
             return None
+
+    # @torch.no_grad()
+    # def get_batch(self):
+    #     data = dict()
+    #     images = []
+    #     input_ids = []
+    #     labels = []
+    #     for i in range(self.n_workers):
+    #         loaded_samples = self.result_queues[i].get(timeout=3000.0)
+    #         if loaded_samples is not None:
+    #             images.append(loaded_samples["image"])
+    #             input_ids.append(loaded_samples["input_id"])
+    #             labels.append(loaded_samples["label"])
+    #     if len(images) > 0:
+    #         images = torch.cat(images)
+    #         input_ids = torch.cat(input_ids)
+    #         labels = torch.cat(labels)
+    #         if self.transform_on_gpu and not self.transform_on_worker:
+    #             images = self.transform(images.to(self.device))
+    #         data['image'] = images
+    #         data['input_id'] = input_ids
+    #         data['label'] = labels
+    #         return data
+    #     else:
+    #         return None
     
+    def save_state(self, client_id, save_dir):
+        samples_in_index = []
+        samples_in_result = []
+        for i in range(len(self.index_queues)):
+            try:
+                r = self.index_queues[i].get(timeout=TIMEOUT)
+                samples_in_index.append(r)
+            except queue.Empty:
+                samples_in_index.append(None)
+        for i in range(len(self.result_queues)):
+            try:
+                r = self.result_queues[i].get(timeout=TIMEOUT)
+                if r:
+                    samples_in_result.append(r['sample'])
+                else:
+                    samples_in_result.append(None)
+            except queue.Empty:
+                samples_in_result.append(None)
+        state_dict = {
+            'index_queues':samples_in_index,
+            'result_queues':samples_in_result
+        }
+        np.save(os.path.join(save_dir, f"{client_id}_client_dataloaderstate.npy"), state_dict)
+
+    def load_state(self, client_id, load_dir):
+        state_dict = np.load(os.path.join(load_dir, f"{client_id}_client_dataloaderstate.npy"))
+        
+        for i, samples in enumerate(state_dict['result_queues']):
+            if samples:
+                self.result_queues[i].put(worker(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker))
+                self.result_queues[i].put(worker_multimodal(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker, tokenizer=self.tokenizer, data_args=self.data_args))
+        for i, samples in enumerate(state_dict['index_queues']):
+            if samples:
+                self.index_queues[i].put(samples)
+
+
     # @torch.no_grad()
     # def get_batch(self):
     #     data = dict()
@@ -184,18 +251,18 @@ def nonzero_indices(bool_mask_tensor):
     # Returns tensor which contains indices of nonzero elements in bool_mask_tensor
     return bool_mask_tensor.nonzero(as_tuple=True)[0]
 
-def get_custom_double_transform(transform):
-    tfs = []
-    for tf in transform:
-        if isinstance(tf, transforms.RandomCrop):
-            tfs.append(CustomRandomCrop(tf.size, tf.padding, resize=self.args.resize_maps==1, min_resize_index=2))
-        elif isinstance(tf, transforms.RandomHorizontalFlip):
-            tfs.append(CustomRandomHorizontalFlip(tf.p))
-        elif isinstance(tf, transforms.Compose):
-            tfs.append(DoubleCompose(
-                get_custom_double_transform(tf.transforms)))
-        else:
-            tfs.append(DoubleTransform(tf))
+# def get_custom_double_transform(transform):
+#     tfs = []
+#     for tf in transform:
+#         if isinstance(tf, transforms.RandomCrop):
+#             tfs.append(CustomRandomCrop(tf.size, tf.padding, resize=self.args.resize_maps==1, min_resize_index=2))
+#         elif isinstance(tf, transforms.RandomHorizontalFlip):
+#             tfs.append(CustomRandomHorizontalFlip(tf.p))
+#         elif isinstance(tf, transforms.Compose):
+#             tfs.append(DoubleCompose(
+#                 get_custom_double_transform(tf.transforms)))
+#         else:
+#             tfs.append(DoubleTransform(tf))
 
 def partial_distill_loss(model, net_partial_features: list, pret_partial_features: list,
                          targets, device, teacher_forcing: list = None, extern_attention_maps: list = None):
@@ -589,7 +656,7 @@ class MemoryDataset(Dataset):
         for i in range(n_chunks):
             yield list(range(i * batch_size, min((i + 1) * batch_size), size))
 
-    def loop_over_buffer(model, pretrain_model, batch_size, task_id):
+    def loop_over_buffer(self, model, pretrain_model, batch_size, task_id):
         with torch.no_grad():
             for buf_idxs in self.batch_iterate(len(self.images), batch_size):
 

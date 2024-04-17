@@ -38,19 +38,22 @@ fi
 
 for RND_SEED in $SEEDS
 do
-    CUDA_VISIBLE_DEVICES=1 deepspeed main_llava.py \
-    --deepspeed ./deepspeed_script/zero3.json \
-    --mode $MODE --dataloader_num_workers 8 \
+    CUDA_VISIBLE_DEVICES=5,6,7 python main_llava.py \
+    --bf16 True \
+    --mode $MODE --dataloader_num_workers 4 \
     --dataset $DATASET \
+    --sigma $SIGMA --repeat $REPEAT --init_cls $INIT_CLS \
+    --memory_size $MEM_SIZE \
     --seed $RND_SEED \
     --optim $OPT_NAME --lr_scheduler_type $SCHED_NAME \
     --learning_rate $LR --per_gpu_train_batch_size $BATCHSIZE \
     --per_device_eval_batch_size $BATCHSIZE \
     --online_iter $ONLINE_ITER \
     --note $NOTE --eval_period $EVAL_PERIOD \
-    --output_dir "./nohup.out"
+    --output_dir "./nohup"
 done
 
+    # --deepspeed ./deepspeed_script/zero3.json \
 # --sigma $SIGMA --repeat $REPEAT --init_cls $INIT_CLS \
 # --model_name $MODEL_NAME
 # --imp_update_period $IMP_UPDATE_PERIOD $USE_AMP \

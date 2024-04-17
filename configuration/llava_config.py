@@ -6,7 +6,7 @@ from typing import Dict, Optional, Sequence, List
 class ModelArguments:
     model_name_or_path: Optional[str] = field(default="liuhaotian/llava-v1.5-7b")
     version: Optional[str] = field(default="v1")
-    freeze_backbone: bool = field(default=False)
+    freeze_backbone: bool = field(default=True)
     tune_mm_mlp_adapter: bool = field(default=False)
     vision_tower: Optional[str] = field(default="openai/clip-vit-large-patch14-336")
     mm_vision_select_layer: Optional[int] = field(default=-2)   # default to the last layer
@@ -28,8 +28,15 @@ class DataArguments:
     image_aspect_ratio: str = 'pad'
 
 
+import torch
+import os
+
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
+    # cuda
+    device: "torch.device" = torch.device(f"cuda:0")
+    n_gpu:int = len(os.environ['CUDA_VISIBLE_DEVICES'].split(','))
+
     # cl config
     mode: str = field(default="er")
     dataset: str = field(default="cifar10")
@@ -44,6 +51,21 @@ class TrainingArguments(transformers.TrainingArguments):
     topk: int = field(default=1)
     f_period: int = field(default=None)
     transforms: str= field(default='randaug')
+
+    sigma:int = 10
+    repeat:int = 1
+    init_cls:int = 100
+
+    # samples_per_task: int = 
+    memory_size: int = 500
+
+    # federated learning
+    num_clients: int = 2
+    num_rounds: int = 2
+    iter_per_round: int = 2
+    state_dir: str = field(default="./client_states")
+
+
     
     # dataloader_num_workers
     optim: str = field(default="adamw_torch")
@@ -52,7 +74,7 @@ class TrainingArguments(transformers.TrainingArguments):
     # per_device_eval_batch_size
     # per_device_eval_batch_size
     # learning_rate
-    temp_batchsize: int = field(default=None)
+    temp_batchsize: int = field(default=2)
     # seed
     # tf32
 
@@ -77,13 +99,13 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "Quantization data type to use. Should be one of `fp4` or `nf4`."}
     )
     bits: int = field(
-        default=16,
+        default=8,
         metadata={"help": "How many bits to use."}
     )
 
 
     # lora config
-    lora_enable: bool = False
+    lora_enable: bool = True
     lora_r: int = 128
     lora_alpha: int = 256
     lora_dropout: float = 0.05

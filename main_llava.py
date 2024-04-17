@@ -14,7 +14,13 @@ from utils.data_loader import get_test_datalist
 from utils.data_loader import get_train_datalist
 
 from utils.method_manager_new import select_method
+from methods.cl_manager_server import CLManagerServer
+from methods.cl_manager_client import CLManagerClient
 
+from utils.train_utils import get_llavamodel
+from torch import multiprocessing
+import copy
+import torch.distributed as dist
 
 def main():
     # args = config.base_parser()
@@ -28,8 +34,8 @@ def main():
         from transformers import BitsAndBytesConfig
         bnb_model_from_pretrained_args.update(dict(
             device_map={"": training_args.device},
-            load_in_4bit=training_args.bits == 4,
-            load_in_8bit=training_args.bits == 8,
+            # load_in_4bit=training_args.bits == 4,
+            # load_in_8bit=training_args.bits == 8,
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=training_args.bits == 4,
                 load_in_8bit=training_args.bits == 8,
@@ -62,7 +68,7 @@ def main():
     logger.info(training_args)
 
     if torch.cuda.is_available():
-        device = torch.device("cuda")
+        device = torch.device("cuda:0")
     else:
         device = torch.device("cpu")
     logger.info(f"Set the device ({device})")
@@ -77,11 +83,15 @@ def main():
 
     # get datalist
     print("args.dataset", training_args.dataset, "num_samples", num_samples[training_args.dataset])
-    # train_datalist, cls_dict, cls_addition = get_train_datalist(training_args.dataset, args.sigma, args.repeat, args.init_cls, args.seed)
-    # test_datalist = get_test_datalist(args.dataset)
-    # samples_cnt = 0
-    train_datalist = None
-    test_datalist = None
+    train_datalist, cls_dict, cls_addition = get_train_datalist(training_args.dataset, training_args.sigma, training_args.repeat, training_args.init_cls, training_args.seed)
+    test_datalist = get_test_datalist(training_args.dataset)
+    samples_cnt = 0
+
+    # FIXME
+    # client별로 할당받을 datalist 얻기
+    # train_datalists = list[train_datalist], len = num_clients
+    # train_datalist = None
+    # test_datalist = None
 
     # Reduce datalist in Debug mode
     if training_args.debug:
@@ -90,64 +100,82 @@ def main():
         random.shuffle(test_datalist)
         test_datalist = test_datalist[:2000]
 
+    # create folder
+    if not os.path.exists(training_args.state_dir):
+        os.makedirs(training_args.state_dir)
 
-    logger.info(f"Select a CIL method ({training_args.mode})")
-    method = select_method(training_args, train_datalist, test_datalist, device, model_args=model_args, training_args=training_args,bnb_model_from_pretrained_args=bnb_model_from_pretrained_args)
+    # start multiprocessing
+    multiprocessing.set_start_method('spawn')
+    processes = []
 
-    print("\n###flops###\n")
-    #method.get_flops_parameter()
+    num_process = training_args.n_gpu
+    client2server_queue = multiprocessing.Queue()
+    server2client_queues = [
+        multiprocessing.Queue() for _ in range(1, num_process)
+    ]
 
-    eval_results = defaultdict(list)
+    server_rank = 0
+    server = CLManagerServer(
+                train_datalists=train_datalist,
+                test_datalists=test_datalist,
+                device=device,
+                data_args=data_args,
+                model_args=model_args,
+                args=training_args,
+                bnb_model_from_pretrained_args=bnb_model_from_pretrained_args,
+                receive_channel=client2server_queue,
+                send_channel=server2client_queues
+            )
+    server_process = multiprocessing.Process(
+        target=run,
+        args=(
+            server_rank,
+            num_process,
+            'localhost',
+            8001,
+            server
+        )
+    )
+    server_process.start()
+    processes.append(server_process)
 
-    samples_cnt = 0
-    task_id = 0
+    for rank in range(1, num_process):
+        args_copied = copy.deepcopy(training_args)
+        bnb_model_from_pretrained_args_copied = copy.deepcopy(bnb_model_from_pretrained_args)
+        device = torch.device(f"cuda:{rank}")
+        args_copied.device = device
+        bnb_model_from_pretrained_args_copied['device_map'] = {"":args_copied.device}
+        client_runner = CLManagerClient(
+            device,
+            data_args,
+            model_args,
+            args=args_copied,
+            bnb_model_from_pretrained_args=bnb_model_from_pretrained_args_copied,
+            receive_channel=server2client_queues[rank-1],
+            send_channel=client2server_queue
+        )
+        p = multiprocessing.Process(target=run,
+                args=(
+                    rank,
+                    num_process,
+                    'localhost',
+                    8001,
+                    client_runner
+                ))
+        p.start()
+        processes.append(p)
 
-    for i, data in enumerate(train_datalist):
+    for p in processes:
+        p.join()
 
-        # explicit task boundary for twf
-        if samples_cnt % args.samples_per_task == 0 and training_args.mode in ["bic", "xder", "der_lider", "er_lider", "xder_lider", "co2l", "trire"]:
-            method.online_before_task(task_id)
-            task_id += 1
-
-        samples_cnt += 1
-        method.online_step(data, samples_cnt, training_args.dataloader_num_workers)
-        if samples_cnt % args.eval_period == 0:
-            eval_dict = method.online_evaluate(test_datalist, samples_cnt, 512, training_args.dataloader_num_workers, cls_dict,
-                                               cls_addition, data["time"])
-            eval_results["test_acc"].append(eval_dict['avg_acc'])
-            eval_results["percls_acc"].append(eval_dict['cls_acc'])
-            eval_results["data_cnt"].append(samples_cnt)
-        
-        if (args.mode in ["remind"]) and samples_cnt == args.baseinit_samples:
-            method.finalize_baseinit()
-        
-        if samples_cnt % args.samples_per_task == 0 and (training_args.mode in ["memo", "xder", "afec", "sparcl", "trire"]) and samples_cnt != num_samples[args.dataset]:
-            method.online_after_task()
-        
-    if eval_results["data_cnt"][-1] != samples_cnt:
-        eval_dict = method.online_evaluate(test_datalist, samples_cnt, 512, training_args.dataloader_num_workers, cls_dict, cls_addition,
-                                           data["time"])
-
-    A_last = eval_dict['avg_acc']
-
-    if training_args.mode == 'gdumb':
-        eval_results = method.evaluate_all(test_datalist, args.memory_epoch, training_args.per_device_eval_batch_size, training_args.dataloader_num_workers, cls_dict, cls_addition)
-
-    np.save(f'results/{training_args.dataset}/{training_args.note}/seed_{training_args.seed}_eval.npy', eval_results['test_acc'])
-    np.save(f'results/{training_args.dataset}/{training_args.note}/seed_{training_args.seed}_eval_per_cls.npy', eval_results['percls_acc'])
-    np.save(f'results/{training_args.dataset}/{training_args.note}/seed_{training_args.seed}_eval_time.npy', eval_results['data_cnt'])
-
-    # Accuracy (A)
-    A_auc = np.mean(eval_results["test_acc"])
-
-    # KLR_avg = np.mean(method.knowledge_loss_rate[1:])
-    # KGR_avg = np.mean(method.knowledge_gain_rate)
-    KLR_avg = 0.0
-    KGR_avg = 0.0
-
-    logger.info(f"======== Summary =======")
-    logger.info(f"A_auc {A_auc:6f} | A_last {A_last:6f} | KLR_avg {KLR_avg:6f} | KGR_avg {KGR_avg:6f} | Total FLOPs {method.total_flops:4f}")
+def run(rank, world_size, master_addr, master_port, runner):
+    print("Process {} start to run".format(rank))
+    os.environ['MASTER_ADDR'] = master_addr
+    os.environ['MASTER_PORT'] = str(master_port)
+    dist.init_process_group('nccl', rank=rank, world_size=world_size)
+    # server process
+    runner.setup()
+    runner.run()
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn')
     main()

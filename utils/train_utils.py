@@ -1042,8 +1042,10 @@ import transformers
 from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.language_model.llava_mpt import LlavaMptForCausalLM
 import models.llava.conversation as conversation_lib
+from transformers import Trainer
+from peft.tuners.lora import LoraLayer
 
-def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args):
+def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, lora_config=None):
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
     attn_implementation = None
     if model_args.vision_tower is not None:
@@ -1074,8 +1076,11 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args):
         )
     model.config.use_cache = False
 
-    if model_args.freeze_backbone:
-        model.model.requires_grad_(False)
+    # FIXME
+    # model = model.to(training_args.device)
+
+    # if model_args.freeze_backbone: #FIXME
+    #     model.model.requires_grad_(False)
 
     if training_args.bits in [4, 8]:
         from peft import prepare_model_for_kbit_training
@@ -1090,8 +1095,11 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args):
                 output.requires_grad_(True)
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
     
-    if training_args.lora_enable:
-        from peft import LoraConfig, get_peft_model
+    from peft import LoraConfig, get_peft_model
+    if lora_config:
+        # print("get_peft_model")
+        model = get_peft_model(model, lora_config)
+    else:
         lora_config = LoraConfig(
             r=training_args.lora_r,
             lora_alpha=training_args.lora_alpha,
@@ -1152,20 +1160,26 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args):
         # data_args.image_processor = vision_tower.image_processor
         # data_args.is_multimodal = True
 
-        model.config.image_aspect_ratio = "pad" #data_args.image_aspect_ratio
-        model.config.tokenizer_padding_side = tokenizer.padding_side
-        model.config.tokenizer_model_max_length = tokenizer.model_max_length
+        # model.config.image_aspect_ratio = "pad" #data_args.image_aspect_ratio
+        # model.config.tokenizer_padding_side = tokenizer.padding_side
+        # model.config.tokenizer_model_max_length = tokenizer.model_max_length
 
-        model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
-        if model_args.tune_mm_mlp_adapter:
-            model.requires_grad_(False)
-            for p in model.get_model().mm_projector.parameters():
-                p.requires_grad = True
+        # model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
+        # if model_args.tune_mm_mlp_adapter:
+        #     model.requires_grad_(False)
+        #     for p in model.get_model().mm_projector.parameters():
+        #         p.requires_grad = True
 
-        model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
-        if training_args.freeze_mm_mlp_adapter:
-            for p in model.get_model().mm_projector.parameters():
-                p.requires_grad = False
+        # model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
+        # if training_args.freeze_mm_mlp_adapter:
+        #     for p in model.get_model().mm_projector.parameters():
+        #         p.requires_grad = False
+        
+        # model.requires_grad_(False)
+        # for name, module in model.named_modules():
+        #     if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
+        #         for p in module.parameters():
+        #             p.requires_grad = True
 
         if training_args.bits in [4, 8]:
             model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
@@ -1177,7 +1191,7 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args):
         model.initialize_vision_tokenizer(model_args, tokenizer=tokenizer)
 
     if training_args.bits in [4, 8]:
-        from peft.tuners.lora import LoraLayer
+        
         for name, module in model.named_modules():
             if isinstance(module, LoraLayer):
                 if training_args.bf16:
@@ -1188,6 +1202,7 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args):
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
+    return model, tokenizer, lora_config
 
 def find_all_linear_names(model):
     cls = torch.nn.Linear
@@ -1204,6 +1219,124 @@ def find_all_linear_names(model):
         lora_module_names.remove('lm_head')
     return list(lora_module_names)
 
-# def rank0_print(*args):
-#     if local_rank == 0:
-#         print(*args)
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
+from transformers.trainer_pt_utils import get_parameter_names
+
+def get_decay_parameter_names(model):
+    """
+    Get all parameter names that weight decay will be applied to
+
+    Note that some models implement their own layernorm instead of calling nn.LayerNorm, weight decay could still
+    apply to those modules since this function only filter out instance of nn.LayerNorm
+    """
+    decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
+    decay_parameters = [name for name in decay_parameters if "bias" not in name]
+    return decay_parameters
+
+def deepspeed_init(model, training_args, accelerator, num_training_steps, inference=False):
+    """
+    Init DeepSpeed, after updating the DeepSpeed configuration with any relevant Trainer's args.
+
+    If `resume_from_checkpoint` was passed then an attempt to resume from a previously saved checkpoint will be made.
+
+    Args:
+        trainer: Trainer object
+        num_training_steps: per single gpu
+        resume_from_checkpoint: path to a checkpoint if to resume from after normal DeepSpeedEngine load
+        inference: launch in inference mode (no optimizer and no lr scheduler)
+        auto_find_batch_size: whether to ignore the `train_micro_batch_size_per_gpu` argument as it's being
+            set automatically by the auto batch size finder
+
+    Returns: optimizer, lr_scheduler
+
+    We may use `deepspeed_init` more than once during the life of Trainer, when we do - it's a temp hack based on:
+    https://github.com/microsoft/DeepSpeed/issues/1394#issuecomment-937405374 until Deepspeed fixes a bug where it
+    can't resume from a checkpoint after it did some stepping https://github.com/microsoft/DeepSpeed/issues/1612
+
+    """
+    from deepspeed.utils import logger as ds_logger
+
+    args = training_args
+
+    hf_deepspeed_config = accelerator.state.deepspeed_plugin.hf_ds_config
+
+    # resume config update - some bits like `model` and `num_training_steps` only become available during train
+    hf_deepspeed_config.trainer_config_finalize(args, model, num_training_steps)
+
+    # set the Deepspeed log level consistent with the Trainer
+    ds_logger.setLevel(args.get_process_log_level())
+
+    if inference:
+        # only Z3 makes sense for the inference
+        if not hf_deepspeed_config.is_zero3():
+            raise ValueError("ZeRO inference only makes sense with ZeRO Stage 3 - please adjust your config")
+
+        # in case the training config is re-used for inference
+        hf_deepspeed_config.del_config_sub_tree("optimizer")
+        hf_deepspeed_config.del_config_sub_tree("lr_scheduler")
+        optimizer, lr_scheduler = None, None
+        model_parameters = None
+    else:
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        optimizer, lr_scheduler = deepspeed_optim_sched(
+            model, hf_deepspeed_config, args, num_training_steps, model_parameters
+        )
+
+    # keep for quick debug:
+    # from pprint import pprint; pprint(config)
+
+    return optimizer, lr_scheduler
+
+def deepspeed_optim_sched(model, hf_deepspeed_config, args, num_training_steps, model_parameters):
+    """
+    A convenience wrapper that deals with optimizer and lr scheduler configuration.
+    """
+    from accelerate.utils import DummyOptim, DummyScheduler
+
+    config = hf_deepspeed_config.config
+
+    # Mixing and matching DS schedulers and optimizers is supported unless Offload is enabled in which case it's:
+    # 1. DS scheduler + DS optimizer: Yes
+    # 2. HF scheduler + HF optimizer: Mostly*
+    # 3. DS scheduler + HF optimizer: Mostly*
+    # 4. HF scheduler + DS optimizer: Yes
+    #
+    # Mostly*: All non-native DeepSpeed optimizers that have both CPU and GPU implementation should work (except LAMB)
+
+    optimizer = None
+    if "optimizer" in config:
+        if args.adafactor:
+            raise ValueError(
+                "--adafactor was passed, but also found `optimizer` configured in the DeepSpeed config. "
+                "Only one optimizer can be configured."
+            )
+        optimizer = DummyOptim(params=model_parameters)
+    else:
+        # ds supports Adam, OneBitAdam, and Lamb optimizers and can import other optimizers from torch.
+        # But trainer uses AdamW by default.
+        optimizer = get_llava_optimizer(model, args)
+        # To use other optimizers requires voiding warranty with: `zero_allow_untested_optimizer`
+        config["zero_allow_untested_optimizer"] = True
+
+    lr_scheduler = None
+    if "scheduler" in config:
+        lr_scheduler = DummyScheduler(optimizer)
+    else:
+        if isinstance(optimizer, DummyOptim):
+
+            def _lr_scheduler_callable(optimizer):
+                # create a shallow copy first, so later modifications do not affect original trainer
+                trainer_copy = copy.copy(trainer)
+                # at the time _lr_scheduler_callable is called, trainer.lr_scheduler has been set
+                # update it to None so that we can re-create a new scheduler
+                trainer_copy.lr_scheduler = None
+                lr_scheduler = trainer_copy.create_scheduler(
+                    num_training_steps=num_training_steps, optimizer=optimizer
+                )
+                return lr_scheduler
+
+            lr_scheduler = DummyScheduler(optimizer, lr_scheduler_callable=_lr_scheduler_callable)
+        else:
+            lr_scheduler = create_scheduler(num_training_steps=num_training_steps, optimizer=optimizer)
+
+    return optimizer, lr_scheduler
