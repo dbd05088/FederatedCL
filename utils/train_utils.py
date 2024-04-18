@@ -1045,7 +1045,7 @@ import models.llava.conversation as conversation_lib
 from transformers import Trainer
 from peft.tuners.lora import LoraLayer
 
-def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, lora_config=None):
+def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, data_args):
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
     attn_implementation = None
     if model_args.vision_tower is not None:
@@ -1096,25 +1096,21 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, lo
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
     
     from peft import LoraConfig, get_peft_model
-    if lora_config:
-        # print("get_peft_model")
-        model = get_peft_model(model, lora_config)
-    else:
-        lora_config = LoraConfig(
-            r=training_args.lora_r,
-            lora_alpha=training_args.lora_alpha,
-            target_modules=find_all_linear_names(model),
-            lora_dropout=training_args.lora_dropout,
-            bias=training_args.lora_bias,
-            task_type="CAUSAL_LM",
-        )
-        if training_args.bits == 16:
-            if training_args.bf16:
-                model.to(torch.bfloat16)
-            if training_args.fp16:
-                model.to(torch.float16)
-        # rank0_print("Adding LoRA adapters...")
-        model = get_peft_model(model, lora_config)
+    lora_config = LoraConfig(
+        r=training_args.lora_r,
+        lora_alpha=training_args.lora_alpha,
+        target_modules=find_all_linear_names(model),
+        lora_dropout=training_args.lora_dropout,
+        bias=training_args.lora_bias,
+        task_type="CAUSAL_LM",
+    )
+    if training_args.bits == 16:
+        if training_args.bf16:
+            model.to(torch.bfloat16)
+        if training_args.fp16:
+            model.to(torch.float16)
+    # rank0_print("Adding LoRA adapters...")
+    model = get_peft_model(model, lora_config)
 
     if 'mpt' in model_args.model_name_or_path:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -1157,12 +1153,12 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, lo
         vision_tower = model.get_vision_tower()
         vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
 
-        # data_args.image_processor = vision_tower.image_processor
-        # data_args.is_multimodal = True
+        data_args.image_processor = vision_tower.image_processor
+        data_args.is_multimodal = True
 
-        # model.config.image_aspect_ratio = "pad" #data_args.image_aspect_ratio
-        # model.config.tokenizer_padding_side = tokenizer.padding_side
-        # model.config.tokenizer_model_max_length = tokenizer.model_max_length
+        model.config.image_aspect_ratio = "pad" #data_args.image_aspect_ratio
+        model.config.tokenizer_padding_side = tokenizer.padding_side
+        model.config.tokenizer_model_max_length = tokenizer.model_max_length
 
         # model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
         # if model_args.tune_mm_mlp_adapter:
@@ -1184,7 +1180,7 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, lo
         if training_args.bits in [4, 8]:
             model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
 
-        model.config.mm_use_im_start_end  = model_args.mm_use_im_start_end # = data_args.mm_use_im_start_end
+        model.config.mm_use_im_start_end = data_args.mm_use_im_start_end = model_args.mm_use_im_start_end
         model.config.mm_projector_lr = training_args.mm_projector_lr
         training_args.use_im_start_end = model_args.mm_use_im_start_end
         model.config.mm_use_im_patch_token = model_args.mm_use_im_patch_token
@@ -1202,7 +1198,7 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, lo
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
-    return model, tokenizer, lora_config
+    return model, tokenizer, data_args
 
 def find_all_linear_names(model):
     cls = torch.nn.Linear

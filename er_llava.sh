@@ -3,7 +3,7 @@
 # CIL CONFIG
 NOTE="er_test" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="er"
-DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="AQUA" # cifar10, cifar100, tinyimagenet, imagenet
 SIGMA=10
 REPEAT=1
 INIT_CLS=100
@@ -11,10 +11,10 @@ INIT_CLS=100
 # USE_AMP="--use_amp"
 SEEDS="1"
 
-if [ "$DATASET" == "cifar10" ]; then
-    MEM_SIZE=50000 ONLINE_ITER=1
-    MODEL_NAME="resnet18" EVAL_PERIOD=100
-    BATCHSIZE=16; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
+# if [ "$DATASET" == "cifar10" ]; then
+MEM_SIZE=50000 ONLINE_ITER=1
+MODEL_NAME="resnet18" EVAL_PERIOD=100
+BATCHSIZE=16; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
 
 # elif [ "$DATASET" == "cifar100" ]; then
 #     MEM_SIZE=2000 ONLINE_ITER=3
@@ -31,14 +31,14 @@ if [ "$DATASET" == "cifar10" ]; then
 #     MODEL_NAME="resnet18" EVAL_PERIOD=1000
 #     BATCHSIZE=1024; LR=3e-4 OPT_NAME="adamw_torch" SCHED_NAME="default" IMP_UPDATE_PERIOD=10
 
-else
-    echo "Undefined setting"
-    exit 1
-fi
+# else
+#     echo "Undefined setting"
+#     exit 1
+# fi
 
 for RND_SEED in $SEEDS
 do
-    CUDA_VISIBLE_DEVICES=5,6,7 python main_llava.py \
+    CUDA_VISIBLE_DEVICES=3,7 python main_llava.py \
     --bf16 True \
     --mode $MODE --dataloader_num_workers 4 \
     --dataset $DATASET \

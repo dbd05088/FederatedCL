@@ -49,7 +49,7 @@ def main():
         ))
 
 
-    num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281165}
+    # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281165}
     logging.config.fileConfig("./configuration/logging.conf")
     logger = logging.getLogger()
 
@@ -82,9 +82,13 @@ def main():
 
 
     # get datalist
-    print("args.dataset", training_args.dataset, "num_samples", num_samples[training_args.dataset])
-    train_datalist, cls_dict, cls_addition = get_train_datalist(training_args.dataset, training_args.sigma, training_args.repeat, training_args.init_cls, training_args.seed)
+    # print("args.dataset", training_args.dataset, "num_samples", num_samples[training_args.dataset])
+    # train_datalist, cls_dict, cls_addition = get_train_datalist(training_args.dataset, training_args.sigma, training_args.repeat, training_args.init_cls, training_args.seed)
+    # test_datalist = get_test_datalist(training_args.dataset)
+    train_datalist = get_train_datalist(training_args.dataset)
     test_datalist = get_test_datalist(training_args.dataset)
+    print(len(train_datalist))
+    print(len(test_datalist))
     samples_cnt = 0
 
     # FIXME

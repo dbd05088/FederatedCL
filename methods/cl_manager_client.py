@@ -105,7 +105,7 @@ class CLManagerClient: # Client
 
         # self.data_dir = kwargs["data_dir"]
         # if self.data_dir is None:
-        self.data_dir = os.path.join("dataset", self.dataset)
+        self.data_dir = os.path.join("dataset", self.dataset, 'images')
         self.n_worker = kwargs["dataloader_num_workers"]
         self.future_steps = kwargs["future_steps"]
         self.transform_on_gpu = kwargs["transform_on_gpu"]
@@ -122,14 +122,13 @@ class CLManagerClient: # Client
 
         # self.train_datalist = train_datalist
         # self.test_datalist = test_datalist
-        self.cls_dict = {}
         # self.total_samples = len(self.train_datalist)
         
         # if self.model_name == 'vit':
         #     self.train_transform, self.test_transform, self.cpu_transform, self.n_classes = get_transform(self.dataset, self.transforms, self.method_name, self.transform_on_gpu, 224)
         # else:
-        self.train_transform, self.test_transform, self.cpu_transform, self.n_classes = get_transform(self.dataset, self.transforms, self.method_name, self.transform_on_gpu)
-        self.cutmix = "cutmix" in kwargs["transforms"]
+        # self.train_transform, self.test_transform, self.cpu_transform, self.n_classes = get_transform(self.dataset, self.transforms, self.method_name, self.transform_on_gpu)
+        # self.cutmix = "cutmix" in kwargs["transforms"]
         
         # self.data_stream = iter(self.train_datalist)
         # self.dataloader = MultiProcessLoader(self.n_worker, self.cls_dict, self.train_transform, self.data_dir, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker,
@@ -164,8 +163,8 @@ class CLManagerClient: # Client
         self.f_period = kwargs['f_period']
         self.f_next_time = 0
         self.start_time = time.time()
-        num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281167}
-        self.total_samples = num_samples[self.dataset]
+        # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281167}
+        # self.total_samples = num_samples[self.dataset]
 
         self.exposed_domains = []
         self.waiting_batch = []
@@ -180,9 +179,10 @@ class CLManagerClient: # Client
         self.watchdog = ManagerWatchdog()
         
     def setup(self):
-        model, tokenizer, _ = get_llavamodel(self.model_args, self.args, self.bnb_model_from_pretrained_args)
+        model, tokenizer, data_args = get_llavamodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
         self.model = model
         self.tokenizer = tokenizer
+        self.data_args = data_args
 
         max_steps = 10000 # FIXME
         self.create_optimizer()
@@ -406,14 +406,14 @@ class CLManagerClient: # Client
 
         seen_so_far = self.state['sample_cnt']
         
-        # for i, data in enumerate(train_datalist[seen_so_far:]):
+        for i, data in enumerate(train_datalist[seen_so_far:]):
             # explicit task boundary for twf
             # if samples_cnt % training_args.samples_per_task == 0 and training_args.mode in ["bic", "xder", "der_lider", "er_lider", "xder_lider", "co2l", "trire"]:
             #     method.online_before_task(task_id)
             #     task_id += 1
 
-            # self.state['sample_cnt'] += 1
-            # self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
+            self.state['sample_cnt'] += 1
+            self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
             # if self.state['sample_cnt'] % self.args.eval_period == 0:
         
 
@@ -441,8 +441,7 @@ class CLManagerClient: # Client
     def initialize_future(self, train_datalist):
         print('start_init_future')
         self.data_stream = iter(train_datalist)
-        self.dataloader = MultiProcessLoader(self.n_worker, self.cls_dict, self.train_transform, self.data_dir, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker,
-                                             tokenizer=self.tokenizer, data_args=self.data_args)
+        self.dataloader = MultiProcessLoader(self.n_worker, self.data_dir, self.device, tokenizer=self.tokenizer, data_args=self.data_args)
         self.memory = MemoryBase(self.memory_size)
 
         # self.memory_list = []
@@ -451,9 +450,9 @@ class CLManagerClient: # Client
         self.num_updates = 0
         self.future_num_updates = 0
         self.train_count = 0
-        self.num_learned_class = 0
-        self.num_learning_class = 1
-        self.exposed_classes = []
+        # self.num_learned_class = 0
+        # self.num_learning_class = 1
+        # self.exposed_classes = []
         self.seen = 0
         self.future_sample_num = 0
         self.future_sampling = True
@@ -469,13 +468,10 @@ class CLManagerClient: # Client
             sample = next(self.data_stream)
         except:
             return 1
-        if sample["klass"] not in self.memory.cls_list:
-            self.memory.add_new_class(sample["klass"])
-            self.dataloader.add_new_class(self.memory.cls_dict)
             
-        if sample["time"] not in self.exposed_domains and "clear" in self.dataset:
-            self.exposed_domains.append(sample["time"])
-            
+        # if sample["time"] not in self.exposed_domains and "clear" in self.dataset:
+        #     self.exposed_domains.append(sample["time"])
+
         self.temp_future_batch.append(sample)
         self.future_num_updates += self.online_iter
 
@@ -534,31 +530,6 @@ class CLManagerClient: # Client
                 self.report_training(sample_num, train_loss, train_acc)
                 self.num_updates -= int(self.num_updates)
             self.temp_batch = []
-
-    def add_new_class(self, class_name):
-        if hasattr(self.model, 'fc'):
-            fc_name = 'fc'
-        elif hasattr(self.model, 'head'):
-            fc_name = 'head'
-        self.cls_dict[class_name] = len(self.exposed_classes)
-        self.exposed_classes.append(class_name)
-        self.num_learned_class = len(self.exposed_classes)
-        model_fc = getattr(self.model, fc_name)
-        prev_weight = copy.deepcopy(model_fc.weight.data)
-        prev_bias = copy.deepcopy(model_fc.bias.data)
-        setattr(self.model, fc_name, nn.Linear(model_fc.in_features, self.num_learned_class).to(self.device))
-        model_fc = getattr(self.model, fc_name)
-        with torch.no_grad():
-            if self.num_learned_class > 1:
-                model_fc.weight[:self.num_learned_class - 1] = prev_weight
-                model_fc.bias[:self.num_learned_class - 1] = prev_bias
-        for param in self.optimizer.param_groups[1]['params']:
-            if param in self.optimizer.state.keys():
-                del self.optimizer.state[param]
-        del self.optimizer.param_groups[1]
-        self.optimizer.add_param_group({'params': model_fc.parameters()})
-        if 'reset' in self.sched_name:
-            self.update_schedule(reset=True)
 
     def _prepare_input(self, data):
         """
@@ -914,42 +885,35 @@ class MemoryBase:
         self.labels = []
 
         self.update_buffer = ()
-        self.cls_dict = dict()
-        self.cls_list = []
-        self.cls_count = []
-        self.cls_idx = []
+        # self.cls_dict = dict()
+        # self.cls_list = []
+        # self.cls_count = []
+        # self.cls_idx = []
         
         self.usage_count = np.array([])
-        self.class_usage_count = np.array([])
+        # self.class_usage_count = np.array([])
         self.current_images = []
         self.current_labels = []
-        self.current_cls_count = [0 for _ in self.cls_list]
-        self.current_cls_idx = [[] for _ in self.cls_list]
+        # self.current_cls_count = [0 for _ in self.cls_list]
+        # self.current_cls_idx = [[] for _ in self.cls_list]
 
     def __len__(self):
         return len(self.images)
 
     def replace_sample(self, sample, idx=None):
-        self.cls_count[self.cls_dict[sample['klass']]] += 1
+        # self.cls_count[self.cls_dict[sample['klass']]] += 1
         if idx is None:
             assert len(self.images) < self.memory_size
-            self.cls_idx[self.cls_dict[sample['klass']]].append(len(self.images))
+            # self.cls_idx[self.cls_dict[sample['klass']]].append(len(self.images))
             self.images.append(sample)
-            self.labels.append(self.cls_dict[sample['klass']])
+            # self.labels.append(self.cls_dict[sample['klass']])
         else:
             assert idx < self.memory_size
-            self.cls_count[self.labels[idx]] -= 1
-            self.cls_idx[self.labels[idx]].remove(idx)
+            # self.cls_count[self.labels[idx]] -= 1
+            # self.cls_idx[self.labels[idx]].remove(idx)
             self.images[idx] = sample
-            self.labels[idx] = self.cls_dict[sample['klass']]
-            self.cls_idx[self.cls_dict[sample['klass']]].append(idx)
-
-    def add_new_class(self, class_name):
-        self.cls_dict[class_name] = len(self.cls_list)
-        self.cls_list.append(class_name)
-        self.cls_count.append(0)
-        self.cls_idx.append([])
-        self.class_usage_count = np.append(self.class_usage_count, 0.0)
+            # self.labels[idx] = self.cls_dict[sample['klass']]
+            # self.cls_idx[self.cls_dict[sample['klass']]].append(idx)
 
     def retrieval(self, size, return_index=False):
         sample_size = min(size, len(self.images))

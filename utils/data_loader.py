@@ -22,6 +22,7 @@ import torch.multiprocessing as multiprocessing
 from utils.augment import DataAugmentation, Preprocess, get_statistics
 
 from utils.data_worker import worker_loop, worker_loop_multimodal, worker, worker_multimodal
+from models.llava.constants import IGNORE_INDEX
 
 logger = logging.getLogger()
 
@@ -29,14 +30,8 @@ import queue
 TIMEOUT = 5.0
 
 class MultiProcessLoader():
-    def __init__(self, n_workers, cls_dict, transform, data_dir, transform_on_gpu=False, cpu_transform=None, device='cpu', use_kornia=False, transform_on_worker=True, init=True, tokenizer=None, data_args=None):
+    def __init__(self, n_workers, data_dir, device='cpu', init=True, tokenizer=None, data_args=None):
         self.n_workers = n_workers
-        self.cls_dict = cls_dict
-        self.transform = transform
-        self.transform_on_gpu = transform_on_gpu
-        self.transform_on_worker = transform_on_worker
-        self.use_kornia = use_kornia
-        self.cpu_transform = cpu_transform
         self.device = device
         self.result_queues = []
         self.workers = []
@@ -50,79 +45,87 @@ class MultiProcessLoader():
                 index_queue.cancel_join_thread()
                 result_queue = multiprocessing.Queue()
                 result_queue.cancel_join_thread()
-                # w = multiprocessing.Process(target=worker_loop_multimodal, args=(index_queue, result_queue, data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, use_kornia, transform_on_worker, self.tokenizer, self.data_args))
-                w = multiprocessing.Process(target=worker_loop, args=(index_queue, result_queue, data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, use_kornia, transform_on_worker))
+                w = multiprocessing.Process(target=worker_loop_multimodal, args=(index_queue, result_queue, data_dir, self.device, self.tokenizer, self.data_args))
+                # w = multiprocessing.Process(target=worker_loop, args=(index_queue, result_queue, data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, use_kornia, transform_on_worker))
                 w.daemon = True
                 w.start()
                 self.workers.append(w)
                 self.index_queues.append(index_queue)
                 self.result_queues.append(result_queue)
-        if self.use_kornia:
-            if 'cifar100' in data_dir:
-                mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar100')
-            elif 'cifar10' in data_dir:
-                mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar10')
-            elif 'tinyimagenet' in data_dir:
-                mean, std, n_classes, inp_size, _ = get_statistics(dataset='tinyimagenet')
-            elif 'imagenet' in data_dir:
-                mean, std, n_classes, inp_size, _ = get_statistics(dataset='imagenet')
-            self.transform = DataAugmentation(inp_size, mean, std)
-
-    def add_new_class(self, cls_dict):
-        self.cls_dict = cls_dict
+        # if self.use_kornia:
+        #     if 'cifar100' in data_dir:
+        #         mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar100')
+        #     elif 'cifar10' in data_dir:
+        #         mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar10')
+        #     elif 'tinyimagenet' in data_dir:
+        #         mean, std, n_classes, inp_size, _ = get_statistics(dataset='tinyimagenet')
+        #     elif 'imagenet' in data_dir:
+        #         mean, std, n_classes, inp_size, _ = get_statistics(dataset='imagenet')
+        #     self.transform = DataAugmentation(inp_size, mean, std)
 
     def load_batch(self, batch):
-        for sample in batch:
-            sample["label"] = self.cls_dict[sample["klass"]]
+        # for sample in batch:
+        #     sample["label"] = self.cls_dict[sample["klass"]]
             
         for i in range(self.n_workers):
             self.index_queues[i].put(batch[len(batch)*i//self.n_workers:len(batch)*(i+1)//self.n_workers])
-
-    @torch.no_grad()
-    def get_batch(self):
-        data = dict()
-        images = []
-        labels = []
-        for i in range(self.n_workers):
-            loaded_samples = self.result_queues[i].get(timeout=3000.0)
-            if loaded_samples is not None:
-                images.append(loaded_samples["image"])
-                labels.append(loaded_samples["label"])
-        if len(images) > 0:
-            images = torch.cat(images)
-            labels = torch.cat(labels)
-            if self.transform_on_gpu and not self.transform_on_worker:
-                images = self.transform(images.to(self.device))
-            data['image'] = images
-            data['label'] = labels
-            return data
-        else:
-            return None
 
     # @torch.no_grad()
     # def get_batch(self):
     #     data = dict()
     #     images = []
-    #     input_ids = []
     #     labels = []
     #     for i in range(self.n_workers):
     #         loaded_samples = self.result_queues[i].get(timeout=3000.0)
     #         if loaded_samples is not None:
     #             images.append(loaded_samples["image"])
-    #             input_ids.append(loaded_samples["input_id"])
     #             labels.append(loaded_samples["label"])
     #     if len(images) > 0:
     #         images = torch.cat(images)
-    #         input_ids = torch.cat(input_ids)
     #         labels = torch.cat(labels)
     #         if self.transform_on_gpu and not self.transform_on_worker:
     #             images = self.transform(images.to(self.device))
     #         data['image'] = images
-    #         data['input_id'] = input_ids
     #         data['label'] = labels
     #         return data
     #     else:
     #         return None
+
+    @torch.no_grad()
+    def get_batch(self):
+        data = dict()
+        images = []
+        input_ids = []
+        labels = []
+        for i in range(self.n_workers):
+            loaded_samples = self.result_queues[i].get(timeout=3000.0)
+            if loaded_samples is not None:
+                images.append(loaded_samples["image"])
+                input_ids.extend(loaded_samples["input_id"])
+                labels.extend(loaded_samples["label"])
+        if len(images) > 0:
+            images = torch.cat(images)
+            input_ids = torch.nn.utils.rnn.pad_sequence(
+                    input_ids,
+                    batch_first=True,
+                    padding_value=self.tokenizer.pad_token_id)
+            labels = torch.nn.utils.rnn.pad_sequence(labels,
+                    batch_first=True,
+                    padding_value=IGNORE_INDEX)
+            input_ids = input_ids[:, :self.tokenizer.model_max_length]
+            labels = labels[:, :self.tokenizer.model_max_length]
+            
+            # input_ids = torch.cat(input_ids)
+            # labels = torch.cat(labels)
+            # if self.transform_on_gpu and not self.transform_on_worker:
+            #     images = self.transform(images.to(self.device))
+            data['images'] = images
+            data['input_ids'] = input_ids
+            data['labels'] = labels
+            return data
+        else:
+            return None
+    
     
     def save_state(self, client_id, save_dir):
         samples_in_index = []
@@ -153,7 +156,7 @@ class MultiProcessLoader():
         
         for i, samples in enumerate(state_dict['result_queues']):
             if samples:
-                self.result_queues[i].put(worker(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker))
+                # self.result_queues[i].put(worker(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker))
                 self.result_queues[i].put(worker_multimodal(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker, tokenizer=self.tokenizer, data_args=self.data_args))
         for i, samples in enumerate(state_dict['index_queues']):
             if samples:
@@ -1792,19 +1795,24 @@ class DistillationMemory(MemoryDataset):
         return data
 
 
-def get_train_datalist(dataset, sigma, repeat, init_cls, rnd_seed):
-    with open(f"collections/{dataset}/{dataset}_sigma{sigma}_repeat{repeat}_init{init_cls}_seed{rnd_seed}.json") as fp:
+def get_train_datalist(dataset):#, sigma, repeat, init_cls, rnd_seed):
+    # with open(f"collections/{dataset}/{dataset}_sigma{sigma}_repeat{repeat}_init{init_cls}_seed{rnd_seed}.json") as fp:
+    with open(f"dataset/{dataset}/train/dataset.json") as fp:
         train_list = json.load(fp)
-    return train_list['stream'], train_list['cls_dict'], train_list['cls_addition']
+    # return train_list['stream'], train_list['cls_dict'], train_list['cls_addition']
+    return train_list
         
 
 def get_test_datalist(dataset) -> List:
-    try:
-        print("test name", f"collections/{dataset}/{dataset}_val.json")
-        return pd.read_json(f"collections/{dataset}/{dataset}_val.json").to_dict(orient="records")
-    except:
-        print("test name", f"collections/{dataset}/{dataset}_val2.json")
-        return pd.read_json(f"collections/{dataset}/{dataset}_val2.json").to_dict(orient="records")
+    # try:
+    #     print("test name", f"collections/{dataset}/{dataset}_val.json")
+    #     return pd.read_json(f"collections/{dataset}/{dataset}_val.json").to_dict(orient="records")
+    # except:
+    #     print("test name", f"collections/{dataset}/{dataset}_val2.json")
+    #     return pd.read_json(f"collections/{dataset}/{dataset}_val2.json").to_dict(orient="records")
+    with open(f"dataset/{dataset}/test/dataset.json") as fp:
+        test_list = json.load(fp)
+    return test_list
 
 '''
 def get_statistics(dataset: str):

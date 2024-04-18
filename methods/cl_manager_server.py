@@ -146,8 +146,8 @@ class CLManagerServer: # == SERVER
         self.f_period = kwargs['f_period']
         self.f_next_time = 0
         self.start_time = time.time()
-        num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281167}
-        self.total_samples = num_samples[self.dataset]
+        # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281167}
+        # self.total_samples = num_samples[self.dataset]
 
         self.exposed_domains = []
         self.waiting_batch = []
@@ -166,9 +166,10 @@ class CLManagerServer: # == SERVER
         self.watchdog = ManagerWatchdog()
 
     def setup(self):
-        model, tokenizer, _ = get_llavamodel(self.model_args, self.args, self.bnb_model_from_pretrained_args)
+        model, tokenizer, data_args = get_llavamodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
         self.model = model
         self.tokenizer = tokenizer
+        self.data_args = data_args
 
         max_steps = 10000 # FIXME
         self.create_optimizer()

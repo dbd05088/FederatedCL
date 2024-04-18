@@ -198,25 +198,15 @@ def worker(r, data_dir, transform, transform_on_gpu=False, cpu_transform=None, d
         return None
 
 @torch.no_grad()
-def worker_multimodal(r, data_dir, transform, transform_on_gpu=False, cpu_transform=None, device='cpu', use_kornia=False, transform_on_worker=True, test_transform=None, scl=False, tokenizer=None, data_args=None):
+def worker_multimodal(r, data_dir, device='cpu', scl=False, tokenizer=None, data_args=None):
     data = dict()
     images = []
     input_ids = []
     labels = []
     not_aug_img = []
-    if use_kornia:
-        if 'cifar100' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar100')
-        elif 'cifar10' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar10')
-        elif 'tinyimagenet' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='tinyimagenet')
-        elif 'imagenet' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='imagenet')
-        preprocess = Preprocess(inp_size)
-        kornia_randaug = DataAugmentation(inp_size, mean, std)
     if len(r) > 0:
         for sample in r:
+            processor = data_args.image_processor
             if 'image' in sample:
                 image_file = sample['image']
                 image = Image.open(os.path.join(data_dir, image_file)).convert('RGB')
@@ -233,20 +223,8 @@ def worker_multimodal(r, data_dir, transform, transform_on_gpu=False, cpu_transf
                             result = Image.new(pil_img.mode, (height, height), background_color)
                             result.paste(pil_img, ((height - width) // 2, 0))
                             return result
-                    image = expand2square(image, tuple(int(x*255) for x in mean))
-                if use_kornia:
-                    images.append(preprocess(image))
-                elif transform_on_gpu:
-                    images.append(load_data(sample, data_dir, cpu_transform))
-                    if not scl and test_transform is not None:
-                        not_aug_img.append(load_data(sample, data_dir, test_transform))
-                else:
-                    if scl:
-                        images.append(load_data(sample, data_dir, test_transform))
-                    else:
-                        images.append(load_data(sample, data_dir, transform))
-                        if test_transform is not None:
-                            not_aug_img.append(load_data(sample, data_dir, test_transform))
+                    image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+                image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
                 sources = preprocess_multimodal(
                     copy.deepcopy([sample['conversations']]),
                     data_args)
@@ -286,20 +264,9 @@ from utils.data_loader_llava import preprocess_multimodal, preprocess_text
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 
 @torch.no_grad()
-def worker_loop_multimodal(index_queue, data_queue, data_dir, transform, transform_on_gpu=False, cpu_transform=None, device='cpu', use_kornia=False, transform_on_worker=True, test_transform=None, scl=False, tokenizer=None, data_args=None):
+def worker_loop_multimodal(index_queue, data_queue, data_dir, device='cpu', tokenizer=None, data_args=None):
     torch.set_num_threads(1)
     watchdog = ManagerWatchdog()
-    if use_kornia:
-        if 'cifar100' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar100')
-        elif 'cifar10' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar10')
-        elif 'tinyimagenet' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='tinyimagenet')
-        elif 'imagenet' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='imagenet')
-        preprocess = Preprocess(inp_size)
-        kornia_randaug = DataAugmentation(inp_size, mean, std)
     while watchdog.is_alive():
         try:
             r = index_queue.get(timeout=TIMEOUT)
@@ -312,6 +279,7 @@ def worker_loop_multimodal(index_queue, data_queue, data_dir, transform, transfo
         labels = []
         not_aug_img = []
         if len(r) > 0:
+            processor = data_args.image_processor
             for sample in r:
                 if 'image' in sample:
                     image_file = sample['image']
@@ -329,20 +297,9 @@ def worker_loop_multimodal(index_queue, data_queue, data_dir, transform, transfo
                                 result = Image.new(pil_img.mode, (height, height), background_color)
                                 result.paste(pil_img, ((height - width) // 2, 0))
                                 return result
-                        image = expand2square(image, tuple(int(x*255) for x in mean))
-                    if use_kornia:
-                        images.append(preprocess(image))
-                    elif transform_on_gpu:
-                        images.append(load_data(sample, data_dir, cpu_transform))
-                        if not scl and test_transform is not None:
-                            not_aug_img.append(load_data(sample, data_dir, test_transform))
-                    else:
-                        if scl:
-                            images.append(load_data(sample, data_dir, test_transform))
-                        else:
-                            images.append(load_data(sample, data_dir, transform))
-                            if test_transform is not None:
-                                not_aug_img.append(load_data(sample, data_dir, test_transform))
+                        image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+                    image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+                    images.append(image)
                     sources = preprocess_multimodal(
                         copy.deepcopy([sample['conversations']]),
                         data_args)
@@ -353,22 +310,15 @@ def worker_loop_multimodal(index_queue, data_queue, data_dir, transform, transfo
                     tokenizer,
                     has_image=('image' in sample))
                 
-                input_id = torch.nn.utils.rnn.pad_sequence(
-                    data_dict["input_ids"],
-                    batch_first=True,
-                    padding_value=tokenizer.pad_token_id)[0]
-                label = torch.nn.utils.rnn.pad_sequence(labels=data_dict["labels"][0],
-                                                 batch_first=True,
-                                                 padding_value=IGNORE_INDEX)[0]
-                input_id = input_id[:tokenizer.model_max_length]
-                label = label[:tokenizer.model_max_length]
+                input_ids.append(data_dict['input_ids'][0])
+                labels.append(data_dict['labels'][0])
 
-                input_ids.append(input_id)
-                labels.append(label)
+                # input_ids.append(input_id)
+                # labels.append(label)
 
             data['image'] = torch.stack(images)
-            data['input_id'] = torch.stack(input_ids)
-            data['label'] = torch.stack(labels)
+            data['input_id'] = input_ids#torch.stack(input_ids)
+            data['label'] = labels#torch.stack(labels)
             data['sample'] = r
             # if not scl and test_transform is not None:
             #     data['not_aug_img'] = not_aug_img
