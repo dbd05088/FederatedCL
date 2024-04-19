@@ -18,7 +18,7 @@ from utils.augment import get_transform
 from utils.train_utils import select_model, select_optimizer, select_scheduler, get_llavamodel
 from utils.block_utils import MODEL_BLOCK_DICT, get_blockwise_flops
 
-logger = logging.getLogger()
+# logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
 from transformers import Trainer
@@ -27,7 +27,7 @@ from transformers.trainer import (
     get_parameter_names,
     has_length,
     ALL_LAYERNORM_LAYERS,
-    logger,
+    # logger,
 )
 
 from transformers.optimization import get_scheduler
@@ -60,6 +60,7 @@ class CLManagerServer: # == SERVER
         # tokenizer = None,
         receive_channel=None,
         send_channel=None,
+        logger=None
     ):
         # super().__init__(model, args, data_collator, train_dataset, eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers, preprocess_logits_for_metrics)
         kwargs = vars(args)
@@ -77,17 +78,12 @@ class CLManagerServer: # == SERVER
         self.task_id = 0
         self.method_name = kwargs["mode"]
         self.dataset = kwargs["dataset"]
-        # self.sigma = kwargs["sigma"]
-        # self.repeat = kwargs["repeat"]
-        # self.init_cls = kwargs["init_cls"]
         # self.samples_per_task = kwargs["samples_per_task"]
         self.memory_size = kwargs["memory_size"]
         self.online_iter = kwargs["online_iter"]
 
         self.receive_channel = receive_channel
         self.send_channel = send_channel
-
-        # self.model_name = kwargs["model_name"]
 
         self.lr = kwargs["learning_rate"]
         # self.block_names = MODEL_BLOCK_DICT[self.model_name]
@@ -105,13 +101,14 @@ class CLManagerServer: # == SERVER
         self.data_dir = os.path.join("dataset", self.dataset)
         self.n_worker = kwargs["dataloader_num_workers"]
         self.future_steps = kwargs["future_steps"]
-        self.transform_on_gpu = kwargs["transform_on_gpu"]
-        self.use_kornia = kwargs["use_kornia"]
-        self.transform_on_worker = kwargs["transform_on_worker"]
+        # self.transform_on_gpu = kwargs["transform_on_gpu"]
+        # self.use_kornia = kwargs["use_kornia"]
+        # self.transform_on_worker = kwargs["transform_on_worker"]
 
         self.eval_period = kwargs["eval_period"]
         self.topk = kwargs["topk"]
-        self.f_period = kwargs["f_period"]
+        
+        self.logger = logger
 
         # self.use_amp = kwargs["use_amp"]
         # if self.use_amp:
@@ -136,12 +133,6 @@ class CLManagerServer: # == SERVER
         self.future_sampling = True
         self.future_retrieval = True
 
-        self.gt_label = None
-        self.test_records = []
-        self.n_model_cls = []
-        self.knowledge_loss_rate = []
-        self.knowledge_gain_rate = []
-        self.forgetting_time = []
         self.note = kwargs['note']
         self.rnd_seed = kwargs['seed']
         self.save_path = f'results/{self.dataset}/{self.note}/seed_{self.rnd_seed}'
@@ -190,13 +181,13 @@ class CLManagerServer: # == SERVER
         for curr_round in range(self.num_rounds):
             # clients turn
             cids = np.arange(self.num_clients).tolist()
-            num_selection = 7#int(round(self.num_clients*self.frac_clients))
-            selected_ids = [0,1,2,3,4,5,6]#random.sample(cids, num_selection)
+            num_selection = 4#int(round(self.num_clients*self.frac_clients))
+            selected_ids = [0,1,2,3]#random.sample(cids, num_selection)
             # selected_ids = cids
             id_idx = 0
             for send_queue in self.send_channel:
                 client_id = selected_ids[id_idx]
-                print(f"add queue about client {client_id}")
+                self.logger.info(f"add queue about client {client_id}")
                 send_queue.put({
                     'client_id':client_id,
                     'curr_round':curr_round,
@@ -213,14 +204,17 @@ class CLManagerServer: # == SERVER
                 except queue.Empty:
                     continue
                 if r:
-                    print(r)
+                    self.logger.info(r)
                     received_data_from_clients+=1
                 
-                    # server side work
+                    # FIXME:server side work
 
                 if received_data_from_clients == num_selection:
                     break
-        print("total done")
+            
+            # FIXME:server-side work 
+        
+        self.logger.info("total done")
         for send_queue in self.send_channel:
             send_queue.put("done")
         return
@@ -298,10 +292,10 @@ class CLManagerServer: # == SERVER
                 for module in opt_model.modules():
                     if isinstance(module, nn.Embedding):
                         skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
-                        logger.info(f"skipped {module}: {skipped/2**20}M params")
+                        self.logger.info(f"skipped {module}: {skipped/2**20}M params")
                         manager.register_module_override(module, "weight", {"optim_bits": 32})
-                        logger.debug(f"bitsandbytes: will optimize {module} in fp32")
-                logger.info(f"skipped: {skipped/2**20}M params")
+                        self.logger.debug(f"bitsandbytes: will optimize {module} in fp32")
+                self.logger.info(f"skipped: {skipped/2**20}M params")
 
         return self.optimizer
 
@@ -412,95 +406,11 @@ class CLManagerServer: # == SERVER
         for i in range(iterations):
             self.waiting_batch.append(self.temp_future_batch + self.memory.retrieval(self.memory_batch_size))
 
-    def online_step(self, sample, sample_num, n_worker):
-        self.sample_num = sample_num
-        # if sample['klass'] not in self.exposed_classes:
-        #     self.add_new_class(sample['klass'])
-        self.temp_batch.append(sample)
-        self.num_updates += self.online_iter
-        if len(self.temp_batch) >= self.temp_batch_size:
-            if int(self.num_updates) > 0:
-                train_loss, train_acc = self.online_train(iterations=int(self.num_updates))
-                self.report_training(sample_num, train_loss, train_acc)
-                self.num_updates -= int(self.num_updates)
-            self.temp_batch = []
-
-    def add_new_class(self, class_name):
-        if hasattr(self.model, 'fc'):
-            fc_name = 'fc'
-        elif hasattr(self.model, 'head'):
-            fc_name = 'head'
-        self.cls_dict[class_name] = len(self.exposed_classes)
-        self.exposed_classes.append(class_name)
-        self.num_learned_class = len(self.exposed_classes)
-        model_fc = getattr(self.model, fc_name)
-        prev_weight = copy.deepcopy(model_fc.weight.data)
-        prev_bias = copy.deepcopy(model_fc.bias.data)
-        setattr(self.model, fc_name, nn.Linear(model_fc.in_features, self.num_learned_class).to(self.device))
-        model_fc = getattr(self.model, fc_name)
-        with torch.no_grad():
-            if self.num_learned_class > 1:
-                model_fc.weight[:self.num_learned_class - 1] = prev_weight
-                model_fc.bias[:self.num_learned_class - 1] = prev_bias
-        for param in self.optimizer.param_groups[1]['params']:
-            if param in self.optimizer.state.keys():
-                del self.optimizer.state[param]
-        del self.optimizer.param_groups[1]
-        self.optimizer.add_param_group({'params': model_fc.parameters()})
-        if 'reset' in self.sched_name:
-            self.update_schedule(reset=True)
-
-    def online_train(self, iterations=1):
-        total_loss, correct, num_data = 0.0, 0.0, 0.0
-
-        for i in range(iterations):
-            self.model.train()
-            data = self.get_batch()
-            # x = data["image"].to(self.device)
-            # y = data["label"].to(self.device)
-            self.before_model_update()
-
-            self.optimizer.zero_grad()
-
-            data = self._prepare_inputs(data)
-
-            with self.compute_loss_context_manager():
-                loss = self.compute_loss(self.model, data)
-
-            # _, preds = logit.topk(self.topk, 1, True, True)
-            loss.backward()
-            self.optimizer.step()
-
-            # if self.use_amp:
-            #     self.scaler.scale(loss).backward()
-            #     self.scaler.step(self.optimizer)
-            #     self.scaler.update()
-            # else:
-            #     loss.backward()
-            #     self.optimizer.step()
-
-            # self.total_flops += (len(y) * self.backward_flops)
-            self.current_flos += float(self.floating_point_ops(data))
-
-            self.after_model_update()
-
-            # total_loss += loss.item()
-            # correct += torch.sum(preds == y.unsqueeze(1)).item()
-            # num_data += y.size(0)
-
-        return total_loss / iterations, correct / num_data
-
-    def before_model_update(self):
-        pass
-
-    def after_model_update(self):
-        self.update_schedule()
-        
 
     def report_training(self, sample_num, train_loss, train_acc):
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         writer.add_scalar(f"train/acc", train_acc, sample_num)
-        logger.info(
+        self.logger.info(
             f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | TFLOPs {self.total_flops/1000:.2f} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
@@ -509,13 +419,11 @@ class CLManagerServer: # == SERVER
     def report_test(self, sample_num, avg_loss, avg_acc):
         writer.add_scalar(f"test/loss", avg_loss, sample_num)
         writer.add_scalar(f"test/acc", avg_acc, sample_num)
-        logger.info(
+        self.logger.info(
             f"Test | Sample # {sample_num} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | TFLOPs {self.total_flops/1000:.2f}"
         )
 
 
-         
-    
 class MemoryBase:
     def __init__(self, memory_size):
         self.memory_size = memory_size
@@ -568,39 +476,3 @@ class MemoryBase:
             return memory_batch, indices
         else:
             return memory_batch
-
-def get_mm_adapter_state_maybe_zero_3(named_params, keys_to_match):
-    to_return = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
-    to_return = {k: maybe_zero_3(v, ignore_status=True, name=k).cpu() for k, v in to_return.items()}
-    return to_return
-
-def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                print(name, 'no ignore status')
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
-
-from transformers.utils import is_peft_available
-import importlib.metadata
-from packaging import version
-
-if is_peft_available():
-    from peft import PeftModel
-
-def _is_peft_model(model):
-    if is_peft_available():
-        classes_to_check = (PeftModel,) if is_peft_available() else ()
-        # Here we also check if the model is an instance of `PeftMixedModel` introduced in peft>=0.7.0: https://github.com/huggingface/transformers/pull/28321
-        if version.parse(importlib.metadata.version("peft")) >= version.parse("0.7.0"):
-            from peft import PeftMixedModel
-
-            classes_to_check = (*classes_to_check, PeftMixedModel)
-        return isinstance(model, classes_to_check)
-    return False
