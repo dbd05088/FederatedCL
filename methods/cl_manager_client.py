@@ -337,7 +337,7 @@ class CLManagerClient: # Client
         if self.is_new(client_id):
             # model, tokenizer, _ = get_llavamodel(training_args=self.args, model_args=self.model_args, bnb_model_from_pretrained_args={}, lora_config=self.args.lora_config)
             print(client_id)
-            self.init_state(client_id)
+            self.init_state(client_id, len(train_datalist))
             self.init_model()
             self.initialize_future(train_datalist)
         else: # load_state
@@ -356,11 +356,12 @@ class CLManagerClient: # Client
                 self.dataloader.load_state(client_id, self.args.state_dir)
                 self.load_model(client_id, self.args.state_dir)
     
-    def init_state(self, cid):
+    def init_state(self, cid, data_len):
         self.state['client_id'] = cid
         self.state['sample_cnt'] = 0
         self.state['round_cnt'] = 0
         self.state['done'] = False
+        self.state['total_samples'] = data_len
     
     def save_state(self):
         trainer_state = self.state
@@ -526,8 +527,8 @@ class CLManagerClient: # Client
         self.num_updates += self.online_iter
         if len(self.temp_batch) >= self.temp_batch_size:
             if int(self.num_updates) > 0:
-                train_loss, train_acc = self.online_train(iterations=int(self.num_updates))
-                self.report_training(sample_num, train_loss, train_acc)
+                train_loss = self.online_train(iterations=int(self.num_updates))
+                self.report_training(sample_num, train_loss)
                 self.num_updates -= int(self.num_updates)
             self.temp_batch = []
 
@@ -574,6 +575,7 @@ class CLManagerClient: # Client
         return (loss, outputs) if return_outputs else loss
 
     def online_train(self, iterations=1):
+        print("start online train")
         total_loss, correct, num_data = 0.0, 0.0, 0.0
 
         for i in range(iterations):
@@ -606,17 +608,18 @@ class CLManagerClient: # Client
 
             self.after_model_update()
 
-            # total_loss += loss.item()
+            total_loss += loss.item()
             # correct += torch.sum(preds == y.unsqueeze(1)).item()
             # num_data += y.size(0)
 
-        return total_loss / iterations, correct / num_data
+        return total_loss / iterations
 
     def before_model_update(self):
         pass
 
     def after_model_update(self):
-        self.update_schedule()
+        # self.update_schedule()
+        self.lr_scheduler.step()
 
     # def model_forward(self, x, y):
     #     do_cutmix = self.cutmix and np.random.rand(1) < 0.5
@@ -634,13 +637,14 @@ class CLManagerClient: # Client
     #     return logit, loss
         
 
-    def report_training(self, sample_num, train_loss, train_acc):
+    def report_training(self, sample_num, train_loss):
         writer.add_scalar(f"train/loss", train_loss, sample_num)
-        writer.add_scalar(f"train/acc", train_acc, sample_num)
-        logger.info(
-            f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | TFLOPs {self.total_flops/1000:.2f} | "
+        # writer.add_scalar(f"train/acc", train_acc, sample_num)
+        # logger.info(
+        print(
+            f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
-            f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
+            f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
         )
 
     def report_test(self, sample_num, avg_loss, avg_acc):

@@ -119,6 +119,9 @@ class MultiProcessLoader():
             # labels = torch.cat(labels)
             # if self.transform_on_gpu and not self.transform_on_worker:
             #     images = self.transform(images.to(self.device))
+            images = images.to(dtype=torch.bfloat16)
+            # labels = labels.to(dtype=torch.bfloat16)
+            
             data['images'] = images
             data['input_ids'] = input_ids
             data['labels'] = labels

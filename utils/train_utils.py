@@ -1047,7 +1047,7 @@ from peft.tuners.lora import LoraLayer
 
 def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, data_args):
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
-    attn_implementation = None
+    attn_implementation = "flash_attention_2"
     if model_args.vision_tower is not None:
         if 'mpt' in model_args.model_name_or_path:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
@@ -1077,7 +1077,9 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, da
     model.config.use_cache = False
 
     # FIXME
-    # model = model.to(training_args.device)
+    if training_args.bits >= 16:
+        # print(training_args.device)
+        model = model.to(training_args.device)
 
     # if model_args.freeze_backbone: #FIXME
     #     model.model.requires_grad_(False)
@@ -1152,6 +1154,7 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, da
         
         vision_tower = model.get_vision_tower()
         vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
+        vision_tower.requires_grad_(True)
 
         data_args.image_processor = vision_tower.image_processor
         data_args.is_multimodal = True
@@ -1172,10 +1175,7 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, da
         #         p.requires_grad = False
         
         # model.requires_grad_(False)
-        # for name, module in model.named_modules():
-        #     if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
-        #         for p in module.parameters():
-        #             p.requires_grad = True
+        
 
         if training_args.bits in [4, 8]:
             model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
@@ -1189,15 +1189,27 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, da
     if training_args.bits in [4, 8]:
         
         for name, module in model.named_modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, LoraLayer):# or isinstance(module, torch.nn.LayerNorm):
                 if training_args.bf16:
                     module = module.to(torch.bfloat16)
-            if 'norm' in name:
-                module = module.to(torch.float32)
+            # if 'norm' in name and 'vision_tower' not in name:
+            #     module = module.to(torch.float32)
             if 'lm_head' in name or 'embed_tokens' in name:
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
+    
+    # for name, module in model.named_modules():
+    #         if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
+    #             for p in module.parameters():
+    #                 p.requires_grad = True   
+    #         else:
+    #             for p in module.parameters():
+    #                 p.requires_grad = False   
+    # for name, parameter in model.named_parameters():
+    #     if parameter.requires_grad:
+    #         print(name)              
+    
     return model, tokenizer, data_args
 
 def find_all_linear_names(model):

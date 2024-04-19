@@ -118,11 +118,13 @@ class CLManagerServer: # == SERVER
         #     self.scaler = torch.cuda.amp.GradScaler()
 
         # for debugging
-        self.train_datalists = [train_datalists[0:100], 
-                                train_datalists[100:200],
-                                train_datalists[200:300],
-                                train_datalists[300:400],
-                                train_datalists[400:500],
+        self.train_datalists = [train_datalists,#[0:100], 
+                                train_datalists,#[100:200],
+                                train_datalists,#[200:300],
+                                train_datalists,#[300:400],
+                                train_datalists,#[400:500],
+                                train_datalists,
+                                train_datalists,
                                 ]
 
         # self.train_datalists = train_datalists
@@ -188,8 +190,8 @@ class CLManagerServer: # == SERVER
         for curr_round in range(self.num_rounds):
             # clients turn
             cids = np.arange(self.num_clients).tolist()
-            num_selection = int(round(self.num_clients*self.frac_clients))
-            selected_ids = random.sample(cids, num_selection)
+            num_selection = 7#int(round(self.num_clients*self.frac_clients))
+            selected_ids = [0,1,2,3,4,5,6]#random.sample(cids, num_selection)
             # selected_ids = cids
             id_idx = 0
             for send_queue in self.send_channel:

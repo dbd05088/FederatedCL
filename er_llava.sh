@@ -14,8 +14,9 @@ SEEDS="1"
 # if [ "$DATASET" == "cifar10" ]; then
 MEM_SIZE=50000 ONLINE_ITER=1
 MODEL_NAME="resnet18" EVAL_PERIOD=100
-BATCHSIZE=16; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
+BATCHSIZE=32; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
 
+#adamw_bnb_8bit
 # elif [ "$DATASET" == "cifar100" ]; then
 #     MEM_SIZE=2000 ONLINE_ITER=3
 #     MODEL_NAME="resnet18" EVAL_PERIOD=100
@@ -38,8 +39,9 @@ BATCHSIZE=16; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERI
 
 for RND_SEED in $SEEDS
 do
-    CUDA_VISIBLE_DEVICES=3,7 python main_llava.py \
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_llava.py \
     --bf16 True \
+    --tf32 True \
     --mode $MODE --dataloader_num_workers 4 \
     --dataset $DATASET \
     --sigma $SIGMA --repeat $REPEAT --init_cls $INIT_CLS \
@@ -59,3 +61,6 @@ done
 # --imp_update_period $IMP_UPDATE_PERIOD $USE_AMP \
 # $GPU_TRANSFORM
 # --memory_size $MEM_SIZE
+
+    # --gradient_checkpointing True \
+    # --gradient_accumulation_steps 1 \
