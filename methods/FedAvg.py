@@ -31,8 +31,11 @@ class FedAvg_server(CLManagerServer):
                 new_tensor += self.state_dicts[i][k]
             mean_state_dict[k] = new_tensor / num_clients
         
-        # self.model.load_state_dict(mean_state_dict, strict=False)
+        self.model.load_state_dict(mean_state_dict, strict=False)
         self.mean_state_dict = mean_state_dict
+        
+        for i in range(len(self.test_datalists)):
+            self.evaluate(i, self.test_datalists[i], 128, self.n_worker)
         
 class FedAvg_client(CLManagerClient): 
     def client_msg(self):
