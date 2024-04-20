@@ -11,9 +11,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from flops_counter.ptflops import get_model_complexity_info
 from utils.data_loader import ImageDataset, cutmix_data, MultiProcessLoader, get_statistics
+from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
 from utils.augment import get_transform
 from utils.train_utils import select_model, select_optimizer, select_scheduler, get_llavamodel
 from utils.block_utils import MODEL_BLOCK_DICT, get_blockwise_flops
@@ -40,14 +42,16 @@ from utils.data_worker import ManagerWatchdog
 import queue
 from collections.abc import Mapping
 
+from utils.eval_metrics import NLPEvaluator
+from models.llava.constants import IGNORE_INDEX
+
 OPTIMIZER_NAME = "optimizer.pt"
 SCHEDULER_NAME = "scheduler.pt"
-
-
 
 class CLManagerClient: # Client
     def __init__(
         self,
+        rank,
         device,
         data_args,
         model_args,
@@ -63,6 +67,7 @@ class CLManagerClient: # Client
 
     # def __init__(self, train_datalist, test_datalist, device, model_args, training_args, bnb_model_from_pretrained_args, **kwargs):
         kwargs = vars(args)
+        self.rank = rank
         self.args = args
         self.data_args = data_args
         self.model_args = model_args
@@ -107,6 +112,19 @@ class CLManagerClient: # Client
         self.topk = kwargs["topk"]
         self.f_period = kwargs["f_period"]
 
+        # self.logger = logger
+        # logging.config.fileConfig("./configuration/logging.conf")
+        # logger = logging.getLogger()
+
+        # os.makedirs(f"results/{self.args.dataset}/{self.args.note}", exist_ok=True)
+        # os.makedirs(f"tensorboard/{self.args.dataset}/{self.args.note}", exist_ok=True)
+        # fileHandler = logging.FileHandler(f'results/{self.args.dataset}/{self.args.note}/seed_{self.args.seed}_client_rank{self.rank}.log', mode="w")
+
+        # formatter = logging.Formatter(
+        #     "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
+        # )
+        # fileHandler.setFormatter(formatter)
+        # logger.addHandler(fileHandler)
         self.logger = logger
         
         self.temp_batch = []
@@ -232,10 +250,10 @@ class CLManagerClient: # Client
                 for module in opt_model.modules():
                     if isinstance(module, nn.Embedding):
                         skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
-                        self.logger.info(f"skipped {module}: {skipped/2**20}M params")
+                        print(f"skipped {module}: {skipped/2**20}M params")
                         manager.register_module_override(module, "weight", {"optim_bits": 32})
                         self.logger.debug(f"bitsandbytes: will optimize {module} in fp32")
-                self.logger.info(f"skipped: {skipped/2**20}M params")
+                print(f"skipped: {skipped/2**20}M params")
 
         return self.optimizer
 
@@ -284,14 +302,14 @@ class CLManagerClient: # Client
     def init_model(self):
         # reinit vision tower & mm_projector of llava model
         self.model.load_state_dict(torch.load('./llava_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
-        self.logger.info("done loading init llava vision tower and mm projector")
+        print("done loading init llava vision tower and mm projector")
         # reset lora layers
         # model = self.model.unload()
         # self.model = get_peft_model(model, self.args.lora_config)
         for name, module in self.model.named_modules():
             if isinstance(module, LoraLayer):
                 module.reset_lora_parameters('default', True)
-        self.logger.info("done reset lora layers")
+        print("done reset lora layers")
 
     def is_new(self, client_id):
         return not os.path.exists(os.path.join(self.args.state_dir, f'{client_id}_client_trainerstate.npy'))
@@ -305,7 +323,7 @@ class CLManagerClient: # Client
             self.initialize_future(train_datalist)
         else: # load_state
             if client_id != self.state['client_id']:
-                self.logger.info(f"load client {client_id}")
+                print(f"load client {client_id}")
                 trainer_state = np.load(os.path.join(self.args.state_dir, '{}_client_trainerstate.npy'.format(client_id))).item()
                 self.state['client_id'] = trainer_state['client_id']
                 self.state['sample_cnt'] = trainer_state['sample_cnt']
@@ -381,7 +399,7 @@ class CLManagerClient: # Client
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 10
+        samples_per_round = 1000
 
         seen_so_far = self.state['sample_cnt']
         
@@ -393,8 +411,8 @@ class CLManagerClient: # Client
 
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
-            # if self.state['sample_cnt'] % self.args.eval_period == 0:
-        
+            if self.state['sample_cnt'] % self.eval_period == 0:
+                self.evaluate(test_datalist)
 
             #     eval_dict = self.online_evaluate(test_datalist, self.state['sample_cnt'], 512, self.args.dataloader_num_workers, cls_dict,
             #                                     cls_addition, data["time"])
@@ -402,17 +420,9 @@ class CLManagerClient: # Client
             #     eval_results["percls_acc"].append(eval_dict['cls_acc'])
             #     eval_results["data_cnt"].append(samples_cnt)
             
-            # if (training_args.mode in ["remind"]) and samples_cnt == training_args.baseinit_samples:
-            #     method.finalize_baseinit()
-            
-            # if samples_cnt % training_args.samples_per_task == 0 and (training_args.mode in ["memo", "xder", "afec", "sparcl", "trire"]) and samples_cnt != num_samples[args.dataset]:
-            #     method.online_after_task()
-            
         # if eval_results["data_cnt"][-1] != samples_cnt:
         #     eval_dict = method.online_evaluate(test_datalist, samples_cnt, 512, training_args.dataloader_num_workers, cls_dict, cls_addition,
         #                                     data["time"])
-
-        # A_last = eval_dict['avg_acc']
         self.save_state()
         
 
@@ -597,18 +607,18 @@ class CLManagerClient: # Client
     def report_training(self, sample_num, train_loss):
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         # writer.add_scalar(f"train/acc", train_acc, sample_num)
-        # self.logger.info(
-        self.logger.info(
+        # print(
+        print(
             f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
         )
 
-    def report_test(self, sample_num, avg_loss, avg_acc):
-        writer.add_scalar(f"test/loss", avg_loss, sample_num)
-        writer.add_scalar(f"test/acc", avg_acc, sample_num)
-        self.logger.info(
-            f"Test | Sample # {sample_num} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | TFLOPs {self.total_flops/1000:.2f}"
+    def report_test(self, sample_num, scores):
+        writer.add_scalar(f"test/loss", scores["loss"], sample_num)
+        writer.add_scalar(f"test/precision", scores["precision"], sample_num)
+        print(
+            f"Test (Client id {self.state['client_id']}) | Sample # {sample_num} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
 
     def update_schedule(self, reset=False):
@@ -619,104 +629,57 @@ class CLManagerClient: # Client
         else:
             self.scheduler.step()
 
-
-    def online_evaluate(self, test_list, sample_num, batch_size, n_worker, cls_dict, cls_addition, data_time):
-        test_df = pd.DataFrame(test_list)
-        '''
-        if "clear" in self.dataset:
-            exp_test_df = test_df[test_df['time'] < self.exposed_domains[-1]]
-            if len(self.exposed_domains) == 0:
-                exp_test_df = test_df[test_df['klass'].isin(self.exposed_classes)]
-        else:
-            exp_test_df = test_df[test_df['klass'].isin(self.exposed_classes)]
-        '''
-        exp_test_df = test_df[test_df['klass'].isin(self.exposed_classes)]
+    def evaluate(self, test_datalist):
+        dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, self.dataset, preprocess=True)
+        dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         
-        print("exposed_domains", self.exposed_domains)
-        print("exposed_classes", self.exposed_classes)
-        print("exp_test_df", len(exp_test_df))
-        test_dataset = ImageDataset(
-            exp_test_df,
-            dataset=self.dataset,
-            transform=self.test_transform,
-            cls_list=self.exposed_classes,
-            data_dir=self.data_dir
-        )
-        test_loader = DataLoader(
-            test_dataset,
-            shuffle=True,
-            batch_size=batch_size,
-            num_workers=n_worker,
-        )
-        eval_dict = self.evaluation(test_loader, self.criterion)
-        
-        self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
-
-        # if sample_num >= self.f_next_time:
-        #     self.get_forgetting(sample_num, test_list, cls_dict, batch_size, n_worker)
-        #     self.f_next_time += self.f_period
-        return eval_dict
-
-
-    def evaluation(self, test_loader, criterion):
-        total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
-        correct_l = torch.zeros(self.n_classes)
-        num_data_l = torch.zeros(self.n_classes)
-        label = []
-
         self.model.eval()
+        predictions = []
+        total_loss = 0
+        n_word_total = 0
+        n_word_correct = 0
+        cnt = 0
         with torch.no_grad():
-            for i, data in enumerate(test_loader):
-                x = data["image"]
-                y = data["label"]
-                x = x.to(self.device)
-                y = y.to(self.device)
-                logit = self.model(x)
+            for i, batch in enumerate(tqdm(dataloader)):
+                # * prepare data
+                input_labels = batch['labels']
+                batch = self._prepare_inputs(batch)
+                
+                # loss, pred_scores_list = model(**batch)
+                output = self.model(**batch)
+                loss = output[0]
+                pred_scores_list = output[1]
+                # * keep logs
+                n_correct = 0
+                n_word = 0
+                for pred, gold in zip(pred_scores_list, input_labels):
+                    valid_label_mask = gold.ne(IGNORE_INDEX)
+                    valid_idx = valid_label_mask.nonzero()[0].item()
+                    
+                    n_word += valid_label_mask.sum()
+                    pred_id = torch.argmax(pred, dim=1).cpu()#.to(device)
+                    
+                    pred_correct_mask = pred_id.eq(gold)
+                    n_correct += pred_correct_mask.masked_select(valid_label_mask).sum()
+                    # pred_id[valid_label_mask == False] = 0
+                    
+                    gold[valid_label_mask == False] = 0
+                    
+                    pred_sentence = self.tokenizer.decode(pred_id[valid_idx:], skip_special_tokens=True)#[valid_label_mask])
+                    gold_sentence = self.tokenizer.decode(gold[valid_label_mask], skip_special_tokens=True)#[])
+                    predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
 
-                loss = criterion(logit, y)
-                pred = torch.argmax(logit, dim=-1)
-                _, preds = logit.topk(self.topk, 1, True, True)
-
-                total_correct += torch.sum(preds == y.unsqueeze(1)).item()
-                total_num_data += y.size(0)
-
-                xlabel_cnt, correct_xlabel_cnt = self._interpret_pred(y, pred)
-                correct_l += correct_xlabel_cnt.detach().cpu()
-                num_data_l += xlabel_cnt.detach().cpu()
-
-                total_loss += loss.item()
-                label += y.tolist()
-
-        avg_acc = total_correct / total_num_data
-        avg_loss = total_loss / len(test_loader)
-        cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
-        ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
-
-        return ret
-
-    def get_flops_parameter(self, method=None):
-        _, _, _, inp_size, inp_channel = get_statistics(dataset=self.dataset)
-        if self.model_name == 'vit':
-            inp_size = 224
+                n_word_total += n_word
+                n_word_correct += n_correct
+                total_loss += loss
+                cnt += 1
+        scores = NLPEvaluator(predictions).evaluate()
+        scores["precision"] = n_word_correct / n_word_total
+        scores["loss"] = total_loss / cnt
+                
+        self.report_test(self.state['sample_cnt'], scores)
         
-        self.flops_dict = get_model_complexity_info(self.model, (inp_channel, inp_size, inp_size),
-                                                                             as_strings=False,
-                                                                             print_per_layer_stat=False, verbose=True,
-                                                                             criterion=self.criterion,
-                                                                             original_opt=self.optimizer,
-                                                                    opt_name=self.opt_name, lr=self.lr)
-        forward_flops, backward_flops, G_forward_flops, G_backward_flops, F_forward_flops, F_backward_flops  = get_blockwise_flops(self.flops_dict, self.model_name, method)
-        self.forward_flops = sum(forward_flops)
-        self.backward_flops = sum(backward_flops)
-        self.blockwise_forward_flops = forward_flops
-        self.blockwise_backward_flops = backward_flops
-        self.total_model_flops = self.forward_flops + self.backward_flops
-        
-        self.G_forward_flops, self.G_backward_flops = sum(G_forward_flops), sum(G_backward_flops)
-        self.F_forward_flops, self.F_backward_flops = sum(F_forward_flops), sum(F_backward_flops)
-        self.G_blockwise_forward_flops, self.G_blockwise_backward_flops = G_forward_flops, G_backward_flops
-        self.F_blockwise_forward_flops, self.F_blockwise_backward_flops = F_forward_flops, F_backward_flops
-        
+        return predictions
     
 class MemoryBase:
     def __init__(self, memory_size):

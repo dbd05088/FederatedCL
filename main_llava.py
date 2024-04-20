@@ -21,7 +21,6 @@ from utils.train_utils import get_llavamodel
 from torch import multiprocessing
 import copy
 import torch.distributed as dist
-
 def main():
     # args = config.base_parser()
 
@@ -112,7 +111,7 @@ def main():
     multiprocessing.set_start_method('spawn')
     processes = []
 
-    num_process = training_args.n_gpu
+    num_process = min(training_args.n_gpu, training_args.num_clients + 1)
     client2server_queue = multiprocessing.Queue()
     server2client_queues = [
         multiprocessing.Queue() for _ in range(1, num_process)
@@ -128,7 +127,8 @@ def main():
                 args=training_args,
                 bnb_model_from_pretrained_args=bnb_model_from_pretrained_args,
                 receive_channel=client2server_queue,
-                send_channel=server2client_queues
+                send_channel=server2client_queues,
+                logger=logger
             )
     server_process = multiprocessing.Process(
         target=run,
@@ -150,13 +150,15 @@ def main():
         args_copied.device = device
         bnb_model_from_pretrained_args_copied['device_map'] = {"":args_copied.device}
         client_runner = CLManagerClient(
+            rank,
             device,
             data_args,
             model_args,
             args=args_copied,
             bnb_model_from_pretrained_args=bnb_model_from_pretrained_args_copied,
             receive_channel=server2client_queues[rank-1],
-            send_channel=client2server_queue
+            send_channel=client2server_queue,
+            logger=logger
         )
         p = multiprocessing.Process(target=run,
                 args=(

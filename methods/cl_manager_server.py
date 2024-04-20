@@ -12,33 +12,28 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from flops_counter.ptflops import get_model_complexity_info
-from utils.data_loader import ImageDataset, cutmix_data, MultiProcessLoader, get_statistics
-from utils.augment import get_transform
-from utils.train_utils import select_model, select_optimizer, select_scheduler, get_llavamodel
-from utils.block_utils import MODEL_BLOCK_DICT, get_blockwise_flops
+from utils.data_loader import ImageDataset, cutmix_data, MultiProcessLoader
+from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
+from utils.train_utils import get_llavamodel
+from collections.abc import Mapping
 
 # logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
 from transformers import Trainer
 from transformers.trainer import (
-    is_sagemaker_mp_enabled,
     get_parameter_names,
-    has_length,
     ALL_LAYERNORM_LAYERS,
     # logger,
 )
-
 from transformers.optimization import get_scheduler
-
-from methods.cl_manager_client import CLManagerClient
-import random
-import torch.multiprocessing as multiprocessing
 import glob
-import sys
 
 from utils.data_worker import ManagerWatchdog
+
+from utils.eval_metrics import NLPEvaluator
+from models.llava.constants import IGNORE_INDEX
+from tqdm import tqdm
 
 OPTIMIZER_NAME = "optimizer.pt"
 SCHEDULER_NAME = "scheduler.pt"
@@ -108,7 +103,20 @@ class CLManagerServer: # == SERVER
         self.eval_period = kwargs["eval_period"]
         self.topk = kwargs["topk"]
         
-        self.logger = logger
+        # self.logger = logger
+        # logging.config.fileConfig("./configuration/logging.conf")
+        # logger = logging.getLogger()
+
+        # os.makedirs(f"results/{self.args.dataset}/{self.args.note}", exist_ok=True)
+        # os.makedirs(f"tensorboard/{self.args.dataset}/{self.args.note}", exist_ok=True)
+        # fileHandler = logging.FileHandler(f'results/{self.args.dataset}/{self.args.note}/seed_{self.args.seed}_server.log', mode="w")
+
+        # formatter = logging.Formatter(
+        #     "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
+        # )
+        # fileHandler.setFormatter(formatter)
+        # logger.addHandler(fileHandler)
+        # self.logger = logger
 
         # self.use_amp = kwargs["use_amp"]
         # if self.use_amp:
@@ -124,8 +132,17 @@ class CLManagerServer: # == SERVER
                                 train_datalists,
                                 ]
 
+        # FIXME
+        self.test_datalists = [test_datalists, test_datalists, test_datalists, test_datalists]
+        # preprocess test datalist into dataloader
+        # self.test_datalists = []
+        # for test_datalist in test_datalists:
+        #     dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, self.dataset, preprocess=True)
+        #     dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        #     self.test_datalists.append(dataloader)
+
         # self.train_datalists = train_datalists
-        self.test_datalists = test_datalists
+        # self.test_datalists = test_datalists
         self.cls_dict = {}
         # self.total_samples = len(self.train_datalist)
 
@@ -141,6 +158,7 @@ class CLManagerServer: # == SERVER
         self.start_time = time.time()
         # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281167}
         # self.total_samples = num_samples[self.dataset]
+        self.total_samples = 0
 
         self.exposed_domains = []
         self.waiting_batch = []
@@ -187,12 +205,12 @@ class CLManagerServer: # == SERVER
             id_idx = 0
             for send_queue in self.send_channel:
                 client_id = selected_ids[id_idx]
-                self.logger.info(f"add queue about client {client_id}")
+                print(f"add queue about client {client_id}")
                 send_queue.put({
                     'client_id':client_id,
                     'curr_round':curr_round,
                     'train_datalist':self.train_datalists[client_id],
-                    'test_datalist':self.test_datalists[client_id],
+                    'test_datalist':self.test_datalists,
                     'server_msg':self.server_msg(),
                 })
                 id_idx += 1
@@ -215,7 +233,7 @@ class CLManagerServer: # == SERVER
             # FIXME:server-side work 
             self.do_server_work()
         
-        self.logger.info("total done")
+        print("total done")
         for send_queue in self.send_channel:
             send_queue.put("done")
         return
@@ -301,10 +319,10 @@ class CLManagerServer: # == SERVER
                 for module in opt_model.modules():
                     if isinstance(module, nn.Embedding):
                         skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
-                        self.logger.info(f"skipped {module}: {skipped/2**20}M params")
+                        print(f"skipped {module}: {skipped/2**20}M params")
                         manager.register_module_override(module, "weight", {"optim_bits": 32})
                         self.logger.debug(f"bitsandbytes: will optimize {module} in fp32")
-                self.logger.info(f"skipped: {skipped/2**20}M params")
+                print(f"skipped: {skipped/2**20}M params")
 
         return self.optimizer
 
@@ -416,21 +434,116 @@ class CLManagerServer: # == SERVER
             self.waiting_batch.append(self.temp_future_batch + self.memory.retrieval(self.memory_batch_size))
 
 
-    def report_training(self, sample_num, train_loss, train_acc):
+    def report_training(self, sample_num, train_loss):
         writer.add_scalar(f"train/loss", train_loss, sample_num)
-        writer.add_scalar(f"train/acc", train_acc, sample_num)
-        self.logger.info(
-            f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | TFLOPs {self.total_flops/1000:.2f} | "
+        # writer.add_scalar(f"train/acc", train_acc, sample_num)
+        # print(
+        print(
+            f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
         )
 
-    def report_test(self, sample_num, avg_loss, avg_acc):
-        writer.add_scalar(f"test/loss", avg_loss, sample_num)
-        writer.add_scalar(f"test/acc", avg_acc, sample_num)
-        self.logger.info(
-            f"Test | Sample # {sample_num} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | TFLOPs {self.total_flops/1000:.2f}"
+    def report_test(self, idx, scores):
+        # writer.add_scalar(f"test/loss", scores["loss"], sample_num)
+        # writer.add_scalar(f"test/precision", scores["precision"], sample_num)
+        print(
+            f"Test (Server) | test_data idx # {idx} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
+    
+    def _prepare_input(self, data):
+        """
+        Prepares one `data` before feeding it to the model, be it a tensor or a nested list/dictionary of tensors.
+        """
+        if isinstance(data, Mapping):
+            return type(data)({k: self._prepare_input(v) for k, v in data.items()})
+        elif isinstance(data, (tuple, list)):
+            return type(data)(self._prepare_input(v) for v in data)
+        elif isinstance(data, torch.Tensor):
+            kwargs = {"device": self.args.device}
+            return data.to(**kwargs)
+        return data
+
+    def _prepare_inputs(self, inputs):
+        """
+        Prepare `inputs` before feeding them to the model, converting them to tensors if they are not already and
+        handling potential state.
+        """
+        inputs = self._prepare_input(inputs)
+        if len(inputs) == 0:
+            raise ValueError(
+                "The batch received was empty, your model won't be able to train on it. Double-check that your "
+                "training dataset contains keys expected by the model"
+            )
+        return inputs
+    
+    def compute_loss(self, model, inputs, return_outputs=False):
+        """
+        How the loss is computed by Trainer. By default, all models return the loss in the first element.
+
+        Subclass and override for custom behavior.
+        """
+        outputs = model(**inputs)
+        # Save past state if it exists
+        # if self.args.past_index >= 0:
+        #     self._past = outputs[self.args.past_index]
+
+        # We don't use .loss here since the model may return tuples instead of ModelOutput.
+        loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+
+        return (loss, outputs) if return_outputs else loss
+
+    def evaluate(self, idx, test_datalist):
+        dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, self.dataset, preprocess=True)
+        dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        
+        self.model.eval()
+        predictions = []
+        total_loss = 0
+        n_word_total = 0
+        n_word_correct = 0
+        cnt = 0
+        with torch.no_grad():
+            for i, batch in enumerate(tqdm(dataloader)):
+                # * prepare data
+                input_labels = batch['labels']
+                batch = self._prepare_inputs(batch)
+                
+                # loss, pred_scores_list = model(**batch)
+                output = self.model(**batch)
+                loss = output[0]
+                pred_scores_list = output[1]
+                # * keep logs
+                n_correct = 0
+                n_word = 0
+                for pred, gold in zip(pred_scores_list, input_labels):
+                    valid_label_mask = gold.ne(IGNORE_INDEX)
+                    valid_idx = valid_label_mask.nonzero()[0].item()
+                    
+                    n_word += valid_label_mask.sum()
+                    pred_id = torch.argmax(pred, dim=1).cpu()#.to(device)
+                    
+                    pred_correct_mask = pred_id.eq(gold)
+                    n_correct += pred_correct_mask.masked_select(valid_label_mask).sum()
+                    # pred_id[valid_label_mask == False] = 0
+                    
+                    gold[valid_label_mask == False] = 0
+                    
+                    pred_sentence = self.tokenizer.decode(pred_id[valid_idx:], skip_special_tokens=True)#[valid_label_mask])
+                    gold_sentence = self.tokenizer.decode(gold[valid_label_mask], skip_special_tokens=True)#[])
+                    predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
+
+                n_word_total += n_word
+                n_word_correct += n_correct
+                total_loss += loss
+                cnt += 1
+        scores = NLPEvaluator(predictions).evaluate()
+        scores["precision"] = n_word_correct / n_word_total
+        scores["loss"] = total_loss / cnt
+                
+        self.report_test(idx, scores)
+        
+        return predictions
 
 
 class MemoryBase:

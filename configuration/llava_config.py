@@ -60,7 +60,7 @@ class TrainingArguments(transformers.TrainingArguments):
     memory_size: int = 500
 
     # federated learning
-    num_clients: int = 2
+    num_clients: int = 4
     num_rounds: int = 2
     iter_per_round: int = 2
     state_dir: str = field(default="./client_states")
@@ -99,7 +99,7 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "Quantization data type to use. Should be one of `fp4` or `nf4`."}
     )
     bits: int = field(
-        default=16,
+        default=8,
         metadata={"help": "How many bits to use."}
     )
 
