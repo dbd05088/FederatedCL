@@ -1813,7 +1813,7 @@ def get_test_datalist(dataset) -> List:
     # except:
     #     print("test name", f"collections/{dataset}/{dataset}_val2.json")
     #     return pd.read_json(f"collections/{dataset}/{dataset}_val2.json").to_dict(orient="records")
-    with open(f"dataset/{dataset}/test/dataset.json") as fp:
+    with open(f"dataset/{dataset}/validation/dataset.json") as fp:
         test_list = json.load(fp)
     return test_list
 
