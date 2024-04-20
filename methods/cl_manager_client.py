@@ -356,15 +356,27 @@ class CLManagerClient: # Client
                     curr_round = r['curr_round']
                     train_datalist = r['train_datalist']
                     test_datalist = r['test_datalist']
+                    server_msg = r['server_msg']
+                    
+                    ######################################
+                    self.switch_state(client_id, train_datalist)
+                    self.handle_server_msg(server_msg)
+                    ######################################
 
-                    self.train_one_round(client_id, curr_round, train_datalist, test_datalist)
+                    self.train_one_round(curr_round, train_datalist, test_datalist)
 
-                    self.send_channel.put(f"done {client_id}")
+                    
 
-    def train_one_round(self, client_id, curr_round, train_datalist, test_datalist):
-        ######################################
-        self.switch_state(client_id, train_datalist)
-        ######################################
+                    # self.send_channel.put(f"done {client_id}")
+                    self.send_channel.put(self.client_msg())
+    
+    def client_msg(self):
+        return f"done {self.state['client_id']}"
+
+    def handle_server_msg(self, server_msg):
+        pass
+
+    def train_one_round(self, curr_round, train_datalist, test_datalist):
         self.state['round_cnt'] += 1
         self.state['curr_round'] = curr_round
         

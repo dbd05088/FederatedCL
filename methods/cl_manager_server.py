@@ -193,6 +193,7 @@ class CLManagerServer: # == SERVER
                     'curr_round':curr_round,
                     'train_datalist':self.train_datalists[client_id],
                     'test_datalist':self.test_datalists[client_id],
+                    'server_msg':self.server_msg(),
                 })
                 id_idx += 1
                 if id_idx == len(selected_ids): break
@@ -204,21 +205,29 @@ class CLManagerServer: # == SERVER
                 except queue.Empty:
                     continue
                 if r:
-                    self.logger.info(r)
-                    received_data_from_clients+=1
-                
                     # FIXME:server side work
-
+                    self.handle_msg_per_client(r)
+                    
+                    received_data_from_clients+=1
                 if received_data_from_clients == num_selection:
                     break
             
             # FIXME:server-side work 
+            self.do_server_work()
         
         self.logger.info("total done")
         for send_queue in self.send_channel:
             send_queue.put("done")
         return
-                
+    
+    def server_msg(self):
+        pass
+    
+    def handle_msg_per_client(self, msg):
+        pass
+    
+    def do_server_work(self):
+        pass
                 
     # from llava_traininer
     def create_optimizer(self):
