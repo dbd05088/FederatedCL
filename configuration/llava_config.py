@@ -4,7 +4,7 @@ from typing import Dict, Optional, Sequence, List
 
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="liuhaotian/llava-v1.5-7b")
+    model_name_or_path: Optional[str] = field(default="./llava-v1.5-7b") #"liuhaotian/llava-v1.5-7b"
     version: Optional[str] = field(default="v1")
     freeze_backbone: bool = field(default=True)
     tune_mm_mlp_adapter: bool = field(default=False)
@@ -39,7 +39,8 @@ class TrainingArguments(transformers.TrainingArguments):
 
     # cl config
     mode: str = field(default="er")
-    dataset: str = field(default="cifar10")
+    # dataset: str = field(default="cifar10")
+    scenario: int = field(default=1)
     note: str = field(default=None)
     eval_period: int = field(default=100)
     online_iter: float = field(default=1.0)
@@ -60,8 +61,8 @@ class TrainingArguments(transformers.TrainingArguments):
     memory_size: int = 500
 
     # federated learning
-    num_clients: int = 4
-    num_rounds: int = 2
+    num_clients: int = 10
+    num_rounds: int = 10
     iter_per_round: int = 2
     state_dir: str = field(default="./client_states")
 

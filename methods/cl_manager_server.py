@@ -16,6 +16,7 @@ from utils.data_loader import ImageDataset, cutmix_data, MultiProcessLoader
 from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
 from utils.train_utils import get_llavamodel
 from collections.abc import Mapping
+import random
 
 # logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -72,7 +73,7 @@ class CLManagerServer: # == SERVER
         self.device = device
         self.task_id = 0
         self.method_name = kwargs["mode"]
-        self.dataset = kwargs["dataset"]
+        # self.dataset = kwargs["dataset"]
         # self.samples_per_task = kwargs["samples_per_task"]
         self.memory_size = kwargs["memory_size"]
         self.online_iter = kwargs["online_iter"]
@@ -93,7 +94,6 @@ class CLManagerServer: # == SERVER
 
         # self.data_dir = kwargs["data_dir"]
         # if self.data_dir is None:
-        self.data_dir = os.path.join("dataset", self.dataset)
         self.n_worker = kwargs["dataloader_num_workers"]
         self.future_steps = kwargs["future_steps"]
         # self.transform_on_gpu = kwargs["transform_on_gpu"]
@@ -123,17 +123,17 @@ class CLManagerServer: # == SERVER
         #     self.scaler = torch.cuda.amp.GradScaler()
 
         # for debugging
-        self.train_datalists = [train_datalists,#[0:100], 
-                                train_datalists,#[100:200],
-                                train_datalists,#[200:300],
-                                train_datalists,#[300:400],
-                                train_datalists,#[400:500],
-                                train_datalists,
-                                train_datalists,
-                                ]
-
-        # FIXME
-        self.test_datalists = [test_datalists, test_datalists, test_datalists, test_datalists]
+        # self.train_datalists = [train_datalists,#[0:100], 
+        #                         train_datalists,#[100:200],
+        #                         train_datalists,#[200:300],
+        #                         train_datalists,#[300:400],
+        #                         train_datalists,#[400:500],
+        #                         train_datalists,
+        #                         train_datalists,
+        #                         ]
+        self.train_datalists = train_datalists
+        self.test_datalists = test_datalists
+        # self.test_datalists = [test_datalists, test_datalists, test_datalists, test_datalists]
         # preprocess test datalist into dataloader
         # self.test_datalists = []
         # for test_datalist in test_datalists:
@@ -143,7 +143,6 @@ class CLManagerServer: # == SERVER
 
         # self.train_datalists = train_datalists
         # self.test_datalists = test_datalists
-        self.cls_dict = {}
         # self.total_samples = len(self.train_datalist)
 
         self.future_sample_num = 0
@@ -152,7 +151,7 @@ class CLManagerServer: # == SERVER
 
         self.note = kwargs['note']
         self.rnd_seed = kwargs['seed']
-        self.save_path = f'results/{self.dataset}/{self.note}/seed_{self.rnd_seed}'
+        # self.save_path = f'results/{self.dataset}/{self.note}/seed_{self.rnd_seed}'
         self.f_period = kwargs['f_period']
         self.f_next_time = 0
         self.start_time = time.time()
@@ -166,7 +165,7 @@ class CLManagerServer: # == SERVER
 
         # federated learning
         self.num_clients = kwargs["num_clients"]
-        self.frac_clients = 0.5
+        self.frac_clients = 1.0#0.5
         self.num_rounds = kwargs["num_rounds"] # num of federated learning round
         self.n_gpu = kwargs["n_gpu"] # first one is for server
 
@@ -182,7 +181,7 @@ class CLManagerServer: # == SERVER
         self.tokenizer = tokenizer
         self.data_args = data_args
 
-        max_steps = 10000 # FIXME
+        max_steps = 1000 # FIXME
         self.create_optimizer()
         self.create_scheduler(max_steps, optimizer=self.optimizer)
 
@@ -199,22 +198,21 @@ class CLManagerServer: # == SERVER
         for curr_round in range(self.num_rounds):
             # clients turn
             cids = np.arange(self.num_clients).tolist()
-            num_selection = 4#int(round(self.num_clients*self.frac_clients))
-            selected_ids = [0,1,2,3]#random.sample(cids, num_selection)
+            num_selection = int(round(self.num_clients*self.frac_clients)) #4#
+            selected_ids = sorted(random.sample(cids, num_selection)) #[0,1,2,3]#
+            print(f"Round {curr_round} | selected_ids: {selected_ids}")
             # selected_ids = cids
-            id_idx = 0
-            for send_queue in self.send_channel:
-                client_id = selected_ids[id_idx]
-                print(f"add queue about client {client_id}")
+            for idx in range(num_selection):
+                send_queue = self.send_channel[idx % len(self.send_channel)]
+            # for send_queue in self.send_channel:
+                client_id = selected_ids[idx]
                 send_queue.put({
                     'client_id':client_id,
                     'curr_round':curr_round,
                     'train_datalist':self.train_datalists[client_id],
-                    'test_datalist':self.test_datalists,
+                    'test_datalist':self.test_datalists[client_id],
                     'server_msg':self.server_msg(),
                 })
-                id_idx += 1
-                if id_idx == len(selected_ids): break
             received_data_from_clients = 0
             
             while True:
@@ -223,14 +221,12 @@ class CLManagerServer: # == SERVER
                 except queue.Empty:
                     continue
                 if r:
-                    # FIXME:server side work
                     self.handle_msg_per_client(r)
                     
                     received_data_from_clients+=1
-                if received_data_from_clients == num_selection:
-                    break
-            
-            # FIXME:server-side work 
+                    if received_data_from_clients == num_selection:
+                        break
+
             self.do_server_work()
         
         print("total done")
@@ -361,94 +357,21 @@ class CLManagerServer: # == SERVER
             )
             self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, SCHEDULER_NAME)))
 
-    # Memory 새로 정의 (not MemoryBase)
-    def initialize_future(self):
-        self.data_stream = iter(self.train_datalist)
-        self.dataloader = MultiProcessLoader(self.n_worker, self.cls_dict, self.train_transform, self.data_dir, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker,
-                                             tokenizer=self.tokenizer, data_args=self.data_args)
-        self.memory = MemoryBase(self.memory_size)
-
-        self.memory_list = []
-        self.temp_batch = []
-        self.temp_future_batch = []
-        self.num_updates = 0
-        self.future_num_updates = 0
-        self.train_count = 0
-        self.seen = 0
-        self.future_sample_num = 0
-        self.future_sampling = True
-        self.future_retrieval = True
-
-        self.waiting_batch = []
-        # 미리 future step만큼의 batch를 load
-        for i in range(self.future_steps):
-            self.load_batch()
-
-    def memory_future_step(self):
-        try:
-            sample = next(self.data_stream)
-        except:
-            return 1
-        # if sample["klass"] not in self.memory.cls_list:
-        #     self.memory.add_new_class(sample["klass"])
-        #     self.dataloader.add_new_class(self.memory.cls_dict)
-            
-        if sample["time"] not in self.exposed_domains and "clear" in self.dataset:
-            self.exposed_domains.append(sample["time"])
-            
-        self.temp_future_batch.append(sample)
-        self.future_num_updates += self.online_iter
-
-        if len(self.temp_future_batch) >= self.temp_batch_size:
-            self.generate_waiting_batch(int(self.future_num_updates))
-            for stored_sample in self.temp_future_batch:
-                self.update_memory(stored_sample)
-            self.temp_future_batch = []
-            self.future_num_updates -= int(self.future_num_updates)
-        self.future_sample_num += 1
-        return 0
-
-    def update_memory(self, sample):
-        pass
-
-    # loader로부터 load된 batch를 받아오는 것
-    def get_batch(self):
-        batch = self.dataloader.get_batch()
-        self.load_batch()
-        return batch
-
-    # stream 또는 memory를 활용해서 batch를 load해라
-    # data loader에 batch를 전달해주는 함수
-    def load_batch(self):
-        stream_end = False
-        while len(self.waiting_batch) == 0:
-            stream_end = self.memory_future_step()
-            if stream_end:
-                break
-        if not stream_end:
-            self.dataloader.load_batch(self.waiting_batch[0])
-            del self.waiting_batch[0]
-
-    def generate_waiting_batch(self, iterations):
-        for i in range(iterations):
-            self.waiting_batch.append(self.temp_future_batch + self.memory.retrieval(self.memory_batch_size))
-
-
     def report_training(self, sample_num, train_loss):
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         # writer.add_scalar(f"train/acc", train_acc, sample_num)
         # print(
         print(
-            f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
+            f"Server Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
         )
 
-    def report_test(self, idx, scores):
+    def report_test(self, dataset_name, scores):
         # writer.add_scalar(f"test/loss", scores["loss"], sample_num)
         # writer.add_scalar(f"test/precision", scores["precision"], sample_num)
         print(
-            f"Test (Server) | test_data idx # {idx} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
+            f"Test (Server) | data {dataset_name} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
     
     def _prepare_input(self, data):
@@ -493,8 +416,9 @@ class CLManagerServer: # == SERVER
 
         return (loss, outputs) if return_outputs else loss
 
-    def evaluate(self, idx, test_datalist):
-        dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, self.dataset, preprocess=True)
+    def evaluate(self, test_datalist, dataset_name):
+        print(f"server evaluate {dataset_name}")
+        dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
         dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         
         self.model.eval()
@@ -504,7 +428,7 @@ class CLManagerServer: # == SERVER
         n_word_correct = 0
         cnt = 0
         with torch.no_grad():
-            for i, batch in enumerate(tqdm(dataloader)):
+            for i, batch in enumerate((dataloader)):
                 # * prepare data
                 input_labels = batch['labels']
                 batch = self._prepare_inputs(batch)
@@ -541,7 +465,7 @@ class CLManagerServer: # == SERVER
         scores["precision"] = n_word_correct / n_word_total
         scores["loss"] = total_loss / cnt
                 
-        self.report_test(idx, scores)
+        self.report_test(dataset_name, scores)
         
         return predictions
 

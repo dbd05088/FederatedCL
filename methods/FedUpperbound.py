@@ -16,7 +16,9 @@ class FedUpperbound_server(CLManagerServer):
         state_dict = OrderedDict()
         for name, module in self.model.named_modules():
             if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
-                state_dict.update(module.state_dict().cpu())
+                state_dict.update(module.state_dict())
+        for k, v in state_dict.items():
+            state_dict[k] = v.cpu()
         return state_dict
     
     def handle_msg_per_client(self, msg):
@@ -25,7 +27,7 @@ class FedUpperbound_server(CLManagerServer):
         self.client_data.extend(msg)
     
     def do_server_work(self):
-        dataset = LazySupervisedDataset(self.client_data, self.tokenizer, self.data_args, self.dataset)
+        dataset = LazySupervisedDataset(self.client_data, self.tokenizer, self.data_args)
         dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         self.total_samples = len(dataloader)
         

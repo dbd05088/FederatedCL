@@ -13,14 +13,16 @@ import transformers
 from utils.data_loader import get_test_datalist
 from utils.data_loader import get_train_datalist
 
-from utils.method_manager_new import select_method
-from methods.cl_manager_server import CLManagerServer
-from methods.cl_manager_client import CLManagerClient
+from utils.method_manager_llava import select_method
 
 from utils.train_utils import get_llavamodel
 from torch import multiprocessing
 import copy
 import torch.distributed as dist
+
+import warnings
+warnings.filterwarnings('ignore')
+
 def main():
     # args = config.base_parser()
 
@@ -52,9 +54,9 @@ def main():
     logging.config.fileConfig("./configuration/logging.conf")
     logger = logging.getLogger()
 
-    os.makedirs(f"results/{training_args.dataset}/{training_args.note}", exist_ok=True)
-    os.makedirs(f"tensorboard/{training_args.dataset}/{training_args.note}", exist_ok=True)
-    fileHandler = logging.FileHandler(f'results/{training_args.dataset}/{training_args.note}/seed_{training_args.seed}.log', mode="w")
+    os.makedirs(f"results/{training_args.mode}/{training_args.note}", exist_ok=True)
+    os.makedirs(f"tensorboard/{training_args.mode}/{training_args.note}", exist_ok=True)
+    fileHandler = logging.FileHandler(f'results/{training_args.mode}/{training_args.note}/seed_{training_args.seed}.log', mode="w")
 
     formatter = logging.Formatter(
         "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
@@ -84,10 +86,9 @@ def main():
     # print("args.dataset", training_args.dataset, "num_samples", num_samples[training_args.dataset])
     # train_datalist, cls_dict, cls_addition = get_train_datalist(training_args.dataset, training_args.sigma, training_args.repeat, training_args.init_cls, training_args.seed)
     # test_datalist = get_test_datalist(training_args.dataset)
-    train_datalist = get_train_datalist(training_args.dataset)
-    test_datalist = get_test_datalist(training_args.dataset)
-    print(len(train_datalist))
-    print(len(test_datalist))
+    # train_datalist = get_train_datalist(training_args.dataset)
+    # test_datalist = get_test_datalist(training_args.dataset)
+    train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     samples_cnt = 0
 
     # FIXME
@@ -97,11 +98,11 @@ def main():
     # test_datalist = None
 
     # Reduce datalist in Debug mode
-    if training_args.debug:
-        random.shuffle(train_datalist)
-        train_datalist = train_datalist[:5000]
-        random.shuffle(test_datalist)
-        test_datalist = test_datalist[:2000]
+    # if training_args.debug:
+    #     random.shuffle(train_datalist)
+    #     train_datalist = train_datalist[:5000]
+    #     random.shuffle(test_datalist)
+    #     test_datalist = test_datalist[:2000]
 
     # create folder
     if not os.path.exists(training_args.state_dir):
@@ -116,11 +117,13 @@ def main():
     server2client_queues = [
         multiprocessing.Queue() for _ in range(1, num_process)
     ]
+    
+    server, client = select_method(training_args.mode)
 
     server_rank = 0
-    server = CLManagerServer(
-                train_datalists=train_datalist,
-                test_datalists=test_datalist,
+    server = server(
+                train_datalists=train_datalists,
+                test_datalists=test_datalists,
                 device=device,
                 data_args=data_args,
                 model_args=model_args,
@@ -149,7 +152,7 @@ def main():
         device = torch.device(f"cuda:{rank}")
         args_copied.device = device
         bnb_model_from_pretrained_args_copied['device_map'] = {"":args_copied.device}
-        client_runner = CLManagerClient(
+        client_runner = client(
             rank,
             device,
             data_args,
@@ -182,6 +185,25 @@ def run(rank, world_size, master_addr, master_port, runner):
     # server process
     runner.setup()
     runner.run()
+    
+import json
+def get_datalists(args, scenario_num):
+    with open(f"./scenarios/scenario-{scenario_num}.json") as fp:
+        scenario = json.load(fp)
+    assert args.num_clients == len(scenario)
+    
+    train_datalists = {}
+    test_datalists = {}
+    
+    for data in scenario:
+        with open(f"./scenarios/{data['dataset']}-{str(data['subset_id'])}.json") as fp:
+            datalist = json.load(fp)
+        train_datalists[data['client_id']] = datalist
+        
+        test_datalist = get_test_datalist(data['dataset'])
+        test_datalists[data['client_id']] = {data['dataset']:test_datalist}
+    
+    return train_datalists, test_datalists
 
 if __name__ == "__main__":
     main()

@@ -80,7 +80,7 @@ class CLManagerClient: # Client
         self.lr_scheduler = None
         self.task_id = 0
         self.method_name = kwargs["mode"]
-        self.dataset = kwargs["dataset"]
+        # self.dataset = kwargs["dataset"]
         # self.samples_per_task = kwargs["samples_per_task"]
         self.memory_size = kwargs["memory_size"]
         self.online_iter = kwargs["online_iter"]
@@ -101,7 +101,7 @@ class CLManagerClient: # Client
 
         # self.data_dir = kwargs["data_dir"]
         # if self.data_dir is None:
-        self.data_dir = os.path.join("dataset", self.dataset, 'images')
+        # self.data_dir = os.path.join("dataset", self.dataset, 'images')
         self.n_worker = kwargs["dataloader_num_workers"]
         self.future_steps = kwargs["future_steps"]
         # self.transform_on_gpu = kwargs["transform_on_gpu"]
@@ -141,7 +141,7 @@ class CLManagerClient: # Client
 
         self.note = kwargs['note']
         self.rnd_seed = kwargs['seed']
-        self.save_path = f'results/{self.dataset}/{self.note}/seed_{self.rnd_seed}'
+        # self.save_path = f'results/{self.dataset}/{self.note}/seed_{self.rnd_seed}'
         self.f_next_time = 0
         self.start_time = time.time()
         # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281167}
@@ -165,7 +165,7 @@ class CLManagerClient: # Client
         self.tokenizer = tokenizer
         self.data_args = data_args
 
-        max_steps = 10000 # FIXME
+        max_steps = 1000 # FIXME
         self.create_optimizer()
         self.create_scheduler(max_steps, optimizer=self.optimizer)
 
@@ -412,7 +412,8 @@ class CLManagerClient: # Client
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
             if self.state['sample_cnt'] % self.eval_period == 0:
-                self.evaluate(test_datalist)
+                for dataname, datalist in test_datalist.items():
+                    self.evaluate(dataname, datalist)
 
             #     eval_dict = self.online_evaluate(test_datalist, self.state['sample_cnt'], 512, self.args.dataloader_num_workers, cls_dict,
             #                                     cls_addition, data["time"])
@@ -430,7 +431,7 @@ class CLManagerClient: # Client
     def initialize_future(self, train_datalist):
         # print('start_init_future')
         self.data_stream = iter(train_datalist)
-        self.dataloader = MultiProcessLoader(self.n_worker, self.data_dir, self.device, tokenizer=self.tokenizer, data_args=self.data_args)
+        self.dataloader = MultiProcessLoader(self.n_worker, self.device, tokenizer=self.tokenizer, data_args=self.data_args)
         self.memory = MemoryBase(self.memory_size)
 
         # self.memory_list = []
@@ -614,23 +615,24 @@ class CLManagerClient: # Client
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
         )
 
-    def report_test(self, sample_num, scores):
+    def report_test(self, sample_num, scores, dataname):
         writer.add_scalar(f"test/loss", scores["loss"], sample_num)
         writer.add_scalar(f"test/precision", scores["precision"], sample_num)
         print(
-            f"Test (Client id {self.state['client_id']}) | Sample # {sample_num} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
+            f"Test (Client id {self.state['client_id']}) | Sample # {sample_num} | Data {dataname} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
 
-    def update_schedule(self, reset=False):
-        if reset:
-            self.scheduler = select_scheduler(self.sched_name, self.optimizer)
-            for param_group in self.optimizer.param_groups:
-                param_group["lr"] = self.lr
-        else:
-            self.scheduler.step()
+    # def update_schedule(self, reset=False):
+    #     if reset:
+    #         self.scheduler = select_scheduler(self.sched_name, self.optimizer)
+    #         for param_group in self.optimizer.param_groups:
+    #             param_group["lr"] = self.lr
+    #     else:
+    #         self.scheduler.step()
 
-    def evaluate(self, test_datalist):
-        dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, self.dataset, preprocess=True)
+    def evaluate(self, dataname, test_datalist):
+        print(f"client {self.state['client_id']} evaluate {dataname}")
+        dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
         dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         
         self.model.eval()
@@ -640,7 +642,7 @@ class CLManagerClient: # Client
         n_word_correct = 0
         cnt = 0
         with torch.no_grad():
-            for i, batch in enumerate(tqdm(dataloader)):
+            for i, batch in enumerate((dataloader)):
                 # * prepare data
                 input_labels = batch['labels']
                 batch = self._prepare_inputs(batch)
@@ -677,7 +679,7 @@ class CLManagerClient: # Client
         scores["precision"] = n_word_correct / n_word_total
         scores["loss"] = total_loss / cnt
                 
-        self.report_test(self.state['sample_cnt'], scores)
+        self.report_test(self.state['sample_cnt'], scores, dataname)
         
         return predictions
     
@@ -743,39 +745,3 @@ class MemoryBase:
         mem_state = np.load(path).item()
         self.images = mem_state['images']
         self.labels = mem_state['labels']
-
-def get_mm_adapter_state_maybe_zero_3(named_params, keys_to_match):
-    to_return = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
-    to_return = {k: maybe_zero_3(v, ignore_status=True, name=k).cpu() for k, v in to_return.items()}
-    return to_return
-
-def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                print(name, 'no ignore status')
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
-
-from transformers.utils import is_peft_available
-import importlib.metadata
-from packaging import version
-
-if is_peft_available():
-    from peft import PeftModel
-
-def _is_peft_model(model):
-    if is_peft_available():
-        classes_to_check = (PeftModel,) if is_peft_available() else ()
-        # Here we also check if the model is an instance of `PeftMixedModel` introduced in peft>=0.7.0: https://github.com/huggingface/transformers/pull/28321
-        if version.parse(importlib.metadata.version("peft")) >= version.parse("0.7.0"):
-            from peft import PeftMixedModel
-
-            classes_to_check = (*classes_to_check, PeftMixedModel)
-        return isinstance(model, classes_to_check)
-    return False

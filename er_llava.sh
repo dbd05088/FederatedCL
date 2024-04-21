@@ -1,9 +1,8 @@
 #/bin/bash
 
 # CIL CONFIG
-NOTE="er_test" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="er"
-DATASET="AQUA" # cifar10, cifar100, tinyimagenet, imagenet
+NOTE="fedavg" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="fedavg"
 SIGMA=10
 REPEAT=1
 INIT_CLS=100
@@ -14,28 +13,8 @@ SEEDS="1"
 # if [ "$DATASET" == "cifar10" ]; then
 MEM_SIZE=50000 ONLINE_ITER=1
 MODEL_NAME="resnet18" EVAL_PERIOD=100
-BATCHSIZE=32; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
+BATCHSIZE=16; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
 
-#adamw_bnb_8bit
-# elif [ "$DATASET" == "cifar100" ]; then
-#     MEM_SIZE=2000 ONLINE_ITER=3
-#     MODEL_NAME="resnet18" EVAL_PERIOD=100
-#     BATCHSIZE=16; LR=3e-4 OPT_NAME="adamw_torch" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
-
-# elif [ "$DATASET" == "tinyimagenet" ]; then
-#     MEM_SIZE=4000 ONLINE_ITER=3
-#     MODEL_NAME="resnet18" EVAL_PERIOD=100
-#     BATCHSIZE=32; LR=3e-4 OPT_NAME="adamw_torch" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
-
-# elif [ "$DATASET" == "imagenet" ]; then
-#     MEM_SIZE=1281167 ONLINE_ITER=0.03125
-#     MODEL_NAME="resnet18" EVAL_PERIOD=1000
-#     BATCHSIZE=1024; LR=3e-4 OPT_NAME="adamw_torch" SCHED_NAME="default" IMP_UPDATE_PERIOD=10
-
-# else
-#     echo "Undefined setting"
-#     exit 1
-# fi
 
 for RND_SEED in $SEEDS
 do
@@ -43,7 +22,6 @@ do
     --bf16 True \
     --tf32 True \
     --mode $MODE --dataloader_num_workers 4 \
-    --dataset $DATASET \
     --sigma $SIGMA --repeat $REPEAT --init_cls $INIT_CLS \
     --memory_size $MEM_SIZE \
     --seed $RND_SEED \
@@ -52,7 +30,7 @@ do
     --per_device_eval_batch_size $BATCHSIZE \
     --online_iter $ONLINE_ITER \
     --note $NOTE --eval_period $EVAL_PERIOD \
-    --output_dir "./nohup"
+    --output_dir "./nohup" > ./nohup/fedavg_bs16.log 2>&1 &
 done
 
     # --deepspeed ./deepspeed_script/zero3.json \
