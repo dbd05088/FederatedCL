@@ -19,20 +19,18 @@ class LazySupervisedDataset(Dataset):
     def __init__(self, datalist,
                  tokenizer,
                  data_args,
-                 data_dir,
                  preprocess=False):
         super(LazySupervisedDataset, self).__init__()
 
         self.tokenizer = tokenizer
         self.datalist = datalist
         self.data_args = data_args
-        self.data_dir = os.path.join("dataset", data_dir, 'images')
         self.preprocess = preprocess
         if preprocess:
             self.images = []
             for data in self.datalist:
                 image_file = data['image']
-                image = Image.open(os.path.join(self.data_dir, image_file)).convert('RGB')
+                image = Image.open(image_file).convert('RGB')
                 self.images.append(image)
 
     def __len__(self):
@@ -49,7 +47,7 @@ class LazySupervisedDataset(Dataset):
                 image = self.images[i]
             else:
                 image_file = self.datalist[i]['image']
-                image = Image.open(os.path.join(self.data_dir, image_file)).convert('RGB')
+                image = Image.open(image_file).convert('RGB')
             if self.data_args.image_aspect_ratio == 'pad':
                 def expand2square(pil_img, background_color):
                     width, height = pil_img.size

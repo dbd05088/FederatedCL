@@ -30,7 +30,7 @@ import queue
 TIMEOUT = 5.0
 
 class MultiProcessLoader():
-    def __init__(self, n_workers, data_dir, device='cpu', init=True, tokenizer=None, data_args=None):
+    def __init__(self, n_workers, device='cpu', init=True, tokenizer=None, data_args=None):
         self.n_workers = n_workers
         self.device = device
         self.result_queues = []
@@ -38,14 +38,14 @@ class MultiProcessLoader():
         self.index_queues = []
         self.tokenizer = tokenizer
         self.data_args = data_args
-        self.data_dir = data_dir
+        # self.data_dir = data_dir
         if init:
             for i in range(self.n_workers):
                 index_queue = multiprocessing.Queue()
                 index_queue.cancel_join_thread()
                 result_queue = multiprocessing.Queue()
                 result_queue.cancel_join_thread()
-                w = multiprocessing.Process(target=worker_loop_multimodal, args=(index_queue, result_queue, data_dir, self.device, self.tokenizer, self.data_args))
+                w = multiprocessing.Process(target=worker_loop_multimodal, args=(index_queue, result_queue, self.device, self.tokenizer, self.data_args))
                 # w = multiprocessing.Process(target=worker_loop, args=(index_queue, result_queue, data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, use_kornia, transform_on_worker))
                 w.daemon = True
                 w.start()
@@ -160,7 +160,7 @@ class MultiProcessLoader():
         for i, samples in enumerate(state_dict['result_queues']):
             if samples:
                 # self.result_queues[i].put(worker(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker))
-                self.result_queues[i].put(worker_multimodal(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker, tokenizer=self.tokenizer, data_args=self.data_args))
+                self.result_queues[i].put(worker_multimodal(samples, self.device, tokenizer=self.tokenizer, data_args=self.data_args))
         for i, samples in enumerate(state_dict['index_queues']):
             if samples:
                 self.index_queues[i].put(samples)

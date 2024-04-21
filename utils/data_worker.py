@@ -198,7 +198,7 @@ def worker(r, data_dir, transform, transform_on_gpu=False, cpu_transform=None, d
         return None
 
 @torch.no_grad()
-def worker_multimodal(r, data_dir, device='cpu', scl=False, tokenizer=None, data_args=None):
+def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
     data = dict()
     images = []
     input_ids = []
@@ -209,7 +209,7 @@ def worker_multimodal(r, data_dir, device='cpu', scl=False, tokenizer=None, data
             processor = data_args.image_processor
             if 'image' in sample:
                 image_file = sample['image']
-                image = Image.open(os.path.join(data_dir, image_file)).convert('RGB')
+                image = Image.open(image_file).convert('RGB')
                 if data_args.image_aspect_ratio == 'pad':
                     def expand2square(pil_img, background_color):
                         width, height = pil_img.size
@@ -264,7 +264,7 @@ from utils.data_loader_llava import preprocess_multimodal, preprocess_text
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 
 @torch.no_grad()
-def worker_loop_multimodal(index_queue, data_queue, data_dir, device='cpu', tokenizer=None, data_args=None):
+def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None, data_args=None):
     torch.set_num_threads(1)
     watchdog = ManagerWatchdog()
     while watchdog.is_alive():
@@ -283,7 +283,7 @@ def worker_loop_multimodal(index_queue, data_queue, data_dir, device='cpu', toke
             for sample in r:
                 if 'image' in sample:
                     image_file = sample['image']
-                    image = Image.open(os.path.join(data_dir, image_file)).convert('RGB')
+                    image = Image.open(image_file).convert('RGB')
                     if data_args.image_aspect_ratio == 'pad':
                         def expand2square(pil_img, background_color):
                             width, height = pil_img.size

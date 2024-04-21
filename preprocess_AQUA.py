@@ -30,24 +30,20 @@ def process_and_save(dataset, output_folder, subset_name):
     # Process and save images and labels
     for item in dataset:
         # Load image if it's a URL or a file path
-        if isinstance(item['image'], str):
-            # response = requests.get(item['image'])
-            image = Image.open(f"./dataset/AQUA/Images/{item['image']}")
-            # image = Image.open(BytesIO(response.content))
-        else:
-            image = item['image']  # Assuming it's a PIL.Image object
-
-
-        # Create a unique ID for each image
-        unique_id = str(uuid.uuid4())
+        # if isinstance(item['image'], str):
+        #     # response = requests.get(item['image'])
+        #     image = Image.open(f"./dataset/AQUA/images/{item['image']}")
+        #     # image = Image.open(BytesIO(response.content))
+        # else:
+        #     image = item['image']  # Assuming it's a PIL.Image object
 
 
         # Define image path
-        image_path = os.path.join(image_subfolder, f"{unique_id}.jpg")
+        image_path = os.path.join(image_subfolder, f"{item['image']}")
 
 
         # Save image
-        image.save(image_path)
+        # image.save(image_path)
 
 
         # Remove duplicates and format answers
@@ -58,8 +54,8 @@ def process_and_save(dataset, output_folder, subset_name):
 
         # Structure for LLaVA JSON
         json_data = {
-            "id": unique_id,
-            "image": f"{unique_id}.jpg",
+            "id": item['image'],
+            "image": image_path,
             "conversations": [
                 {
                     "from": "human",
@@ -109,7 +105,7 @@ def save_dataset(dataset_name, output_folder):
         test_dataset = json.load(fp)
 
     # Process and save the datasets
-    for subset, data in [('test', test_dataset)]: #('train', train_dataset), ('validation', val_dataset), 
+    for subset, data in [('test', test_dataset), ('train', train_dataset), ('validation', val_dataset), ]:
         if data:
             process_and_save(data, output_folder, subset)
 
