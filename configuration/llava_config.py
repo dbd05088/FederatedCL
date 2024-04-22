@@ -75,7 +75,7 @@ class TrainingArguments(transformers.TrainingArguments):
     # per_device_eval_batch_size
     # per_device_eval_batch_size
     # learning_rate
-    temp_batchsize: int = field(default=2)
+    temp_batchsize: int = field(default=1)
     # seed
     # tf32
 

@@ -12,8 +12,8 @@ SEEDS="1"
 
 # if [ "$DATASET" == "cifar10" ]; then
 MEM_SIZE=50000 ONLINE_ITER=1
-MODEL_NAME="resnet18" EVAL_PERIOD=100
-BATCHSIZE=16; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
+MODEL_NAME="resnet18" EVAL_PERIOD=200
+BATCHSIZE=2; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
 
 
 for RND_SEED in $SEEDS
@@ -21,7 +21,7 @@ do
     CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_llava.py \
     --bf16 True \
     --tf32 True \
-    --mode $MODE --dataloader_num_workers 4 \
+    --mode $MODE --dataloader_num_workers 1 \
     --sigma $SIGMA --repeat $REPEAT --init_cls $INIT_CLS \
     --memory_size $MEM_SIZE \
     --seed $RND_SEED \

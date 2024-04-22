@@ -33,7 +33,7 @@ import glob
 from utils.data_worker import ManagerWatchdog
 
 from utils.eval_metrics import NLPEvaluator
-from models.llava.constants import IGNORE_INDEX
+from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 from tqdm import tqdm
 
 OPTIMIZER_NAME = "optimizer.pt"
@@ -424,7 +424,7 @@ class CLManagerServer: # == SERVER
     def evaluate(self, test_datalist, dataset_name):
         self.logger.write(f"server evaluate {dataset_name}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
-        dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        dataloader = DataLoader(dataset, batch_size= 8, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         
         self.model.eval()
         predictions = []
@@ -435,6 +435,7 @@ class CLManagerServer: # == SERVER
         with torch.no_grad():
             for i, batch in enumerate((dataloader)):
                 # * prepare data
+                inputs = batch['input_ids']
                 input_labels = batch['labels']
                 batch = self._prepare_inputs(batch)
                 
@@ -445,12 +446,16 @@ class CLManagerServer: # == SERVER
                 # * keep logs
                 n_correct = 0
                 n_word = 0
-                for pred, gold in zip(pred_scores_list, input_labels):
+                for inp, pred, gold in zip(inputs, pred_scores_list, input_labels):
                     valid_label_mask = gold.ne(IGNORE_INDEX)
                     valid_idx = valid_label_mask.nonzero()[0].item()
                     
                     n_word += valid_label_mask.sum()
                     pred_id = torch.argmax(pred, dim=1).cpu()#.to(device)
+                    
+                    # image token index
+                    img_token_index = (inp==IMAGE_TOKEN_INDEX).nonzero()[0].item()
+                    pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+576:]))
                     
                     pred_correct_mask = pred_id.eq(gold)
                     n_correct += pred_correct_mask.masked_select(valid_label_mask).sum()
