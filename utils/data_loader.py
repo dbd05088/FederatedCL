@@ -155,7 +155,7 @@ class MultiProcessLoader():
         np.save(os.path.join(save_dir, f"{client_id}_client_dataloaderstate.npy"), state_dict)
 
     def load_state(self, client_id, load_dir):
-        state_dict = np.load(os.path.join(load_dir, f"{client_id}_client_dataloaderstate.npy"))
+        state_dict = np.load(os.path.join(load_dir, f"{client_id}_client_dataloaderstate.npy"), allow_pickle=True).item()
         
         for i, samples in enumerate(state_dict['result_queues']):
             if samples:

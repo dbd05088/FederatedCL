@@ -324,7 +324,7 @@ class CLManagerClient: # Client
         else: # load_state
             if client_id != self.state['client_id']:
                 print(f"load client {client_id}")
-                trainer_state = np.load(os.path.join(self.args.state_dir, '{}_client_trainerstate.npy'.format(client_id))).item()
+                trainer_state = np.load(os.path.join(self.args.state_dir, '{}_client_trainerstate.npy'.format(client_id)), allow_pickle=True).item()
                 self.state['client_id'] = trainer_state['client_id']
                 self.state['sample_cnt'] = trainer_state['sample_cnt']
                 self.state['round_cnt'] = trainer_state['round_cnt']
@@ -742,6 +742,6 @@ class MemoryBase:
 
     def load_state(self, client_id, load_dir):
         path = os.path.join(load_dir, f"{client_id}_client_memory.npy")
-        mem_state = np.load(path).item()
+        mem_state = np.load(path, allow_pickle=True).item()
         self.images = mem_state['images']
         self.labels = mem_state['labels']
