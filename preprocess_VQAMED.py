@@ -22,18 +22,18 @@ def process_and_save(dataset_dir, output_folder, subset_name):
     json_data_list = []
 
     # move img files
-    if subset_name == 'train':
-        img_file_list = open(os.path.join(output_folder, dataset_dir,'train_ImageIDs.txt'))
-    elif subset_name == 'validation':
-        img_file_list = open(os.path.join(output_folder, dataset_dir,'val_ImageIDs.txt'))
-    img_files = img_file_list.readlines()
-    img_file_list.close()
+    # if subset_name == 'train':
+    #     img_file_list = open(os.path.join(output_folder, dataset_dir,'train_ImageIDs.txt'))
+    # elif subset_name == 'validation':
+    #     img_file_list = open(os.path.join(output_folder, dataset_dir,'val_ImageIDs.txt'))
+    # img_files = img_file_list.readlines()
+    # img_file_list.close()
     
-    for i in range(len(img_files)):
-        imgname = img_files[i][:-1] if i < len(img_files) - 1 else img_files[i]
-        cur_path = os.path.join(img_folder, imgname + '.jpg')
-        new_path = os.path.join(output_folder,'images',imgname+'.jpg')
-        shutil.copyfile(cur_path, new_path)
+    # for i in range(len(img_files)):
+    #     imgname = img_files[i][:-1] if i < len(img_files) - 1 else img_files[i]
+    #     cur_path = os.path.join(img_folder, imgname + '.jpg')
+    #     new_path = os.path.join(output_folder,'images',imgname+'.jpg')
+    #     shutil.copyfile(cur_path, new_path)
     
     for i in range(len(qa_list)):
         qa_line = qa_list[i]
@@ -51,7 +51,7 @@ def process_and_save(dataset_dir, output_folder, subset_name):
             "conversations": [
                 {
                     "from": "human",
-                    "value": input_q
+                    "value": "<image>\n" + input_q
                 },
                 {
                     "from": "gpt",

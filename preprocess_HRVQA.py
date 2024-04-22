@@ -33,7 +33,7 @@ def process_and_save(dataset, output_folder, subset_name):
             "conversations": [
                 {
                     "from": "human",
-                    "value": input_q
+                    "value": "<image>\n" + input_q
                 },
                 {
                     "from": "gpt",
