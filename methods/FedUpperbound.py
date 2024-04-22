@@ -11,15 +11,10 @@ class FedUpperbound_server(CLManagerServer):
         super().setup()
         
         self.client_data = []
+        self.state_dict = None
     
     def server_msg(self):
-        state_dict = OrderedDict()
-        for name, module in self.model.named_modules():
-            if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
-                state_dict.update(module.state_dict())
-        for k, v in state_dict.items():
-            state_dict[k] = v.cpu()
-        return state_dict
+        return self.state_dict
     
     def handle_msg_per_client(self, msg):
         assert isinstance(msg, list)
@@ -42,8 +37,20 @@ class FedUpperbound_server(CLManagerServer):
             
             self.report_training(i, loss)
         
+        state_dict = OrderedDict()
+        for name, module in self.model.named_modules():
+            if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
+                state_dict.update(module.state_dict())
+        for k, v in state_dict.items():
+            state_dict[k] = v.cpu()
+        self.state_dict = state_dict
+        
+        eval_keys = []
         for i in range(len(self.test_datalists)):
-            self.evaluate(i, self.test_datalists[i])
+            for name, datalist in self.test_datalists[i].items():
+                if name not in eval_keys:
+                    self.evaluate(datalist, name)
+                    eval_keys.append(name)
         
 class FedUpperbound_client(CLManagerClient): 
     def setup(self):
@@ -59,7 +66,7 @@ class FedUpperbound_client(CLManagerClient):
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 1000
+        samples_per_round = 800
 
         seen_so_far = self.state['sample_cnt']
         
@@ -73,12 +80,14 @@ class FedUpperbound_client(CLManagerClient):
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
             if self.state['sample_cnt'] % self.eval_period == 0:
-                self.evaluate(test_datalist, 128, self.n_worker)
+                for dataname, datalist in test_datalist.items():
+                    self.evaluate(dataname, datalist)
 
         self.save_state()
     
     def handle_server_msg(self, server_msg):
-        assert isinstance(server_msg, OrderedDict)
+        if not isinstance(server_msg, OrderedDict):
+            return
         
         self.model.load_state_dict(server_msg, strict=False)
         self.train_data = []

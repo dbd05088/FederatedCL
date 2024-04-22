@@ -194,13 +194,16 @@ class CLManagerServer: # == SERVER
 
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)
 
+        # start log file for server
+        self.logger = open(f'./results/{self.method_name}/{self.note}/server.log', 'a')
+
     def run(self):
         for curr_round in range(self.num_rounds):
             # clients turn
             cids = np.arange(self.num_clients).tolist()
             num_selection = int(round(self.num_clients*self.frac_clients)) #4#
             selected_ids = sorted(random.sample(cids, num_selection)) #[0,1,2,3]#
-            print(f"Round {curr_round} | selected_ids: {selected_ids}")
+            self.logger.write(f"Round {curr_round} | selected_ids: {selected_ids}\n")
             # selected_ids = cids
             for idx in range(num_selection):
                 send_queue = self.send_channel[idx % len(self.send_channel)]
@@ -229,7 +232,8 @@ class CLManagerServer: # == SERVER
 
             self.do_server_work()
         
-        print("total done")
+        self.logger.write("total done\n")
+        self.logger.close()
         for send_queue in self.send_channel:
             send_queue.put("done")
         return
@@ -360,19 +364,20 @@ class CLManagerServer: # == SERVER
     def report_training(self, sample_num, train_loss):
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         # writer.add_scalar(f"train/acc", train_acc, sample_num)
-        # print(
-        print(
+        self.logger.write(
             f"Server Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
         )
+        self.logger.write("\n")
 
     def report_test(self, dataset_name, scores):
         # writer.add_scalar(f"test/loss", scores["loss"], sample_num)
         # writer.add_scalar(f"test/precision", scores["precision"], sample_num)
-        print(
+        self.logger.write(
             f"Test (Server) | data {dataset_name} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
+        self.logger.write('\n')
     
     def _prepare_input(self, data):
         """
@@ -417,7 +422,7 @@ class CLManagerServer: # == SERVER
         return (loss, outputs) if return_outputs else loss
 
     def evaluate(self, test_datalist, dataset_name):
-        print(f"server evaluate {dataset_name}")
+        self.logger.write(f"server evaluate {dataset_name}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
         dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         

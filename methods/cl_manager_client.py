@@ -156,6 +156,8 @@ class CLManagerClient: # Client
         self.total_flops = 0.0
         # self.writer = SummaryWriter(f'tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}')
         self.state = {}
+        
+        self.logger = None
 
         self.watchdog = ManagerWatchdog()
         
@@ -302,19 +304,20 @@ class CLManagerClient: # Client
     def init_model(self):
         # reinit vision tower & mm_projector of llava model
         self.model.load_state_dict(torch.load('./llava_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
-        print("done loading init llava vision tower and mm projector")
+        self.logger.write("done loading init llava vision tower and mm projector\n")
         # reset lora layers
         # model = self.model.unload()
         # self.model = get_peft_model(model, self.args.lora_config)
         for name, module in self.model.named_modules():
             if isinstance(module, LoraLayer):
                 module.reset_lora_parameters('default', True)
-        print("done reset lora layers")
+        self.logger.write("done reset lora layers\n")
 
     def is_new(self, client_id):
         return not os.path.exists(os.path.join(self.args.state_dir, f'{client_id}_client_trainerstate.npy'))
 
     def switch_state(self, client_id, train_datalist):
+        self.logger = open(f'./results/{self.method_name}/{self.note}/{client_id}_client.log', 'a')
         if self.is_new(client_id):
             # model, tokenizer, _ = get_llavamodel(training_args=self.args, model_args=self.model_args, bnb_model_from_pretrained_args={}, lora_config=self.args.lora_config)
             # print(client_id)
@@ -323,7 +326,7 @@ class CLManagerClient: # Client
             self.initialize_future(train_datalist)
         else: # load_state
             if client_id != self.state['client_id']:
-                print(f"load client {client_id}")
+                self.logger.write(f"load client {client_id}\n")
                 trainer_state = np.load(os.path.join(self.args.state_dir, '{}_client_trainerstate.npy'.format(client_id)), allow_pickle=True).item()
                 self.state['client_id'] = trainer_state['client_id']
                 self.state['sample_cnt'] = trainer_state['sample_cnt']
@@ -333,7 +336,7 @@ class CLManagerClient: # Client
                 self.waiting_batch = trainer_state['waiting_batch']
                 self.temp_batch = trainer_state['temp_batch']
 
-                self.memory.load_state(client_id)
+                self.memory.load_state(client_id, self.args.state_dir)
                 self.dataloader.load_state(client_id, self.args.state_dir)
                 self.load_model(client_id, self.args.state_dir)
     
@@ -358,6 +361,8 @@ class CLManagerClient: # Client
         torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"))
 
         self.save_model(self.state['client_id'], self.args.state_dir)
+        
+        self.logger.close()
 
     def run(self):
         while True:#self.watchdog.is_alive():
@@ -609,18 +614,20 @@ class CLManagerClient: # Client
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         # writer.add_scalar(f"train/acc", train_acc, sample_num)
         # print(
-        print(
+        self.logger.write(
             f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
         )
+        self.logger.write('\n')
 
     def report_test(self, sample_num, scores, dataname):
         writer.add_scalar(f"test/loss", scores["loss"], sample_num)
         writer.add_scalar(f"test/precision", scores["precision"], sample_num)
-        print(
+        self.logger.write(
             f"Test (Client id {self.state['client_id']}) | Sample # {sample_num} | Data {dataname} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
+        self.logger.write('\n')
 
     # def update_schedule(self, reset=False):
     #     if reset:
@@ -631,7 +638,7 @@ class CLManagerClient: # Client
     #         self.scheduler.step()
 
     def evaluate(self, dataname, test_datalist):
-        print(f"client {self.state['client_id']} evaluate {dataname}")
+        self.logger.write(f"client {self.state['client_id']} evaluate {dataname}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
         dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         
