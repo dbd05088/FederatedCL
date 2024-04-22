@@ -399,7 +399,7 @@ class CLManagerClient: # Client
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 1000
+        samples_per_round = 800
 
         seen_so_far = self.state['sample_cnt']
         

@@ -40,7 +40,7 @@ class TrainingArguments(transformers.TrainingArguments):
     # cl config
     mode: str = field(default="er")
     # dataset: str = field(default="cifar10")
-    scenario: int = field(default=1)
+    scenario: int = field(default=2)
     note: str = field(default=None)
     eval_period: int = field(default=100)
     online_iter: float = field(default=1.0)
@@ -62,8 +62,8 @@ class TrainingArguments(transformers.TrainingArguments):
 
     # federated learning
     num_clients: int = 10
-    num_rounds: int = 10
-    iter_per_round: int = 2
+    num_rounds: int = 5
+    iter_per_round: int = 1
     state_dir: str = field(default="./client_states")
 
 
