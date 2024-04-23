@@ -1,7 +1,10 @@
 import json
+import numpy as np
+import random
 
 with open("./dataset/AQUA/train/dataset.json") as fp:
     aqua = json.load(fp)
+
     
 with open("./dataset/HRVQA-1.0/train/dataset.json") as fp:
     hrvqa = json.load(fp)
@@ -14,35 +17,55 @@ print(len(hrvqa))
 print(len(vqamed))
 # breakpoint()
 
+size = 12000
+indices = np.arange(len(aqua)).tolist()
+selection = sorted(random.sample(indices, size))
+new_list = []
+for idx in selection:
+    new_list.append(aqua[idx])
 with open("./scenarios/AQUA-0.json", 'w') as json_file:
-    json.dump(aqua[:4000], json_file, indent=4)
+    json.dump(new_list[:4000], json_file, indent=4)
 
 with open("./scenarios/AQUA-1.json", 'w') as json_file:
-    json.dump(aqua[10000:14000], json_file, indent=4)
+    json.dump(new_list[4000:8000], json_file, indent=4)
     
 with open("./scenarios/AQUA-2.json", 'w') as json_file:
-    json.dump(aqua[20000:24000], json_file, indent=4)
+    json.dump(new_list[8000:12000], json_file, indent=4)
+
+size = 16000
+indices = np.arange(len(hrvqa)).tolist()
+selection = sorted(random.sample(indices, size))
+new_list = []
+for idx in selection:
+    new_list.append(hrvqa[idx])
 
 with open("./scenarios/HRVQA-1.0-0.json", 'w') as json_file:
-    json.dump(hrvqa[:4000], json_file, indent=4)
+    json.dump(new_list[:4000], json_file, indent=4)
 
 with open("./scenarios/HRVQA-1.0-1.json", 'w') as json_file:
-    json.dump(hrvqa[10000:14000], json_file, indent=4)
+    json.dump(new_list[4000:8000], json_file, indent=4)
     
 with open("./scenarios/HRVQA-1.0-2.json", 'w') as json_file:
-    json.dump(hrvqa[20000:24000], json_file, indent=4)
+    json.dump(new_list[8000:12000], json_file, indent=4)
 
 with open("./scenarios/HRVQA-1.0-3.json", 'w') as json_file:
-    json.dump(hrvqa[30000:34000], json_file, indent=4)
+    json.dump(new_list[12000:16000], json_file, indent=4)
+    
+size = 12000
+indices = np.arange(len(vqamed)).tolist()
+selection = sorted(random.sample(indices, size))
+new_list = []
+for idx in selection:
+    new_list.append(vqamed[idx])
     
 with open("./scenarios/VQA-MED-0.json", 'w') as json_file:
-    json.dump(vqamed[:4000], json_file, indent=4)
+    json.dump(new_list[:4000], json_file, indent=4)
 
 with open("./scenarios/VQA-MED-1.json", 'w') as json_file:
-    json.dump(vqamed[4000:8000], json_file, indent=4)
+    json.dump(new_list[4000:8000], json_file, indent=4)
     
 with open("./scenarios/VQA-MED-2.json", 'w') as json_file:
-    json.dump(vqamed[8000:12000], json_file, indent=4)
+    json.dump(new_list[8000:12000], json_file, indent=4)
 
 
 
