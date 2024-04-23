@@ -161,6 +161,9 @@ class CLManagerClient: # Client
 
         self.watchdog = ManagerWatchdog()
         
+        self.gradient_accumulation_steps = kwargs['gradient_accumulation_steps']
+        self.gradient_checkpointing = kwargs['gradient_checkpointing']
+        
     def setup(self):
         model, tokenizer, data_args = get_llavamodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
         self.model = model
@@ -408,6 +411,14 @@ class CLManagerClient: # Client
 
         seen_so_far = self.state['sample_cnt']
         
+        if self.gradient_checkpointing:
+            if self.args.gradient_checkpointing_kwargs is None:
+                gradient_checkpointing_kwargs = {}
+            else:
+                gradient_checkpointing_kwargs = self.args.gradient_checkpointing_kwargs
+            self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+        
+        self.optimizer.zero_grad()
         for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+samples_per_round]):
             # explicit task boundary for twf
             # if samples_cnt % training_args.samples_per_task == 0 and training_args.mode in ["bic", "xder", "der_lider", "er_lider", "xder_lider", "co2l", "trire"]:
@@ -574,7 +585,7 @@ class CLManagerClient: # Client
             # y = data["label"].to(self.device)
             self.before_model_update()
 
-            self.optimizer.zero_grad()
+            # self.optimizer.zero_grad()
 
             data = self._prepare_inputs(data)
 
@@ -582,7 +593,11 @@ class CLManagerClient: # Client
 
             # _, preds = logit.topk(self.topk, 1, True, True)
             loss.backward()
-            self.optimizer.step()
+            
+            if (self.state['sample_cnt']) % self.gradient_accumulation_steps == 0:
+                self.optimizer.step()
+                self.lr_scheduler.step()
+                self.optimizer.zero_grad()
 
             # if self.use_amp:
             #     self.scaler.scale(loss).backward()
@@ -614,12 +629,13 @@ class CLManagerClient: # Client
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         # writer.add_scalar(f"train/acc", train_acc, sample_num)
         # print(
-        self.logger.write(
-            f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
-            f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
-            f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
-        )
-        self.logger.write('\n')
+        if self.state['sample_cnt'] % 5 == 0:
+            self.logger.write(
+                f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
+                f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
+                f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
+            )
+            self.logger.write('\n')
 
     def report_test(self, sample_num, scores, dataname):
         writer.add_scalar(f"test/loss", scores["loss"], sample_num)

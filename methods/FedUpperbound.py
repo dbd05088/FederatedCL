@@ -26,14 +26,24 @@ class FedUpperbound_server(CLManagerServer):
         dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         self.total_samples = len(dataloader)
         
+        if self.gradient_checkpointing:
+            if self.args.gradient_checkpointing_kwargs is None:
+                gradient_checkpointing_kwargs = {}
+            else:
+                gradient_checkpointing_kwargs = self.args.gradient_checkpointing_kwargs
+            self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+        
         # train for one epoch
         self.model.train()
+        self.optimizer.zero_grad()
         for i, data in enumerate(dataloader):
-            self.optimizer.zero_grad()
             data = self._prepare_inputs(data)
             loss = self.compute_loss(self.model, data)
             loss.backward()
-            self.optimizer.step()
+            if (i + 1) % self.gradient_accumulation_steps == 0:
+                self.optimizer.step()
+                self.lr_scheduler.step()
+                self.optimizer.zero_grad()
             
             self.report_training(i, loss)
         
@@ -70,12 +80,20 @@ class FedUpperbound_client(CLManagerClient):
 
         seen_so_far = self.state['sample_cnt']
         
+        if self.gradient_checkpointing:
+            if self.args.gradient_checkpointing_kwargs is None:
+                gradient_checkpointing_kwargs = {}
+            else:
+                gradient_checkpointing_kwargs = self.args.gradient_checkpointing_kwargs
+            self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+        
+        self.optimizer.zero_grad()
         for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+samples_per_round]):
             # explicit task boundary for twf
             # if samples_cnt % training_args.samples_per_task == 0 and training_args.mode in ["bic", "xder", "der_lider", "er_lider", "xder_lider", "co2l", "trire"]:
             #     method.online_before_task(task_id)
             #     task_id += 1
-            self.trained_data.append(copy.deepcopy(data))
+            self.trained_data.append(data)
 
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)

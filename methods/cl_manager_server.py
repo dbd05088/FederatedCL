@@ -174,6 +174,9 @@ class CLManagerServer: # == SERVER
         # self.writer = SummaryWriter(f'tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}')
 
         self.watchdog = ManagerWatchdog()
+        
+        self.gradient_accumulation_steps = kwargs['gradient_accumulation_steps']
+        self.gradient_checkpointing = kwargs['gradient_checkpointing']
 
     def setup(self):
         model, tokenizer, data_args = get_llavamodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
@@ -364,12 +367,13 @@ class CLManagerServer: # == SERVER
     def report_training(self, sample_num, train_loss):
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         # writer.add_scalar(f"train/acc", train_acc, sample_num)
-        self.logger.write(
-            f"Server Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
-            f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
-            f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
-        )
-        self.logger.write("\n")
+        if sample_num % 5 == 0:
+            self.logger.write(
+                f"Server Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
+                f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
+                f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
+            )
+            self.logger.write("\n")
 
     def report_test(self, dataset_name, scores):
         # writer.add_scalar(f"test/loss", scores["loss"], sample_num)
