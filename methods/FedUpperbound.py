@@ -27,10 +27,7 @@ class FedUpperbound_server(CLManagerServer):
         self.total_samples = len(dataloader)
         
         if self.gradient_checkpointing:
-            if self.args.gradient_checkpointing_kwargs is None:
-                gradient_checkpointing_kwargs = {}
-            else:
-                gradient_checkpointing_kwargs = self.args.gradient_checkpointing_kwargs
+            gradient_checkpointing_kwargs = {'use_reentrant':False}
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
         
         # train for one epoch

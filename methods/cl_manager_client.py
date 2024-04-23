@@ -412,10 +412,7 @@ class CLManagerClient: # Client
         seen_so_far = self.state['sample_cnt']
         
         if self.gradient_checkpointing:
-            if self.args.gradient_checkpointing_kwargs is None:
-                gradient_checkpointing_kwargs = {}
-            else:
-                gradient_checkpointing_kwargs = self.args.gradient_checkpointing_kwargs
+            gradient_checkpointing_kwargs = {'use_reentrant':False}
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
         
         self.optimizer.zero_grad()
@@ -629,7 +626,7 @@ class CLManagerClient: # Client
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         # writer.add_scalar(f"train/acc", train_acc, sample_num)
         # print(
-        if self.state['sample_cnt'] % 5 == 0:
+        if sample_num % 5 == 0:
             self.logger.write(
                 f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
                 f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
