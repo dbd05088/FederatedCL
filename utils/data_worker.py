@@ -225,6 +225,7 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
                             return result
                     image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
                 image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+                images.append(image)
                 sources = preprocess_multimodal(
                     copy.deepcopy([sample['conversations']]),
                     data_args)
