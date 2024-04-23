@@ -42,7 +42,7 @@ from utils.data_worker import ManagerWatchdog
 import queue
 from collections.abc import Mapping
 
-from utils.eval_metrics import NLPEvaluator
+from utils.eval_metrics import NLPEvaluator, matching_token_num
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 
 OPTIMIZER_NAME = "optimizer.pt"
@@ -626,13 +626,13 @@ class CLManagerClient: # Client
         writer.add_scalar(f"train/loss", train_loss, sample_num)
         # writer.add_scalar(f"train/acc", train_acc, sample_num)
         # print(
-        if sample_num % 5 == 0:
-            self.logger.write(
-                f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
-                f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
-                f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
-            )
-            self.logger.write('\n')
+        # if sample_num % 5 == 0:
+        self.logger.write(
+            f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
+            f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
+            f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
+        )
+        self.logger.write('\n')
 
     def report_test(self, sample_num, scores, dataname):
         writer.add_scalar(f"test/loss", scores["loss"], sample_num)
@@ -679,15 +679,14 @@ class CLManagerClient: # Client
                     valid_label_mask = gold.ne(IGNORE_INDEX)
                     valid_idx = valid_label_mask.nonzero()[0].item()
                     
-                    n_word += valid_label_mask.sum()
+                    n_word += len(torch.unique(gold[valid_label_mask]))#.sum()
                     pred_id = torch.argmax(pred, dim=1).cpu()#.to(device)
                     
                     # image token index
                     img_token_index = (inp==IMAGE_TOKEN_INDEX).nonzero()[0].item()
                     pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+576:]))
                     
-                    pred_correct_mask = pred_id.eq(gold)
-                    n_correct += pred_correct_mask.masked_select(valid_label_mask).sum()
+                    n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
                     # pred_id[valid_label_mask == False] = 0
                     
                     gold[valid_label_mask == False] = 0

@@ -42,7 +42,7 @@ class FedUpperbound_server(CLManagerServer):
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
             
-            self.report_training(i, loss)
+            self.report_training(i+1, loss)
         
         state_dict = OrderedDict()
         for name, module in self.model.named_modules():
@@ -78,10 +78,7 @@ class FedUpperbound_client(CLManagerClient):
         seen_so_far = self.state['sample_cnt']
         
         if self.gradient_checkpointing:
-            if self.args.gradient_checkpointing_kwargs is None:
-                gradient_checkpointing_kwargs = {}
-            else:
-                gradient_checkpointing_kwargs = self.args.gradient_checkpointing_kwargs
+            gradient_checkpointing_kwargs = {'use_reentrant':False}
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
         
         self.optimizer.zero_grad()

@@ -5,6 +5,15 @@ from pycocoevalcap.cider.cider import Cider
 from utils.bleu.bleu import Bleu
 import numpy as np
 import json
+import torch
+
+def matching_token_num(pred, gold, valid_idx, valid_mask):
+    unique_pred = set(pred[valid_idx:].tolist())
+    unique_gold = set(gold[valid_mask].tolist())
+    
+    matching_token = unique_pred.intersection(unique_gold)
+    
+    return len(matching_token)
 
 def remove_nonascii(text):
     return ''.join([i if ord(i) < 128 else ' ' for i in text])

@@ -235,18 +235,8 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
                 tokenizer,
                 has_image=('image' in sample))
             
-            input_id = torch.nn.utils.rnn.pad_sequence(
-                data_dict["input_ids"],
-                batch_first=True,
-                padding_value=tokenizer.pad_token_id)[0]
-            label = torch.nn.utils.rnn.pad_sequence(labels=data_dict["labels"][0],
-                                                batch_first=True,
-                                                padding_value=IGNORE_INDEX)[0]
-            input_id = input_id[:tokenizer.model_max_length]
-            label = label[:tokenizer.model_max_length]
-
-            input_ids.append(input_id)
-            labels.append(label)
+            input_ids.append(data_dict['input_ids'][0])
+            labels.append(data_dict['labels'][0])
 
         data['image'] = torch.stack(images)
         data['input_id'] = torch.stack(input_ids)
