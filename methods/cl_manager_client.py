@@ -294,9 +294,9 @@ class CLManagerClient: # Client
 
     def save_model(self, client_id, output_dir):
         state_dict = OrderedDict()
-        for name, module in self.model.named_modules():
-            if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
-                state_dict.update(module.state_dict())
+        for name, parameters in self.model.named_parameters():
+            if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
+                    state_dict[name] = parameters.cpu()
         torch.save(state_dict, os.path.join(output_dir, f"{client_id}_client_model.pth"))
     
     def load_model(self, client_id, output_dir):

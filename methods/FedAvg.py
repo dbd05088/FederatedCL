@@ -48,12 +48,9 @@ class FedAvg_server(CLManagerServer):
 class FedAvg_client(CLManagerClient): 
     def client_msg(self):
         state_dict = OrderedDict()
-        for name, module in self.model.named_modules():
-            if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
-                state_dict.update(module.state_dict())
-        for k, v in state_dict.items():
-            if isinstance(v, torch.Tensor):
-                state_dict[k] = v.cpu()
+        for name, parameters in self.model.named_parameters():
+            if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
+                    state_dict[name] = parameters.cpu()
         return state_dict
     
     def handle_server_msg(self, server_msg):

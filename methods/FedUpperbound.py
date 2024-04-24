@@ -46,9 +46,9 @@ class FedUpperbound_server(CLManagerServer):
             self.report_training(i+1, loss)
         
         state_dict = OrderedDict()
-        for name, module in self.model.named_modules():
-            if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
-                state_dict.update(module.state_dict())
+        for name, parameters in self.model.named_parameters():
+            if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
+                    state_dict[name] = parameters.cpu()
         # print(state_dict)
         for k, v in state_dict.items():
             if isinstance(v, torch.Tensor):
@@ -76,7 +76,7 @@ class FedUpperbound_client(CLManagerClient):
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 4
+        samples_per_round = 800
 
         seen_so_far = self.state['sample_cnt']
         
