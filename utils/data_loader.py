@@ -21,7 +21,7 @@ import torch.multiprocessing as multiprocessing
 
 from utils.augment import DataAugmentation, Preprocess, get_statistics
 
-from utils.data_worker import worker_loop, worker_loop_multimodal, worker, worker_multimodal
+from utils.data_worker import worker_loop_multimodal, worker_multimodal
 from models.llava.constants import IGNORE_INDEX
 
 logger = logging.getLogger()
@@ -133,72 +133,6 @@ class MultiProcessLoader():
         for i, samples in enumerate(state_dict['index_queues']):
             if samples:
                 self.index_queues[i].put(samples)
-    
-
-class XDERLoader(MultiProcessLoader):
-    def __init__(self, n_workers, cls_dict, transform, data_dir, transform_on_gpu=False, cpu_transform=None, device='cpu', use_kornia=False, transform_on_worker=True, test_transform=None, scl=False, init=True):
-        super().__init__(n_workers, cls_dict, transform, data_dir, transform_on_gpu, cpu_transform, device, use_kornia, transform_on_worker, init=False)
-        self.n_workers = n_workers
-        self.cls_dict = cls_dict
-        self.transform = transform
-        self.transform_on_gpu = transform_on_gpu
-        self.transform_on_worker = transform_on_worker
-        self.use_kornia = use_kornia
-        self.cpu_transform = cpu_transform
-        self.device = device
-        self.result_queues = []
-        self.workers = []
-        self.index_queues = []
-        for i in range(self.n_workers):
-            index_queue = multiprocessing.Queue()
-            index_queue.cancel_join_thread()
-            result_queue = multiprocessing.Queue()
-            result_queue.cancel_join_thread()
-            w = multiprocessing.Process(target=worker_loop, args=(index_queue, result_queue, data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, use_kornia, transform_on_worker, test_transform, scl))
-            w.daemon = True
-            w.start()
-            self.workers.append(w)
-            self.index_queues.append(index_queue)
-            self.result_queues.append(result_queue)
-        if self.use_kornia:
-            if 'cifar100' in data_dir:
-                mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar100')
-            elif 'cifar10' in data_dir:
-                mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar10')
-            elif 'tinyimagenet' in data_dir:
-                mean, std, n_classes, inp_size, _ = get_statistics(dataset='tinyimagenet')
-            elif 'imagenet' in data_dir:
-                mean, std, n_classes, inp_size, _ = get_statistics(dataset='imagenet')
-            self.transform = DataAugmentation(inp_size, mean, std)
-
-    @torch.no_grad()
-    def get_batch(self):
-        data = dict()
-        images = []
-        labels = []
-        not_aug_img = []
-        for i in range(self.n_workers):
-            loaded_samples = self.result_queues[i].get(timeout=3000.0)
-            if loaded_samples is not None:
-                images.append(loaded_samples["image"])
-                labels.append(loaded_samples["label"])
-                if "not_aug_img" in loaded_samples.keys():
-                    not_aug_img.append(loaded_samples["not_aug_img"])
-        if len(images) > 0:
-            images = torch.cat(images)
-            labels = torch.cat(labels)
-            if self.transform_on_gpu and not self.transform_on_worker:
-                images = self.transform(images.to(self.device))
-            data['image'] = images
-            data['label'] = labels
-            if "not_aug_img" in loaded_samples.keys():
-                not_aug_img = torch.cat(not_aug_img)
-                data['not_aug_img'] = not_aug_img
-            return data
-        else:
-            return None
-    
-
 
 def nonzero_indices(bool_mask_tensor):
     # Returns tensor which contains indices of nonzero elements in bool_mask_tensor
