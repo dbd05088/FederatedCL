@@ -1,31 +1,25 @@
-import logging
 import os
-import copy
-import math
 import time
 import datetime
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from utils.data_loader import ImageDataset, cutmix_data, MultiProcessLoader
 from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
 from utils.train_utils import get_llavamodel
 from collections.abc import Mapping
 import random
 
-# logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
+import bitsandbytes
 from transformers import Trainer
 from transformers.trainer import (
     get_parameter_names,
     ALL_LAYERNORM_LAYERS,
-    # logger,
 )
 from transformers.optimization import get_scheduler
 import glob
@@ -34,12 +28,11 @@ from utils.data_worker import ManagerWatchdog
 
 from utils.eval_metrics import NLPEvaluator, matching_token_num
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
-from tqdm import tqdm
+from collections import OrderedDict
 
 OPTIMIZER_NAME = "optimizer.pt"
 SCHEDULER_NAME = "scheduler.pt"
 
-TIMEOUT=5.0
 import queue
 
 class CLManagerServer: # == SERVER
@@ -50,15 +43,12 @@ class CLManagerServer: # == SERVER
         device,
         data_args,
         model_args,
-        # model = None,
         args = None,
         bnb_model_from_pretrained_args=None,
-        # tokenizer = None,
         receive_channel=None,
         send_channel=None,
         logger=None
     ):
-        # super().__init__(model, args, data_collator, train_dataset, eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers, preprocess_logits_for_metrics)
         kwargs = vars(args)
 
         self.args = args
@@ -73,8 +63,6 @@ class CLManagerServer: # == SERVER
         self.device = device
         self.task_id = 0
         self.method_name = kwargs["mode"]
-        # self.dataset = kwargs["dataset"]
-        # self.samples_per_task = kwargs["samples_per_task"]
         self.memory_size = kwargs["memory_size"]
         self.online_iter = kwargs["online_iter"]
 
@@ -82,8 +70,6 @@ class CLManagerServer: # == SERVER
         self.send_channel = send_channel
 
         self.lr = kwargs["learning_rate"]
-        # self.block_names = MODEL_BLOCK_DICT[self.model_name]
-        # self.num_blocks = len(self.block_names) - 1
 
         assert kwargs["temp_batchsize"] <= kwargs["per_gpu_train_batch_size"]
         self.batch_size = kwargs["per_gpu_train_batch_size"]
@@ -92,58 +78,14 @@ class CLManagerServer: # == SERVER
         self.memory_size -= self.temp_batch_size
         self.transforms = kwargs["transforms"]
 
-        # self.data_dir = kwargs["data_dir"]
-        # if self.data_dir is None:
         self.n_worker = kwargs["dataloader_num_workers"]
         self.future_steps = kwargs["future_steps"]
-        # self.transform_on_gpu = kwargs["transform_on_gpu"]
-        # self.use_kornia = kwargs["use_kornia"]
-        # self.transform_on_worker = kwargs["transform_on_worker"]
 
         self.eval_period = kwargs["eval_period"]
         self.topk = kwargs["topk"]
         
-        # self.logger = logger
-        # logging.config.fileConfig("./configuration/logging.conf")
-        # logger = logging.getLogger()
-
-        # os.makedirs(f"results/{self.args.dataset}/{self.args.note}", exist_ok=True)
-        # os.makedirs(f"tensorboard/{self.args.dataset}/{self.args.note}", exist_ok=True)
-        # fileHandler = logging.FileHandler(f'results/{self.args.dataset}/{self.args.note}/seed_{self.args.seed}_server.log', mode="w")
-
-        # formatter = logging.Formatter(
-        #     "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
-        # )
-        # fileHandler.setFormatter(formatter)
-        # logger.addHandler(fileHandler)
-        # self.logger = logger
-
-        # self.use_amp = kwargs["use_amp"]
-        # if self.use_amp:
-        #     self.scaler = torch.cuda.amp.GradScaler()
-
-        # for debugging
-        # self.train_datalists = [train_datalists,#[0:100], 
-        #                         train_datalists,#[100:200],
-        #                         train_datalists,#[200:300],
-        #                         train_datalists,#[300:400],
-        #                         train_datalists,#[400:500],
-        #                         train_datalists,
-        #                         train_datalists,
-        #                         ]
         self.train_datalists = train_datalists
         self.test_datalists = test_datalists
-        # self.test_datalists = [test_datalists, test_datalists, test_datalists, test_datalists]
-        # preprocess test datalist into dataloader
-        # self.test_datalists = []
-        # for test_datalist in test_datalists:
-        #     dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, self.dataset, preprocess=True)
-        #     dataloader = DataLoader(dataset, batch_size= 128, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
-        #     self.test_datalists.append(dataloader)
-
-        # self.train_datalists = train_datalists
-        # self.test_datalists = test_datalists
-        # self.total_samples = len(self.train_datalist)
 
         self.future_sample_num = 0
         self.future_sampling = True
@@ -151,25 +93,19 @@ class CLManagerServer: # == SERVER
 
         self.note = kwargs['note']
         self.rnd_seed = kwargs['seed']
-        # self.save_path = f'results/{self.dataset}/{self.note}/seed_{self.rnd_seed}'
         self.f_period = kwargs['f_period']
         self.f_next_time = 0
         self.start_time = time.time()
-        # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281167}
-        # self.total_samples = num_samples[self.dataset]
         self.total_samples = 0
 
         self.exposed_domains = []
         self.waiting_batch = []
-        # self.get_flops_parameter()
-
         # federated learning
         self.num_clients = kwargs["num_clients"]
         self.frac_clients = 1.0#0.5
         self.num_rounds = kwargs["num_rounds"] # num of federated learning round
         self.n_gpu = kwargs["n_gpu"] # first one is for server
 
-        # self.initialize_future()
         self.total_flops = 0.0
         # self.writer = SummaryWriter(f'tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}')
 
@@ -184,7 +120,7 @@ class CLManagerServer: # == SERVER
         self.tokenizer = tokenizer
         self.data_args = data_args
 
-        max_steps = 1000 # FIXME
+        max_steps = 4000 # FIXME
         self.create_optimizer()
         self.create_scheduler(max_steps, optimizer=self.optimizer)
 
@@ -210,7 +146,6 @@ class CLManagerServer: # == SERVER
             # selected_ids = cids
             for idx in range(num_selection):
                 send_queue = self.send_channel[idx % len(self.send_channel)]
-            # for send_queue in self.send_channel:
                 client_id = selected_ids[idx]
                 send_queue.put({
                     'client_id':client_id,
@@ -249,6 +184,18 @@ class CLManagerServer: # == SERVER
     
     def do_server_work(self):
         pass
+    
+    def save_model(self, output_dir):
+        state_dict = OrderedDict()
+        with torch.no_grad():
+            for name, parameters in self.model.named_parameters():
+                if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
+                        state_dict[name] = parameters.detach().cpu()
+        torch.save(state_dict, os.path.join(output_dir, f"server_model.pth"))
+    
+    def load_model(self, output_dir):
+        state_dict = torch.load(os.path.join(output_dir, f"server_model.pth"), map_location=self.args.device)
+        self.model.load_state_dict(state_dict, strict=False)
                 
     # from llava_traininer
     def create_optimizer(self):
@@ -314,8 +261,6 @@ class CLManagerServer: # == SERVER
 
             self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
             if optimizer_cls.__name__ == "Adam8bit":
-                import bitsandbytes
-
                 manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
 
                 skipped = 0
@@ -365,8 +310,7 @@ class CLManagerServer: # == SERVER
             self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, SCHEDULER_NAME)))
 
     def report_training(self, sample_num, train_loss):
-        writer.add_scalar(f"train/loss", train_loss, sample_num)
-        # writer.add_scalar(f"train/acc", train_acc, sample_num)
+        # writer.add_scalar(f"train/loss", train_loss, sample_num)
         # if sample_num % 5 == 0:
         self.logger.write(
             f"Server Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
@@ -376,8 +320,12 @@ class CLManagerServer: # == SERVER
         self.logger.write("\n")
 
     def report_test(self, dataset_name, scores):
-        # writer.add_scalar(f"test/loss", scores["loss"], sample_num)
-        # writer.add_scalar(f"test/precision", scores["precision"], sample_num)
+        # writer.add_scalar(f"test/loss_server", scores["loss"], sample_num)
+        # writer.add_scalar(f"test/precision_server", scores["precision"], sample_num)
+        # writer.add_scalar(f"test/Bleu_server", scores["Bleu_1"], sample_num)
+        # writer.add_scalar(f"test/METEOR_server", scores["METEOR"], sample_num)
+        # writer.add_scalar(f"test/RogueL_server", scores["ROUGE_L"], sample_num)
+        # writer.add_scalar(f"test/CIDEr_server", scores["CIDEr"], sample_num)
         self.logger.write(
             f"Test (Server) | data {dataset_name} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
@@ -411,11 +359,6 @@ class CLManagerServer: # == SERVER
         return inputs
     
     def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        How the loss is computed by Trainer. By default, all models return the loss in the first element.
-
-        Subclass and override for custom behavior.
-        """
         outputs = model(**inputs)
         # Save past state if it exists
         # if self.args.past_index >= 0:
@@ -444,7 +387,6 @@ class CLManagerServer: # == SERVER
                 input_labels = batch['labels']
                 batch = self._prepare_inputs(batch)
                 
-                # loss, pred_scores_list = model(**batch)
                 output = self.model(**batch)
                 loss = output[0]
                 pred_scores_list = output[1]
@@ -463,9 +405,6 @@ class CLManagerServer: # == SERVER
                     pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+576:]))
                     
                     n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
-                    # pred_correct_mask = pred_id.eq(gold)
-                    # n_correct += pred_correct_mask.masked_select(valid_label_mask).sum()
-                    # pred_id[valid_label_mask == False] = 0
                     
                     gold[valid_label_mask == False] = 0
                     
@@ -484,57 +423,3 @@ class CLManagerServer: # == SERVER
         self.report_test(dataset_name, scores)
         
         return predictions
-
-
-class MemoryBase:
-    def __init__(self, memory_size):
-        self.memory_size = memory_size
-        self.images = []
-        self.labels = []
-        self.update_buffer = ()
-        self.cls_dict = dict()
-        self.cls_list = []
-        self.cls_count = []
-        self.cls_idx = []
-        self.usage_count = np.array([])
-        self.class_usage_count = np.array([])
-        self.current_images = []
-        self.current_labels = []
-        self.current_cls_count = [0 for _ in self.cls_list]
-        self.current_cls_idx = [[] for _ in self.cls_list]
-
-    def __len__(self):
-        return len(self.images)
-
-    def replace_sample(self, sample, idx=None):
-        self.cls_count[self.cls_dict[sample['klass']]] += 1
-        if idx is None:
-            assert len(self.images) < self.memory_size
-            self.cls_idx[self.cls_dict[sample['klass']]].append(len(self.images))
-            self.images.append(sample)
-            self.labels.append(self.cls_dict[sample['klass']])
-        else:
-            assert idx < self.memory_size
-            self.cls_count[self.labels[idx]] -= 1
-            self.cls_idx[self.labels[idx]].remove(idx)
-            self.images[idx] = sample
-            self.labels[idx] = self.cls_dict[sample['klass']]
-            self.cls_idx[self.cls_dict[sample['klass']]].append(idx)
-
-    def add_new_class(self, class_name):
-        self.cls_dict[class_name] = len(self.cls_list)
-        self.cls_list.append(class_name)
-        self.cls_count.append(0)
-        self.cls_idx.append([])
-        self.class_usage_count = np.append(self.class_usage_count, 0.0)
-
-    def retrieval(self, size, return_index=False):
-        sample_size = min(size, len(self.images))
-        memory_batch = []
-        indices = np.random.choice(range(len(self.images)), size=sample_size, replace=False)
-        for i in indices:
-            memory_batch.append(self.images[i])
-        if return_index:
-            return memory_batch, indices
-        else:
-            return memory_batch

@@ -52,16 +52,6 @@ class MultiProcessLoader():
                 self.workers.append(w)
                 self.index_queues.append(index_queue)
                 self.result_queues.append(result_queue)
-        # if self.use_kornia:
-        #     if 'cifar100' in data_dir:
-        #         mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar100')
-        #     elif 'cifar10' in data_dir:
-        #         mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar10')
-        #     elif 'tinyimagenet' in data_dir:
-        #         mean, std, n_classes, inp_size, _ = get_statistics(dataset='tinyimagenet')
-        #     elif 'imagenet' in data_dir:
-        #         mean, std, n_classes, inp_size, _ = get_statistics(dataset='imagenet')
-        #     self.transform = DataAugmentation(inp_size, mean, std)
 
     def load_batch(self, batch):
         # for sample in batch:
@@ -69,27 +59,6 @@ class MultiProcessLoader():
             
         for i in range(self.n_workers):
             self.index_queues[i].put(batch[len(batch)*i//self.n_workers:len(batch)*(i+1)//self.n_workers])
-
-    # @torch.no_grad()
-    # def get_batch(self):
-    #     data = dict()
-    #     images = []
-    #     labels = []
-    #     for i in range(self.n_workers):
-    #         loaded_samples = self.result_queues[i].get(timeout=3000.0)
-    #         if loaded_samples is not None:
-    #             images.append(loaded_samples["image"])
-    #             labels.append(loaded_samples["label"])
-    #     if len(images) > 0:
-    #         images = torch.cat(images)
-    #         labels = torch.cat(labels)
-    #         if self.transform_on_gpu and not self.transform_on_worker:
-    #             images = self.transform(images.to(self.device))
-    #         data['image'] = images
-    #         data['label'] = labels
-    #         return data
-    #     else:
-    #         return None
 
     @torch.no_grad()
     def get_batch(self):
@@ -164,28 +133,6 @@ class MultiProcessLoader():
         for i, samples in enumerate(state_dict['index_queues']):
             if samples:
                 self.index_queues[i].put(samples)
-
-
-    # @torch.no_grad()
-    # def get_batch(self):
-    #     data = dict()
-    #     images = []
-    #     labels = []
-    #     for i in range(self.n_workers):
-    #         loaded_samples = self.result_queues[i].get(timeout=3000.0)
-    #         # if loaded_samples is not None:
-    #         images.append(torch.rand(4, 3, 32, 32).to(self.device))
-    #         labels.append(torch.LongTensor([0, 0, 0, 0]).to(self.device))
-    #     if len(images) > 0:
-    #         images = torch.cat(images)
-    #         labels = torch.cat(labels)
-    #         if self.transform_on_gpu and not self.transform_on_worker:
-    #             images = self.transform(images.to(self.device))
-    #         data['image'] = images
-    #         data['label'] = labels
-    #         return data
-    #     else:
-    #         return None
     
 
 class XDERLoader(MultiProcessLoader):

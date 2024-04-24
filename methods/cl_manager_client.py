@@ -1,42 +1,30 @@
-import logging
 import os
-import copy
-import math
 import time
 import datetime
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
 
-from flops_counter.ptflops import get_model_complexity_info
-from utils.data_loader import ImageDataset, cutmix_data, MultiProcessLoader, get_statistics
+from utils.data_loader import MultiProcessLoader
 from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
-from utils.augment import get_transform
-from utils.train_utils import select_model, select_optimizer, select_scheduler, get_llavamodel
-from utils.block_utils import MODEL_BLOCK_DICT, get_blockwise_flops
+from utils.train_utils import  get_llavamodel
 from peft.tuners.lora import LoraLayer
+import bitsandbytes
 
-# logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
 from transformers import Trainer
 from transformers.trainer import (
-    is_sagemaker_mp_enabled,
     get_parameter_names,
-    has_length,
     ALL_LAYERNORM_LAYERS,
-    # logger,
 )
 import numpy as np
 
 from transformers.optimization import get_scheduler
 from utils.train_utils import get_llavamodel
-from peft import get_peft_model
 from collections import OrderedDict
 from utils.data_worker import ManagerWatchdog
 import queue
@@ -63,9 +51,7 @@ class CLManagerClient: # Client
         send_channel=None,
         logger=None
     ):
-        # super().__init__(model, args, data_collator, train_dataset, eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers, preprocess_logits_for_metrics)
-
-    # def __init__(self, train_datalist, test_datalist, device, model_args, training_args, bnb_model_from_pretrained_args, **kwargs):
+        
         kwargs = vars(args)
         self.rank = rank
         self.args = args
@@ -73,15 +59,13 @@ class CLManagerClient: # Client
         self.model_args = model_args
         self.bnb_model_from_pretrained_args=bnb_model_from_pretrained_args
         self.device = device
-        # model = model.to(args.device)
+        
         self.model = None
         self.tokenizer = None
         self.optimizer = None
         self.lr_scheduler = None
         self.task_id = 0
         self.method_name = kwargs["mode"]
-        # self.dataset = kwargs["dataset"]
-        # self.samples_per_task = kwargs["samples_per_task"]
         self.memory_size = kwargs["memory_size"]
         self.online_iter = kwargs["online_iter"]
 
@@ -89,8 +73,6 @@ class CLManagerClient: # Client
         self.receive_channel=receive_channel
 
         self.lr = kwargs["learning_rate"]
-        # self.block_names = MODEL_BLOCK_DICT[self.model_name]
-        # self.num_blocks = len(self.block_names) - 1
 
         assert kwargs["temp_batchsize"] <= kwargs["per_gpu_train_batch_size"]
         self.batch_size = kwargs["per_gpu_train_batch_size"]
@@ -99,32 +81,13 @@ class CLManagerClient: # Client
         self.memory_size -= self.temp_batch_size
         self.transforms = kwargs["transforms"]
 
-        # self.data_dir = kwargs["data_dir"]
-        # if self.data_dir is None:
-        # self.data_dir = os.path.join("dataset", self.dataset, 'images')
         self.n_worker = kwargs["dataloader_num_workers"]
         self.future_steps = kwargs["future_steps"]
-        # self.transform_on_gpu = kwargs["transform_on_gpu"]
-        # self.use_kornia = kwargs["use_kornia"]
-        # self.transform_on_worker = kwargs["transform_on_worker"]
 
         self.eval_period = kwargs["eval_period"]
         self.topk = kwargs["topk"]
         self.f_period = kwargs["f_period"]
 
-        # self.logger = logger
-        # logging.config.fileConfig("./configuration/logging.conf")
-        # logger = logging.getLogger()
-
-        # os.makedirs(f"results/{self.args.dataset}/{self.args.note}", exist_ok=True)
-        # os.makedirs(f"tensorboard/{self.args.dataset}/{self.args.note}", exist_ok=True)
-        # fileHandler = logging.FileHandler(f'results/{self.args.dataset}/{self.args.note}/seed_{self.args.seed}_client_rank{self.rank}.log', mode="w")
-
-        # formatter = logging.Formatter(
-        #     "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
-        # )
-        # fileHandler.setFormatter(formatter)
-        # logger.addHandler(fileHandler)
         self.logger = logger
         
         self.temp_batch = []
@@ -141,20 +104,14 @@ class CLManagerClient: # Client
 
         self.note = kwargs['note']
         self.rnd_seed = kwargs['seed']
-        # self.save_path = f'results/{self.dataset}/{self.note}/seed_{self.rnd_seed}'
+        
         self.f_next_time = 0
         self.start_time = time.time()
-        # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281167}
-        # self.total_samples = num_samples[self.dataset]
 
         self.exposed_domains = []
         self.waiting_batch = []
-        # self.get_flops_parameter()
-        # self.init_training()
 
-        # self.initialize_future()
         self.total_flops = 0.0
-        # self.writer = SummaryWriter(f'tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}')
         self.state = {}
         
         self.logger = None
@@ -170,7 +127,7 @@ class CLManagerClient: # Client
         self.tokenizer = tokenizer
         self.data_args = data_args
 
-        max_steps = 1000 # FIXME
+        max_steps = 4000 # FIXME
         self.create_optimizer()
         self.create_scheduler(max_steps, optimizer=self.optimizer)
 
@@ -247,8 +204,6 @@ class CLManagerClient: # Client
 
             self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
             if optimizer_cls.__name__ == "Adam8bit":
-                import bitsandbytes
-
                 manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
 
                 skipped = 0
@@ -294,9 +249,10 @@ class CLManagerClient: # Client
 
     def save_model(self, client_id, output_dir):
         state_dict = OrderedDict()
-        for name, parameters in self.model.named_parameters():
-            if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
-                    state_dict[name] = parameters.cpu()
+        with torch.no_grad():
+            for name, parameters in self.model.named_parameters():
+                if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
+                        state_dict[name] = parameters.detach().cpu()
         torch.save(state_dict, os.path.join(output_dir, f"{client_id}_client_model.pth"))
     
     def load_model(self, client_id, output_dir):
@@ -309,8 +265,6 @@ class CLManagerClient: # Client
         self.model.load_state_dict(torch.load('./llava_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
         self.logger.write("done loading init llava vision tower and mm projector\n")
         # reset lora layers
-        # model = self.model.unload()
-        # self.model = get_peft_model(model, self.args.lora_config)
         for name, module in self.model.named_modules():
             if isinstance(module, LoraLayer):
                 module.reset_lora_parameters('default', True)
@@ -322,8 +276,6 @@ class CLManagerClient: # Client
     def switch_state(self, client_id, train_datalist):
         self.logger = open(f'./results/{self.method_name}/{self.note}/{client_id}_client.log', 'a')
         if self.is_new(client_id):
-            # model, tokenizer, _ = get_llavamodel(training_args=self.args, model_args=self.model_args, bnb_model_from_pretrained_args={}, lora_config=self.args.lora_config)
-            # print(client_id)
             self.init_state(client_id, len(train_datalist))
             self.init_model()
             self.initialize_future(train_datalist)
@@ -368,7 +320,7 @@ class CLManagerClient: # Client
         self.logger.close()
 
     def run(self):
-        while True:#self.watchdog.is_alive():
+        while True:
             try:
                 r = self.receive_channel.get()
             except queue.Empty:
@@ -391,9 +343,6 @@ class CLManagerClient: # Client
 
                     self.train_one_round(curr_round, train_datalist, test_datalist)
 
-                    
-
-                    # self.send_channel.put(f"done {client_id}")
                     self.send_channel.put(self.client_msg())
     
     def client_msg(self):
@@ -407,7 +356,7 @@ class CLManagerClient: # Client
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 800
+        samples_per_round = 2
 
         seen_so_far = self.state['sample_cnt']
         
@@ -417,37 +366,19 @@ class CLManagerClient: # Client
         
         self.optimizer.zero_grad()
         for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+samples_per_round]):
-            # explicit task boundary for twf
-            # if samples_cnt % training_args.samples_per_task == 0 and training_args.mode in ["bic", "xder", "der_lider", "er_lider", "xder_lider", "co2l", "trire"]:
-            #     method.online_before_task(task_id)
-            #     task_id += 1
-
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
             if self.state['sample_cnt'] % self.eval_period == 0:
                 for dataname, datalist in test_datalist.items():
                     self.evaluate(dataname, datalist)
-
-            #     eval_dict = self.online_evaluate(test_datalist, self.state['sample_cnt'], 512, self.args.dataloader_num_workers, cls_dict,
-            #                                     cls_addition, data["time"])
-            #     eval_results["test_acc"].append(eval_dict['avg_acc'])
-            #     eval_results["percls_acc"].append(eval_dict['cls_acc'])
-            #     eval_results["data_cnt"].append(samples_cnt)
-            
-        # if eval_results["data_cnt"][-1] != samples_cnt:
-        #     eval_dict = method.online_evaluate(test_datalist, samples_cnt, 512, training_args.dataloader_num_workers, cls_dict, cls_addition,
-        #                                     data["time"])
         self.save_state()
-        
 
     # Memory 새로 정의 (not MemoryBase)
     def initialize_future(self, train_datalist):
-        # print('start_init_future')
         self.data_stream = iter(train_datalist)
         self.dataloader = MultiProcessLoader(self.n_worker, self.device, tokenizer=self.tokenizer, data_args=self.data_args)
         self.memory = MemoryBase(self.memory_size)
 
-        # self.memory_list = []
         self.temp_batch = []
         self.temp_future_batch = []
         self.num_updates = 0
@@ -468,9 +399,6 @@ class CLManagerClient: # Client
             sample = next(self.data_stream)
         except:
             return 1
-            
-        # if sample["time"] not in self.exposed_domains and "clear" in self.dataset:
-        #     self.exposed_domains.append(sample["time"])
 
         self.temp_future_batch.append(sample)
         self.future_num_updates += self.online_iter
@@ -556,39 +484,24 @@ class CLManagerClient: # Client
         return inputs
     
     def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        How the loss is computed by Trainer. By default, all models return the loss in the first element.
-
-        Subclass and override for custom behavior.
-        """
         outputs = model(**inputs)
         # Save past state if it exists
         # if self.args.past_index >= 0:
         #     self._past = outputs[self.args.past_index]
-
-        # We don't use .loss here since the model may return tuples instead of ModelOutput.
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
         return (loss, outputs) if return_outputs else loss
 
     def online_train(self, iterations=1):
-        # print("start online train")
         total_loss, correct, num_data = 0.0, 0.0, 0.0
 
         for i in range(iterations):
             self.model.train()
             data = self.get_batch()
-            # x = data["image"].to(self.device)
-            # y = data["label"].to(self.device)
             self.before_model_update()
 
-            # self.optimizer.zero_grad()
-
             data = self._prepare_inputs(data)
-
             loss = self.compute_loss(self.model, data)
-
-            # _, preds = logit.topk(self.topk, 1, True, True)
             loss.backward()
             
             if (self.state['sample_cnt']) % self.gradient_accumulation_steps == 0:
@@ -596,23 +509,9 @@ class CLManagerClient: # Client
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-            # if self.use_amp:
-            #     self.scaler.scale(loss).backward()
-            #     self.scaler.step(self.optimizer)
-            #     self.scaler.update()
-            # else:
-            #     loss.backward()
-            #     self.optimizer.step()
-
-            # self.total_flops += (len(y) * self.backward_flops)
-            # self.current_flos += float(self.floating_point_ops(data))
-
             self.after_model_update()
 
             total_loss += loss.item()
-            # correct += torch.sum(preds == y.unsqueeze(1)).item()
-            # num_data += y.size(0)
-
         return total_loss / iterations
 
     def before_model_update(self):
@@ -623,9 +522,7 @@ class CLManagerClient: # Client
         self.lr_scheduler.step()
 
     def report_training(self, sample_num, train_loss):
-        writer.add_scalar(f"train/loss", train_loss, sample_num)
-        # writer.add_scalar(f"train/acc", train_acc, sample_num)
-        # print(
+        # writer.add_scalar(f"train/loss", train_loss, sample_num)
         # if sample_num % 5 == 0:
         self.logger.write(
             f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
@@ -635,20 +532,16 @@ class CLManagerClient: # Client
         self.logger.write('\n')
 
     def report_test(self, sample_num, scores, dataname):
-        writer.add_scalar(f"test/loss", scores["loss"], sample_num)
-        writer.add_scalar(f"test/precision", scores["precision"], sample_num)
+        # writer.add_scalar(f"test/loss_client{self.state['client_id']}", scores["loss"], sample_num)
+        # writer.add_scalar(f"test/precision_client{self.state['client_id']}", scores["precision"], sample_num)
+        # writer.add_scalar(f"test/Bleu_client{self.state['client_id']}", scores["Bleu_1"], sample_num)
+        # writer.add_scalar(f"test/METEOR_client{self.state['client_id']}", scores["METEOR"], sample_num)
+        # writer.add_scalar(f"test/RogueL_client{self.state['client_id']}", scores["ROUGE_L"], sample_num)
+        # writer.add_scalar(f"test/CIDEr_client{self.state['client_id']}", scores["CIDEr"], sample_num)
         self.logger.write(
             f"Test (Client id {self.state['client_id']}) | Sample # {sample_num} | Data {dataname} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
         self.logger.write('\n')
-
-    # def update_schedule(self, reset=False):
-    #     if reset:
-    #         self.scheduler = select_scheduler(self.sched_name, self.optimizer)
-    #         for param_group in self.optimizer.param_groups:
-    #             param_group["lr"] = self.lr
-    #     else:
-    #         self.scheduler.step()
 
     def evaluate(self, dataname, test_datalist):
         self.logger.write(f"client {self.state['client_id']} evaluate {dataname}\n")
@@ -668,11 +561,9 @@ class CLManagerClient: # Client
                 input_labels = batch['labels']
                 batch = self._prepare_inputs(batch)
                 
-                # loss, pred_scores_list = model(**batch)
                 output = self.model(**batch)
                 loss = output[0]
                 pred_scores_list = output[1]
-                # * keep logs
                 n_correct = 0
                 n_word = 0
                 for inp, pred, gold in zip(inputs, pred_scores_list, input_labels):
@@ -687,7 +578,6 @@ class CLManagerClient: # Client
                     pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+576:]))
                     
                     n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
-                    # pred_id[valid_label_mask == False] = 0
                     
                     gold[valid_label_mask == False] = 0
                     
@@ -714,35 +604,21 @@ class MemoryBase:
         self.labels = []
 
         self.update_buffer = ()
-        # self.cls_dict = dict()
-        # self.cls_list = []
-        # self.cls_count = []
-        # self.cls_idx = []
         
         self.usage_count = np.array([])
-        # self.class_usage_count = np.array([])
         self.current_images = []
         self.current_labels = []
-        # self.current_cls_count = [0 for _ in self.cls_list]
-        # self.current_cls_idx = [[] for _ in self.cls_list]
 
     def __len__(self):
         return len(self.images)
 
     def replace_sample(self, sample, idx=None):
-        # self.cls_count[self.cls_dict[sample['klass']]] += 1
         if idx is None:
             assert len(self.images) < self.memory_size
-            # self.cls_idx[self.cls_dict[sample['klass']]].append(len(self.images))
             self.images.append(sample)
-            # self.labels.append(self.cls_dict[sample['klass']])
         else:
             assert idx < self.memory_size
-            # self.cls_count[self.labels[idx]] -= 1
-            # self.cls_idx[self.labels[idx]].remove(idx)
             self.images[idx] = sample
-            # self.labels[idx] = self.cls_dict[sample['klass']]
-            # self.cls_idx[self.cls_dict[sample['klass']]].append(idx)
 
     def retrieval(self, size, return_index=False):
         sample_size = min(size, len(self.images))

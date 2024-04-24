@@ -1,42 +1,35 @@
 import logging.config
 import os
 import random
-from collections import defaultdict
 
 import numpy as np
 import torch
-from torch.utils.tensorboard import SummaryWriter
-
-from configuration import config
 from configuration.llava_config import ModelArguments, DataArguments, TrainingArguments
 import transformers
 from utils.data_loader import get_test_datalist
 from utils.data_loader import get_train_datalist
 
 from utils.method_manager_llava import select_method
+from torch.utils.tensorboard import SummaryWriter
 
-from utils.train_utils import get_llavamodel
 from torch import multiprocessing
 import copy
 import torch.distributed as dist
+import json
+from transformers import BitsAndBytesConfig
 
 import warnings
 warnings.filterwarnings('ignore')
 
 def main():
-    # args = config.base_parser()
-
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
     bnb_model_from_pretrained_args = {}
     if training_args.bits in [4, 8]:
-        from transformers import BitsAndBytesConfig
         bnb_model_from_pretrained_args.update(dict(
             device_map={"": training_args.device},
-            # load_in_4bit=training_args.bits == 4,
-            # load_in_8bit=training_args.bits == 8,
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=training_args.bits == 4,
                 load_in_8bit=training_args.bits == 8,
@@ -49,8 +42,6 @@ def main():
             )
         ))
 
-
-    # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'clear10':30000, 'clear100':100000, 'tinyimagenet': 100000, 'imagenet': 1281165}
     logging.config.fileConfig("./configuration/logging.conf")
     logger = logging.getLogger()
 
@@ -58,14 +49,13 @@ def main():
     os.makedirs(f"tensorboard/{training_args.mode}/{training_args.note}", exist_ok=True)
     fileHandler = logging.FileHandler(f'results/{training_args.mode}/{training_args.note}/seed_{training_args.seed}.log', mode="w")
 
+    # writer = SummaryWriter(f'tensorboard/{training_args.mode}/{training_args.note}/federated')
+
     formatter = logging.Formatter(
         "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
     )
     fileHandler.setFormatter(formatter)
     logger.addHandler(fileHandler)
-
-    #writer = SummaryWriter(f'tensorboard/{args.dataset}/{args.note}/seed_{args.seed}')
-
     logger.info(training_args)
 
     if torch.cuda.is_available():
@@ -81,28 +71,7 @@ def main():
     np.random.seed(training_args.seed)
     random.seed(training_args.seed)
 
-
-    # get datalist
-    # print("args.dataset", training_args.dataset, "num_samples", num_samples[training_args.dataset])
-    # train_datalist, cls_dict, cls_addition = get_train_datalist(training_args.dataset, training_args.sigma, training_args.repeat, training_args.init_cls, training_args.seed)
-    # test_datalist = get_test_datalist(training_args.dataset)
-    # train_datalist = get_train_datalist(training_args.dataset)
-    # test_datalist = get_test_datalist(training_args.dataset)
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
-    samples_cnt = 0
-
-    # FIXME
-    # client별로 할당받을 datalist 얻기
-    # train_datalists = list[train_datalist], len = num_clients
-    # train_datalist = None
-    # test_datalist = None
-
-    # Reduce datalist in Debug mode
-    # if training_args.debug:
-    #     random.shuffle(train_datalist)
-    #     train_datalist = train_datalist[:5000]
-    #     random.shuffle(test_datalist)
-    #     test_datalist = test_datalist[:2000]
 
     # create folder
     if not os.path.exists(training_args.state_dir):
@@ -186,7 +155,6 @@ def run(rank, world_size, master_addr, master_port, runner):
     runner.setup()
     runner.run()
     
-import json
 def get_datalists(args, scenario_num):
     with open(f"./scenarios/scenario-{scenario_num}.json") as fp:
         scenario = json.load(fp)

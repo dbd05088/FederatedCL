@@ -1,7 +1,6 @@
 from methods.cl_manager_server import CLManagerServer
 from methods.cl_manager_client import CLManagerClient
 from collections import OrderedDict
-from peft.tuners.lora import LoraLayer
 import torch
 
 class FedAvg_server(CLManagerServer):
@@ -48,9 +47,10 @@ class FedAvg_server(CLManagerServer):
 class FedAvg_client(CLManagerClient): 
     def client_msg(self):
         state_dict = OrderedDict()
-        for name, parameters in self.model.named_parameters():
-            if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
-                    state_dict[name] = parameters.cpu()
+        with torch.no_grad():
+            for name, parameters in self.model.named_parameters():
+                if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
+                        state_dict[name] = parameters.detach().cpu()
         return state_dict
     
     def handle_server_msg(self, server_msg):

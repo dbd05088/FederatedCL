@@ -1,10 +1,8 @@
 from methods.cl_manager_server import CLManagerServer
 from methods.cl_manager_client import CLManagerClient
 from collections import OrderedDict
-from peft.tuners.lora import LoraLayer
 from torch.utils.data import DataLoader
 from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
-import copy
 import torch
 
 class FedUpperbound_server(CLManagerServer):
@@ -46,13 +44,12 @@ class FedUpperbound_server(CLManagerServer):
             self.report_training(i+1, loss)
         
         state_dict = OrderedDict()
-        for name, parameters in self.model.named_parameters():
-            if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
-                    state_dict[name] = parameters.cpu()
-        # print(state_dict)
-        for k, v in state_dict.items():
-            if isinstance(v, torch.Tensor):
-                state_dict[k] = v.cpu()
+        
+        with torch.no_grad():
+            for name, parameters in self.model.named_parameters():
+                if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
+                        state_dict[name] = parameters.detach().cpu()
+
         self.state_dict = state_dict
         
         eval_keys = []
@@ -86,10 +83,6 @@ class FedUpperbound_client(CLManagerClient):
         
         self.optimizer.zero_grad()
         for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+samples_per_round]):
-            # explicit task boundary for twf
-            # if samples_cnt % training_args.samples_per_task == 0 and training_args.mode in ["bic", "xder", "der_lider", "er_lider", "xder_lider", "co2l", "trire"]:
-            #     method.online_before_task(task_id)
-            #     task_id += 1
             self.trained_data.append(data)
 
             self.state['sample_cnt'] += 1

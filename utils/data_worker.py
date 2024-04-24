@@ -8,6 +8,11 @@ import PIL
 import numpy as np
 from utils.augment import DataAugmentation, Preprocess, get_statistics
 
+from PIL import Image
+import copy
+from utils.data_loader_llava import preprocess_multimodal, preprocess_text
+from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+
 IS_WINDOWS = sys.platform == "win32"
 TIMEOUT = 5.0
 
@@ -65,139 +70,6 @@ def load_data(sample, data_dir, transform=None):
     return image
 
 @torch.no_grad()
-def worker_loop(index_queue, data_queue, data_dir, transform, transform_on_gpu=False, cpu_transform=None, device='cpu', use_kornia=False, transform_on_worker=True, test_transform=None, scl=False):
-    torch.set_num_threads(1)
-    watchdog = ManagerWatchdog()
-    if use_kornia:
-        if 'cifar100' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar100')
-        elif 'cifar10' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar10')
-        elif 'tinyimagenet' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='tinyimagenet')
-        elif 'imagenet' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='imagenet')
-        preprocess = Preprocess(inp_size)
-        kornia_randaug = DataAugmentation(inp_size, mean, std)
-    while watchdog.is_alive():
-        try:
-            r = index_queue.get(timeout=TIMEOUT)
-        except queue.Empty:
-            continue
-        data = dict()
-        images = []
-        labels = []
-        not_aug_img = []
-        if len(r) > 0:
-            for sample in r:
-                if use_kornia:
-                    img_name = sample["file_name"]
-                    img_path = os.path.join(data_dir, img_name)
-                    image = PIL.Image.open(img_path).convert("RGB")
-                    images.append(preprocess(image))
-                elif transform_on_gpu:
-                    images.append(load_data(sample, data_dir, cpu_transform))
-                    if not scl and test_transform is not None:
-                        not_aug_img.append(load_data(sample, data_dir, test_transform))
-                else:
-                    if scl:
-                        images.append(load_data(sample, data_dir, test_transform))
-                    else:
-                        images.append(load_data(sample, data_dir, transform))
-                        if test_transform is not None:
-                            not_aug_img.append(load_data(sample, data_dir, test_transform))
-                labels.append(sample["label"])
-            if transform_on_worker:
-                if use_kornia:
-                    images = kornia_randaug(torch.stack(images).to(device))
-                elif transform_on_gpu:
-                    if scl:
-                        images = torch.stack(images).to(device)
-                    else:
-                        images = transform(torch.stack(images).to(device))
-                        if test_transform is not None:
-                            not_aug_img = torch.stack(not_aug_img).to(device)
-                else:
-                    images = torch.stack(images)
-                    if not scl and test_transform is not None:
-                        not_aug_img = torch.stack(not_aug_img).to(device)
-            else:
-                images = torch.stack(images)
-                if not scl and test_transform is not None:
-                    not_aug_img = torch.stack(not_aug_img)
-            data['image'] = images
-            data['label'] = torch.LongTensor(labels)
-            if not scl and test_transform is not None:
-                data['not_aug_img'] = not_aug_img
-            data['sample'] = r
-            data_queue.put(data)
-        else:
-            data_queue.put(None)
-
-@torch.no_grad()
-def worker(r, data_dir, transform, transform_on_gpu=False, cpu_transform=None, device='cpu', use_kornia=False, transform_on_worker=True, test_transform=None, scl=False):
-    data = dict()
-    images = []
-    labels = []
-    not_aug_img = []
-    if use_kornia:
-        if 'cifar100' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar100')
-        elif 'cifar10' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='cifar10')
-        elif 'tinyimagenet' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='tinyimagenet')
-        elif 'imagenet' in data_dir:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset='imagenet')
-        preprocess = Preprocess(inp_size)
-        kornia_randaug = DataAugmentation(inp_size, mean, std)
-    if len(r) > 0:
-        for sample in r:
-            if use_kornia:
-                img_name = sample["file_name"]
-                img_path = os.path.join(data_dir, img_name)
-                image = PIL.Image.open(img_path).convert("RGB")
-                images.append(preprocess(image))
-            elif transform_on_gpu:
-                images.append(load_data(sample, data_dir, cpu_transform))
-                if not scl and test_transform is not None:
-                    not_aug_img.append(load_data(sample, data_dir, test_transform))
-            else:
-                if scl:
-                    images.append(load_data(sample, data_dir, test_transform))
-                else:
-                    images.append(load_data(sample, data_dir, transform))
-                    if test_transform is not None:
-                        not_aug_img.append(load_data(sample, data_dir, test_transform))
-            labels.append(sample["label"])
-        if transform_on_worker:
-            if use_kornia:
-                images = kornia_randaug(torch.stack(images).to(device))
-            elif transform_on_gpu:
-                if scl:
-                    images = torch.stack(images).to(device)
-                else:
-                    images = transform(torch.stack(images).to(device))
-                    if test_transform is not None:
-                        not_aug_img = torch.stack(not_aug_img).to(device)
-            else:
-                images = torch.stack(images)
-                if not scl and test_transform is not None:
-                    not_aug_img = torch.stack(not_aug_img).to(device)
-        else:
-            images = torch.stack(images)
-            if not scl and test_transform is not None:
-                not_aug_img = torch.stack(not_aug_img)
-        data['image'] = images
-        data['label'] = torch.LongTensor(labels)
-        if not scl and test_transform is not None:
-            data['not_aug_img'] = not_aug_img
-        data['sample'] = r
-        return data
-    else:
-        return None
-
-@torch.no_grad()
 def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
     data = dict()
     images = []
@@ -249,10 +121,6 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
     else:
         return None
 
-from PIL import Image
-import copy
-from utils.data_loader_llava import preprocess_multimodal, preprocess_text
-from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 
 @torch.no_grad()
 def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None, data_args=None):
@@ -304,15 +172,10 @@ def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None
                 input_ids.append(data_dict['input_ids'][0])
                 labels.append(data_dict['labels'][0])
 
-                # input_ids.append(input_id)
-                # labels.append(label)
-
             data['image'] = torch.stack(images)
             data['input_id'] = input_ids#torch.stack(input_ids)
             data['label'] = labels#torch.stack(labels)
             data['sample'] = r
-            # if not scl and test_transform is not None:
-            #     data['not_aug_img'] = not_aug_img
             data_queue.put(data)
         else:
             data_queue.put(None)
