@@ -280,20 +280,20 @@ class CLManagerClient: # Client
             self.init_model()
             self.initialize_future(train_datalist)
         else: # load_state
-            if client_id != self.state['client_id']:
-                self.logger.write(f"load client {client_id}\n")
-                trainer_state = np.load(os.path.join(self.args.state_dir, '{}_client_trainerstate.npy'.format(client_id)), allow_pickle=True).item()
-                self.state['client_id'] = trainer_state['client_id']
-                self.state['sample_cnt'] = trainer_state['sample_cnt']
-                self.state['round_cnt'] = trainer_state['round_cnt']
-                self.state['done'] = trainer_state['done']
-                self.temp_future_batch = trainer_state['temp_future_batch']
-                self.waiting_batch = trainer_state['waiting_batch']
-                self.temp_batch = trainer_state['temp_batch']
+            # if client_id != self.state['client_id']:
+            self.logger.write(f"load client {client_id} to rank {self.rank}\n")
+            trainer_state = np.load(os.path.join(self.args.state_dir, '{}_client_trainerstate.npy'.format(client_id)), allow_pickle=True).item()
+            self.state['client_id'] = trainer_state['client_id']
+            self.state['sample_cnt'] = trainer_state['sample_cnt']
+            self.state['round_cnt'] = trainer_state['round_cnt']
+            self.state['done'] = trainer_state['done']
+            self.temp_future_batch = trainer_state['temp_future_batch']
+            self.waiting_batch = trainer_state['waiting_batch']
+            self.temp_batch = trainer_state['temp_batch']
 
-                self.memory.load_state(client_id, self.args.state_dir)
-                self.dataloader.load_state(client_id, self.args.state_dir)
-                self.load_model(client_id, self.args.state_dir)
+            self.memory.load_state(client_id, self.args.state_dir)
+            self.dataloader.load_state(client_id, self.args.state_dir)
+            self.load_model(client_id, self.args.state_dir)
     
     def init_state(self, cid, data_len):
         self.state['client_id'] = cid
@@ -356,7 +356,7 @@ class CLManagerClient: # Client
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 2
+        samples_per_round = 800
 
         seen_so_far = self.state['sample_cnt']
         
