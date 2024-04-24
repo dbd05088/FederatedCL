@@ -5,6 +5,7 @@ from peft.tuners.lora import LoraLayer
 from torch.utils.data import DataLoader
 from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
 import copy
+import torch
 
 class FedUpperbound_server(CLManagerServer):
     def setup(self):
@@ -48,8 +49,10 @@ class FedUpperbound_server(CLManagerServer):
         for name, module in self.model.named_modules():
             if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
                 state_dict.update(module.state_dict())
+        # print(state_dict)
         for k, v in state_dict.items():
-            state_dict[k] = v.cpu()
+            if isinstance(v, torch.Tensor):
+                state_dict[k] = v.cpu()
         self.state_dict = state_dict
         
         eval_keys = []
@@ -73,7 +76,7 @@ class FedUpperbound_client(CLManagerClient):
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 800
+        samples_per_round = 4
 
         seen_so_far = self.state['sample_cnt']
         

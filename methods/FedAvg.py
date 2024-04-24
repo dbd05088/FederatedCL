@@ -2,6 +2,7 @@ from methods.cl_manager_server import CLManagerServer
 from methods.cl_manager_client import CLManagerClient
 from collections import OrderedDict
 from peft.tuners.lora import LoraLayer
+import torch
 
 class FedAvg_server(CLManagerServer):
     def setup(self):
@@ -26,10 +27,13 @@ class FedAvg_server(CLManagerServer):
         
         mean_state_dict = OrderedDict()
         for k in keys:
-            new_tensor = 0
-            for i in range(len(self.state_dicts)):
-                new_tensor += self.state_dicts[i][k]
-            mean_state_dict[k] = new_tensor / num_clients
+            if isinstance(self.state_dicts[0][k], torch.Tensor):
+                new_tensor = 0
+                for i in range(len(self.state_dicts)):
+                    new_tensor += self.state_dicts[i][k]
+                mean_state_dict[k] = new_tensor / num_clients
+            else:
+                mean_state_dict[k] = self.state_dicts[0][k]
         
         self.model.load_state_dict(mean_state_dict, strict=False)
         self.mean_state_dict = mean_state_dict
@@ -48,7 +52,8 @@ class FedAvg_client(CLManagerClient):
             if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
                 state_dict.update(module.state_dict())
         for k, v in state_dict.items():
-            state_dict[k] = v.cpu()
+            if isinstance(v, torch.Tensor):
+                state_dict[k] = v.cpu()
         return state_dict
     
     def handle_server_msg(self, server_msg):
