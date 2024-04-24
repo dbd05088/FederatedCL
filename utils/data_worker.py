@@ -240,8 +240,8 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
             labels.append(data_dict['labels'][0])
 
         data['image'] = torch.stack(images)
-        data['input_id'] = torch.stack(input_ids)
-        data['label'] = torch.stack(labels)
+        data['input_id'] = input_ids#torch.stack(input_ids)
+        data['label'] = labels#torch.stack(labels)
         data['sample'] = r
         # if not scl and test_transform is not None:
         #     data['not_aug_img'] = not_aug_img
