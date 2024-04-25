@@ -278,6 +278,7 @@ class CLManagerClient: # Client
         if self.is_new(client_id):
             self.init_state(client_id, len(train_datalist))
             self.init_model()
+            self.data_stream = iter(train_datalist)
             self.initialize_future(train_datalist)
         else: # load_state
             # if client_id != self.state['client_id']:
@@ -290,6 +291,8 @@ class CLManagerClient: # Client
             self.temp_future_batch = trainer_state['temp_future_batch']
             self.waiting_batch = trainer_state['waiting_batch']
             self.temp_batch = trainer_state['temp_batch']
+            self.future_sample_num = trainer_state['future_sample_num']
+            self.data_stream = iter(train_datalist[self.future_sample_num:])
 
             self.memory.load_state(client_id, self.args.state_dir)
             self.dataloader.load_state(client_id, self.args.state_dir)
@@ -307,6 +310,7 @@ class CLManagerClient: # Client
         trainer_state['temp_future_batch'] = self.temp_future_batch
         trainer_state['waiting_batch'] = self.waiting_batch
         trainer_state['temp_batch'] = self.temp_batch
+        trainer_state['future_sample_num'] = self.future_sample_num
 
         np.save(os.path.join(self.args.state_dir, '{}_client_trainerstate.npy'.format(self.state['client_id'])), trainer_state)
         self.memory.save_state(self.state['client_id'], self.args.state_dir)
@@ -375,7 +379,6 @@ class CLManagerClient: # Client
 
     # Memory 새로 정의 (not MemoryBase)
     def initialize_future(self, train_datalist):
-        self.data_stream = iter(train_datalist)
         self.dataloader = MultiProcessLoader(self.n_worker, self.device, tokenizer=self.tokenizer, data_args=self.data_args)
         self.memory = MemoryBase(self.memory_size)
 

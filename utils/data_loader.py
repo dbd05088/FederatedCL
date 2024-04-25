@@ -110,7 +110,7 @@ class MultiProcessLoader():
                 samples_in_index.append(None)
         for i in range(len(self.result_queues)):
             try:
-                r = self.result_queues[i].get(timeout=TIMEOUT)
+                r = self.result_queues[i].get(timeout=3000.0)
                 if r:
                     samples_in_result.append(r['sample'])
                 else:
