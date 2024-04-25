@@ -17,22 +17,28 @@ print(len(hrvqa))
 print(len(vqamed))
 # breakpoint()
 
-size = 12000
+size = 40000
 indices = np.arange(len(aqua)).tolist()
 selection = sorted(random.sample(indices, size))
 new_list = []
 for idx in selection:
     new_list.append(aqua[idx])
 with open("./scenarios/AQUA-0.json", 'w') as json_file:
-    json.dump(new_list[:4000], json_file, indent=4)
+    json.dump(new_list[:8000], json_file, indent=4)
 
 with open("./scenarios/AQUA-1.json", 'w') as json_file:
-    json.dump(new_list[4000:8000], json_file, indent=4)
+    json.dump(new_list[8000:16000], json_file, indent=4)
     
 with open("./scenarios/AQUA-2.json", 'w') as json_file:
-    json.dump(new_list[8000:12000], json_file, indent=4)
+    json.dump(new_list[16000:24000], json_file, indent=4)
 
-size = 16000
+with open("./scenarios/AQUA-3.json", 'w') as json_file:
+    json.dump(new_list[24000:32000], json_file, indent=4)
+
+with open("./scenarios/AQUA-4.json", 'w') as json_file:
+    json.dump(new_list[32000:40000], json_file, indent=4)
+
+size = 40000
 indices = np.arange(len(hrvqa)).tolist()
 selection = sorted(random.sample(indices, size))
 new_list = []
@@ -40,32 +46,35 @@ for idx in selection:
     new_list.append(hrvqa[idx])
 
 with open("./scenarios/HRVQA-1.0-0.json", 'w') as json_file:
-    json.dump(new_list[:4000], json_file, indent=4)
+    json.dump(new_list[:8000], json_file, indent=4)
 
 with open("./scenarios/HRVQA-1.0-1.json", 'w') as json_file:
-    json.dump(new_list[4000:8000], json_file, indent=4)
+    json.dump(new_list[8000:16000], json_file, indent=4)
     
 with open("./scenarios/HRVQA-1.0-2.json", 'w') as json_file:
-    json.dump(new_list[8000:12000], json_file, indent=4)
+    json.dump(new_list[16000:24000], json_file, indent=4)
 
 with open("./scenarios/HRVQA-1.0-3.json", 'w') as json_file:
-    json.dump(new_list[12000:16000], json_file, indent=4)
-    
-size = 12000
-indices = np.arange(len(vqamed)).tolist()
-selection = sorted(random.sample(indices, size))
-new_list = []
-for idx in selection:
-    new_list.append(vqamed[idx])
-    
-with open("./scenarios/VQA-MED-0.json", 'w') as json_file:
-    json.dump(new_list[:4000], json_file, indent=4)
+    json.dump(new_list[24000:32000], json_file, indent=4)
 
-with open("./scenarios/VQA-MED-1.json", 'w') as json_file:
-    json.dump(new_list[4000:8000], json_file, indent=4)
+with open("./scenarios/HRVQA-1.0-4.json", 'w') as json_file:
+    json.dump(new_list[32000:40000], json_file, indent=4)
     
-with open("./scenarios/VQA-MED-2.json", 'w') as json_file:
-    json.dump(new_list[8000:12000], json_file, indent=4)
+# size = 12000
+# indices = np.arange(len(vqamed)).tolist()
+# selection = sorted(random.sample(indices, size))
+# new_list = []
+# for idx in selection:
+#     new_list.append(vqamed[idx])
+    
+# with open("./scenarios/VQA-MED-0.json", 'w') as json_file:
+#     json.dump(new_list[:4000], json_file, indent=4)
+
+# with open("./scenarios/VQA-MED-1.json", 'w') as json_file:
+#     json.dump(new_list[4000:8000], json_file, indent=4)
+    
+# with open("./scenarios/VQA-MED-2.json", 'w') as json_file:
+#     json.dump(new_list[8000:12000], json_file, indent=4)
 
 
 

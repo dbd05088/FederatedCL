@@ -102,7 +102,7 @@ class CLManagerServer: # == SERVER
         self.waiting_batch = []
         # federated learning
         self.num_clients = kwargs["num_clients"]
-        self.frac_clients = 1.0#0.5
+        self.frac_clients = 0.7#0.5
         self.num_rounds = kwargs["num_rounds"] # num of federated learning round
         self.n_gpu = kwargs["n_gpu"] # first one is for server
 
@@ -120,7 +120,7 @@ class CLManagerServer: # == SERVER
         self.tokenizer = tokenizer
         self.data_args = data_args
 
-        max_steps = 4000 # FIXME
+        max_steps = 8000 # FIXME
         self.create_optimizer()
         self.create_scheduler(max_steps, optimizer=self.optimizer)
 

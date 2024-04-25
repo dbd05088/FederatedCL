@@ -127,7 +127,7 @@ class CLManagerClient: # Client
         self.tokenizer = tokenizer
         self.data_args = data_args
 
-        max_steps = 4000 # FIXME
+        max_steps = 8000 # FIXME
         self.create_optimizer()
         self.create_scheduler(max_steps, optimizer=self.optimizer)
 
@@ -509,10 +509,10 @@ class CLManagerClient: # Client
             
             if (self.state['sample_cnt']) % self.gradient_accumulation_steps == 0:
                 self.optimizer.step()
-                self.lr_scheduler.step()
+                # self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-            self.after_model_update()
+            # self.after_model_update()
 
             total_loss += loss.item()
         return total_loss / iterations
@@ -520,9 +520,9 @@ class CLManagerClient: # Client
     def before_model_update(self):
         pass
 
-    def after_model_update(self):
-        # self.update_schedule()
-        self.lr_scheduler.step()
+    # def after_model_update(self):
+    #     # self.update_schedule()
+    #     self.lr_scheduler.step()
 
     def report_training(self, sample_num, train_loss):
         # writer.add_scalar(f"train/loss", train_loss, sample_num)
