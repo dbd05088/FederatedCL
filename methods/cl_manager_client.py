@@ -9,8 +9,8 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from utils.data_loader import MultiProcessLoader
-from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
-from utils.train_utils import  get_llavamodel
+from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
+from utils.train_utils import  get_VLMmodel
 from peft.tuners.lora import LoraLayer
 import bitsandbytes
 
@@ -24,7 +24,6 @@ from transformers.trainer import (
 import numpy as np
 
 from transformers.optimization import get_scheduler
-from utils.train_utils import get_llavamodel
 from collections import OrderedDict
 from utils.data_worker import ManagerWatchdog
 import queue
@@ -122,14 +121,14 @@ class CLManagerClient: # Client
         self.gradient_checkpointing = kwargs['gradient_checkpointing']
         
     def setup(self):
-        model, tokenizer, data_args = get_llavamodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
+        model, tokenizer, data_args = get_VLMmodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
         self.model = model
         self.tokenizer = tokenizer
         self.data_args = data_args
 
-        max_steps = 8000 # FIXME
+        # max_steps = 8000 # FIXME
         self.create_optimizer()
-        self.create_scheduler(max_steps, optimizer=self.optimizer)
+        # self.create_scheduler(max_steps, optimizer=self.optimizer)
 
         # Activate gradient checkpointing if needed
         if self.args.gradient_checkpointing: # default False
@@ -155,7 +154,7 @@ class CLManagerClient: # Client
             decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
             decay_parameters = [name for name in decay_parameters if "bias" not in name]
             if self.args.mm_projector_lr is not None:
-                projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name]
+                projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" or "vision_tower" in name]
                 optimizer_grouped_parameters = [
                     {
                         "params": [
@@ -245,7 +244,7 @@ class CLManagerClient: # Client
             self.optimizer.load_state_dict(
                 torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{OPTIMIZER_NAME}"), map_location=map_location)
             )
-            self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}")))
+            # self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}")))
 
     def save_model(self, client_id, output_dir):
         state_dict = OrderedDict()
@@ -262,8 +261,8 @@ class CLManagerClient: # Client
     @torch.no_grad()
     def init_model(self):
         # reinit vision tower & mm_projector of llava model
-        self.model.load_state_dict(torch.load('./llava_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
-        self.logger.write("done loading init llava vision tower and mm projector\n")
+        # self.model.load_state_dict(torch.load('./llava_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
+        # self.logger.write("done loading init llava vision tower and mm projector\n")
         # reset lora layers
         for name, module in self.model.named_modules():
             if isinstance(module, LoraLayer):
@@ -297,6 +296,7 @@ class CLManagerClient: # Client
             self.memory.load_state(client_id, self.args.state_dir)
             self.dataloader.load_state(client_id, self.args.state_dir)
             self.load_model(client_id, self.args.state_dir)
+            self._load_optimizer_and_scheduler(self.args.state_dir)
     
     def init_state(self, cid, data_len):
         self.state['client_id'] = cid
@@ -317,7 +317,7 @@ class CLManagerClient: # Client
         self.dataloader.save_state(self.state['client_id'], self.args.state_dir)
 
         torch.save(self.optimizer.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{OPTIMIZER_NAME}"))
-        torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"))
+        # torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"))
 
         self.save_model(self.state['client_id'], self.args.state_dir)
         
@@ -360,7 +360,7 @@ class CLManagerClient: # Client
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 800
+        samples_per_round = 1000
 
         seen_so_far = self.state['sample_cnt']
         

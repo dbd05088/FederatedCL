@@ -10,8 +10,7 @@ from utils.augment import DataAugmentation, Preprocess, get_statistics
 
 from PIL import Image
 import copy
-from utils.data_loader_llava import preprocess_multimodal, preprocess_text
-from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+from utils.data_loader_VLM import preprocess_multimodal, preprocess_text_llava, preprocess_text_bunny
 
 IS_WINDOWS = sys.platform == "win32"
 TIMEOUT = 5.0
@@ -103,10 +102,17 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
                     data_args)
             else:
                 sources = copy.deepcopy([e["conversations"] for e in sample])
-            data_dict = preprocess_text(
-                sources,
-                tokenizer,
-                has_image=('image' in sample))
+            
+            if 'llava' in data_args.model_name_for_dataarg.lower():
+                data_dict = preprocess_text_llava(
+                    sources,
+                    tokenizer,
+                    has_image=('image' in sample))
+            elif 'bunny' in data_args.model_name_for_dataarg.lower():
+                data_dict = preprocess_text_bunny(
+                    sources,
+                    tokenizer,
+                    has_image=('image' in sample))
             
             input_ids.append(data_dict['input_ids'][0])
             labels.append(data_dict['labels'][0])
@@ -164,10 +170,16 @@ def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None
                         data_args)
                 else:
                     sources = copy.deepcopy([e["conversations"] for e in sample])
-                data_dict = preprocess_text(
-                    sources,
-                    tokenizer,
-                    has_image=('image' in sample))
+                if 'llava' in data_args.model_name_for_dataarg.lower():
+                    data_dict = preprocess_text_llava(
+                        sources,
+                        tokenizer,
+                        has_image=('image' in sample))
+                elif 'bunny' in data_args.model_name_for_dataarg.lower():
+                    data_dict = preprocess_text_bunny(
+                        sources,
+                        tokenizer,
+                        has_image=('image' in sample))
                 
                 input_ids.append(data_dict['input_ids'][0])
                 labels.append(data_dict['labels'][0])

@@ -8,8 +8,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
-from utils.train_utils import get_llavamodel
+from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
+from utils.train_utils import get_VLMmodel
 from collections.abc import Mapping
 import random
 
@@ -115,14 +115,14 @@ class CLManagerServer: # == SERVER
         self.gradient_checkpointing = kwargs['gradient_checkpointing']
 
     def setup(self):
-        model, tokenizer, data_args = get_llavamodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
+        model, tokenizer, data_args = get_VLMmodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
         self.model = model
         self.tokenizer = tokenizer
         self.data_args = data_args
 
-        max_steps = 8000 # FIXME
+        # max_steps = 8000 # FIXME
         self.create_optimizer()
-        self.create_scheduler(max_steps, optimizer=self.optimizer)
+        # self.create_scheduler(max_steps, optimizer=self.optimizer)
 
         # Activate gradient checkpointing if needed
         if self.args.gradient_checkpointing: # default False
@@ -212,7 +212,7 @@ class CLManagerServer: # == SERVER
             decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
             decay_parameters = [name for name in decay_parameters if "bias" not in name]
             if self.args.mm_projector_lr is not None:
-                projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name]
+                projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" or "vision_tower" in name]
                 optimizer_grouped_parameters = [
                     {
                         "params": [
@@ -307,7 +307,7 @@ class CLManagerServer: # == SERVER
             self.optimizer.load_state_dict(
                 torch.load(os.path.join(checkpoint, OPTIMIZER_NAME), map_location=map_location)
             )
-            self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, SCHEDULER_NAME)))
+            # self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, SCHEDULER_NAME)))
 
     def report_training(self, sample_num, train_loss):
         # writer.add_scalar(f"train/loss", train_loss, sample_num)

@@ -4,11 +4,12 @@ from typing import Dict, Optional, Sequence, List
 
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="./llava-v1.5-7b") #"liuhaotian/llava-v1.5-7b"
+    model_name_or_path: Optional[str] = field(default=None) #"liuhaotian/llava-v1.5-7b"
+    model_type: Optional[str] = field(default=None)
     version: Optional[str] = field(default="v1")
     freeze_backbone: bool = field(default=True)
     tune_mm_mlp_adapter: bool = field(default=False)
-    vision_tower: Optional[str] = field(default="openai/clip-vit-large-patch14-336")
+    vision_tower: Optional[str] = field(default=None)
     mm_vision_select_layer: Optional[int] = field(default=-2)   # default to the last layer
     pretrain_mm_mlp_adapter: Optional[str] = field(default=None)
     mm_projector_type: Optional[str] = field(default='mlp2x_gelu')
@@ -26,6 +27,7 @@ class DataArguments:
     is_multimodal: bool = False
     image_folder: Optional[str] = field(default=None)
     image_aspect_ratio: str = 'pad'
+    model_name_for_dataarg: Optional[str] = field(default=None)
 
 
 import torch
@@ -52,10 +54,6 @@ class TrainingArguments(transformers.TrainingArguments):
     topk: int = field(default=1)
     f_period: int = field(default=None)
     transforms: str= field(default='randaug')
-
-    sigma:int = 10
-    repeat:int = 1
-    init_cls:int = 100
 
     # samples_per_task: int = 
     memory_size: int = 500

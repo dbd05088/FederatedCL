@@ -2,7 +2,7 @@ from methods.cl_manager_server import CLManagerServer
 from methods.cl_manager_client import CLManagerClient
 from collections import OrderedDict
 from torch.utils.data import DataLoader
-from utils.data_loader_llava import LazySupervisedDataset, DataCollatorForSupervisedDataset
+from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
 import torch
 
 class FedUpperbound_server(CLManagerServer):
@@ -38,7 +38,7 @@ class FedUpperbound_server(CLManagerServer):
             loss.backward()
             if (i + 1) % self.gradient_accumulation_steps == 0:
                 self.optimizer.step()
-                self.lr_scheduler.step()
+                # self.lr_scheduler.step()
                 self.optimizer.zero_grad()
             
             self.report_training(i+1, loss)
@@ -73,7 +73,7 @@ class FedUpperbound_client(CLManagerClient):
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 800
+        samples_per_round = 1000
 
         seen_so_far = self.state['sample_cnt']
         
