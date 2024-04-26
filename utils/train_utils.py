@@ -1237,7 +1237,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
 
     if training_args.bits in [4, 8]:
         for name, module in model.named_modules():
-            if isinstance(module, LoraLayer) or isinstance(module, torch.nn.LayerNorm):
+            if isinstance(module, LoraLayer)or isinstance(module, torch.nn.LayerNorm):
                 if training_args.bf16:
                     module = module.to(torch.bfloat16)
             # if 'norm' in name and 'vision_tower' not in name:

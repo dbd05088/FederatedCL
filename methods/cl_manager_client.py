@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 from utils.data_loader import MultiProcessLoader
 from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
@@ -14,7 +14,7 @@ from utils.train_utils import  get_VLMmodel
 from peft.tuners.lora import LoraLayer
 import bitsandbytes
 
-writer = SummaryWriter("tensorboard")
+# writer = SummaryWriter("tensorboard")
 
 from transformers import Trainer
 from transformers.trainer import (
@@ -119,6 +119,13 @@ class CLManagerClient: # Client
         
         self.gradient_accumulation_steps = kwargs['gradient_accumulation_steps']
         self.gradient_checkpointing = kwargs['gradient_checkpointing']
+        
+        # 576 for clip image encoder (llava)
+        # 729 for siglip (bunny)
+        if 'llava' in self.model_args.model_name_or_path.lower():
+            self.img_feat_size = 576
+        elif 'bunny' in self.model_args.model_name_or_path.lower():
+            self.img_feat_size = 729
         
     def setup(self):
         model, tokenizer, data_args = get_VLMmodel(self.model_args, self.args, self.bnb_model_from_pretrained_args, self.data_args)
@@ -261,8 +268,14 @@ class CLManagerClient: # Client
     @torch.no_grad()
     def init_model(self):
         # reinit vision tower & mm_projector of llava model
-        # self.model.load_state_dict(torch.load('./llava_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
-        # self.logger.write("done loading init llava vision tower and mm projector\n")
+        if 'bunny' in self.model_args.model_name_or_path.lower():
+            self.model.load_state_dict(torch.load('./bunny_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
+            self.logger.write("done loading init bunny vision tower and mm projector\n")
+        elif 'llava' in self.model_args.model_name_or_path.lower():
+            self.model.load_state_dict(torch.load('./llava_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
+            self.logger.write("done loading init llava vision tower and mm projector\n")
+        else:
+            raise ValueError("wrong model name")
         # reset lora layers
         for name, module in self.model.named_modules():
             if isinstance(module, LoraLayer):
@@ -578,7 +591,7 @@ class CLManagerClient: # Client
                     
                     # image token index
                     img_token_index = (inp==IMAGE_TOKEN_INDEX).nonzero()[0].item()
-                    pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+576:]))
+                    pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+self.img_feat_size:]))
                     
                     n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
                     
