@@ -1,4 +1,4 @@
-git clone https://github.com/umd-huang-lab/Mementos
+git clone https://github.com/si0wang/Mementos.git
 mkdir Mementos/train
 mkdir Mementos/test
 gdrive files download 16OgGr7cb9egGzTGCao5xgWKmdaG06S6H
