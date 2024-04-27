@@ -376,6 +376,14 @@ class CLManagerServer: # == SERVER
 
         return (loss, outputs) if return_outputs else loss
 
+    def evaluate_seendata(self):
+        eval_keys = []
+        for i in range(len(self.test_datalists)):
+            for data_info in self.test_datalists[i]:
+                if data_info['data_name'] not in eval_keys:
+                    self.evaluate(data_info['data'], data_info['data_name'])
+                    eval_keys.append(data_info['data_name'])
+
     def evaluate(self, test_datalist, dataset_name):
         self.logger.write(f"server evaluate {dataset_name}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)

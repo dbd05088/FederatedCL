@@ -52,12 +52,7 @@ class FedUpperbound_server(CLManagerServer):
 
         self.state_dict = state_dict
         
-        eval_keys = []
-        for i in range(len(self.test_datalists)):
-            for name, datalist in self.test_datalists[i].items():
-                if name not in eval_keys:
-                    self.evaluate(datalist, name)
-                    eval_keys.append(name)
+        self.evaluate_seendata()
         
 class FedUpperbound_client(CLManagerClient): 
     def setup(self):
@@ -88,8 +83,9 @@ class FedUpperbound_client(CLManagerClient):
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
             if self.state['sample_cnt'] % self.eval_period == 0:
-                for dataname, datalist in test_datalist.items():
-                    self.evaluate(dataname, datalist)
+                for data_info in test_datalist:
+                    if self.state['sample_cnt'] > data_info['eval_cnt']:
+                        self.evaluate(data_info['data_name'], data_info['data'])
 
         self.save_state()
     

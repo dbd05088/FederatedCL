@@ -386,8 +386,9 @@ class CLManagerClient: # Client
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
             if self.state['sample_cnt'] % self.eval_period == 0:
-                for dataname, datalist in test_datalist.items():
-                    self.evaluate(dataname, datalist)
+                for data_info in test_datalist:
+                    if self.state['sample_cnt'] > data_info['eval_cnt']:
+                        self.evaluate(data_info['data_name'], data_info['data'])
         self.save_state()
 
     # Memory 새로 정의 (not MemoryBase)

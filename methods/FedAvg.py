@@ -37,12 +37,7 @@ class FedAvg_server(CLManagerServer):
         self.model.load_state_dict(mean_state_dict, strict=False)
         self.mean_state_dict = mean_state_dict
         
-        eval_keys = []
-        for i in range(len(self.test_datalists)):
-            for name, datalist in self.test_datalists[i].items():
-                if name not in eval_keys:
-                    self.evaluate(datalist, name)
-                    eval_keys.append(name)
+        self.evaluate_seendata()
         
 class FedAvg_client(CLManagerClient): 
     def client_msg(self):

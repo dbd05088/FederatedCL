@@ -6,12 +6,10 @@ import numpy as np
 import torch
 from configuration.VLM_config import ModelArguments, DataArguments, TrainingArguments
 import transformers
-from utils.data_loader import get_test_datalist
-from utils.data_loader import get_train_datalist
 from utils.train_utils import get_VLMmodel
 
 from utils.method_manager_VLM import select_method
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 from torch import multiprocessing
 import copy
@@ -75,15 +73,17 @@ def main():
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     
     # model, _, _ = get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args)
-    # breakpoint()
+    # # breakpoint()
     
     # from collections import OrderedDict
     # state_dict = OrderedDict()
     # for name, parameters in model.named_parameters():
     #     if 'vision_tower' in name or 'mm_projector' in name:
     #         state_dict[name] = parameters.cpu()
-    
-    # torch.save(state_dict, 'llava_vision_tower_mm_projector.pth')
+    # print(state_dict.keys())
+    # # breakpoint()
+    # torch.save(state_dict, 'bunny_vision_tower_mm_projector.pth')
+    # breakpoint()
     
     
     # create folder
@@ -176,13 +176,27 @@ def get_datalists(args, scenario_num):
     train_datalists = {}
     test_datalists = {}
     
-    for data in scenario:
-        with open(f"./scenarios/{data['dataset']}-{str(data['subset_id'])}.json") as fp:
-            datalist = json.load(fp)
-        train_datalists[data['client_id']] = datalist
-        
-        test_datalist = get_test_datalist(data['dataset'])
-        test_datalists[data['client_id']] = {data['dataset']:test_datalist}
+    for client_data in scenario:
+        client_id = client_data['client_id']
+        train_datalist = []
+        test_datalist = []
+        eval_cnt = 0
+        for data in client_data['datasets']:
+            with open(f"./dataset/{data['dataset']}/train/dataset-{str(data['subset_id'])}.json") as fp:
+                datalist = json.load(fp)
+            random.shuffle(datalist)
+            train_datalist.extend(datalist)
+            
+            with open(f"./dataset/{data['dataset']}/test/dataset-{str(data['subset_id'])}.json") as fp:
+                datalist = json.load(fp)
+            test_datalist.append({
+                "data_name": f"{data['dataset']}-{data['subset_id']}",
+                "data": datalist,
+                "eval_cnt": eval_cnt + len(datalist)})
+            eval_cnt += len(datalist)
+            
+        train_datalists[client_id] = train_datalist
+        test_datalists[client_id] = test_datalist
     
     return train_datalists, test_datalists
 
