@@ -84,6 +84,12 @@ class MultiProcessLoader():
             input_ids = input_ids[:, :self.tokenizer.model_max_length]
             labels = labels[:, :self.tokenizer.model_max_length]
             
+            attention_mask=input_ids.ne(self.tokenizer.pad_token_id)
+            
+            if self.tokenizer.pad_token_id == self.tokenizer.eos_token_id:
+                for input_id in input_ids:
+                    input_id[input_id == -300] = self.tokenizer.eos_token_id
+            
             # input_ids = torch.cat(input_ids)
             # labels = torch.cat(labels)
             # if self.transform_on_gpu and not self.transform_on_worker:
@@ -94,6 +100,7 @@ class MultiProcessLoader():
             data['images'] = images
             data['input_ids'] = input_ids
             data['labels'] = labels
+            data['attention_mask'] = attention_mask
             return data
         else:
             return None

@@ -4,12 +4,13 @@ import random
 
 import numpy as np
 import torch
-from configuration.llava_config import ModelArguments, DataArguments, TrainingArguments
+from configuration.VLM_config import ModelArguments, DataArguments, TrainingArguments
 import transformers
 from utils.data_loader import get_test_datalist
 from utils.data_loader import get_train_datalist
+from utils.train_utils import get_VLMmodel
 
-from utils.method_manager_llava import select_method
+from utils.method_manager_VLM import select_method
 from torch.utils.tensorboard import SummaryWriter
 
 from torch import multiprocessing
@@ -18,8 +19,8 @@ import torch.distributed as dist
 import json
 from transformers import BitsAndBytesConfig
 
-import warnings
-warnings.filterwarnings('ignore')
+# import warnings
+# warnings.filterwarnings('ignore')
 
 def main():
     parser = transformers.HfArgumentParser(
@@ -72,7 +73,19 @@ def main():
     random.seed(training_args.seed)
 
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
-
+    
+    # model, _, _ = get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args)
+    # breakpoint()
+    
+    # from collections import OrderedDict
+    # state_dict = OrderedDict()
+    # for name, parameters in model.named_parameters():
+    #     if 'vision_tower' in name or 'mm_projector' in name:
+    #         state_dict[name] = parameters.cpu()
+    
+    # torch.save(state_dict, 'llava_vision_tower_mm_projector.pth')
+    
+    
     # create folder
     if not os.path.exists(training_args.state_dir):
         os.makedirs(training_args.state_dir)

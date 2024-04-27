@@ -12,6 +12,10 @@ def process_and_save(dataset, output_folder, subset_name):
     answer_list = dataset[1]['annotations']
     # Initialize list to hold all JSON data
     json_data_list = []
+    
+    subset_folder = os.path.join(output_folder, subset_name)
+    if not os.path.exists(subset_folder):
+        os.makedirs(subset_folder)
 
     assert len(question_list) == len(answer_list)
     

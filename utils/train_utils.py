@@ -5,7 +5,7 @@ import torch
 import pandas as pd
 from models import mnist, cifar, imagenet
 from torch.utils.data import DataLoader
-from onedrivedownloader import download as dn
+# from onedrivedownloader import download as dn
 from torch.optim import SGD
 import numpy as np
 import timm
@@ -1041,15 +1041,66 @@ def copy_paste_fc(new_fc, prev_fc):
 import transformers
 from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.language_model.llava_mpt import LlavaMptForCausalLM
-import models.llava.conversation as conversation_lib
+from models.bunny import BunnyPhiForCausalLM, BunnyStableLMForCausalLM, BunnyQwen2ForCausalLM, BunnyMiniCPMForCausalLM, BunnyLlamaForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import models.llava.conversation as conversation_lib_llava
+import models.bunny.conversation as conversation_lib_bunny
 from transformers import Trainer
 from peft.tuners.lora import LoraLayer
 
-def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, data_args):
+def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args):
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
     attn_implementation = "flash_attention_2"
-    if model_args.vision_tower is not None:
-        if 'mpt' in model_args.model_name_or_path:
+    assert model_args.vision_tower is not None
+    
+    # load tokenizer
+    # for llava
+    if model_args.model_type == "mpt":
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right"
+        )
+    elif model_args.model_type == 'llama': 
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=False,
+        )
+    
+    # for bunny
+    elif (
+        model_args.model_type == 'phi-1.5' or model_args.model_type == 'phi-2'
+            or model_args.model_type == 'qwen1.5-1.8b' or model_args.model_type == 'minicpm'
+            or model_args.model_type == 'llama3-8b'):
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+        )
+    elif model_args.model_type == 'stablelm-2':
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True
+        )
+
+    if tokenizer.unk_token is not None and tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.unk_token
+    
+    if model_args.model_type == 'llama3-8b':
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    if 'llava' in model_args.model_name_or_path.lower():
+        if 'mpt' == model_args.model_type:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
             config.attn_config['attn_impl'] = training_args.mpt_attn_impl
             model = LlavaMptForCausalLM.from_pretrained(
@@ -1066,24 +1117,52 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, da
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-    else:
-        model = transformers.LlamaForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            attn_implementation=attn_implementation,
-            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-            **bnb_model_from_pretrained_args
-        )
+    
+    elif 'bunny' in model_args.model_name_or_path.lower():
+        if model_args.model_type == 'phi-1.5' or model_args.model_type == 'phi-2':
+            model = BunnyPhiForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                **bnb_model_from_pretrained_args
+            )
+        elif model_args.model_type == 'stablelm-2':
+            model = BunnyStableLMForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                **bnb_model_from_pretrained_args
+            )
+        elif model_args.model_type == 'qwen1.5-1.8b':
+            model = BunnyQwen2ForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                **bnb_model_from_pretrained_args
+            )
+        elif model_args.model_type == 'minicpm':
+            model = BunnyMiniCPMForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                **bnb_model_from_pretrained_args
+            )
+        elif model_args.model_type == 'llama3-8b':
+            model = BunnyLlamaForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                **bnb_model_from_pretrained_args
+            )
+        else:
+            raise ValueError(f"Unknown Model Type {model_args.model_type}")    
+
     model.config.use_cache = False
+    model.model.requires_grad_(False)
 
     # FIXME
     if training_args.bits >= 16:
         # print(training_args.device)
         model = model.to(training_args.device)
-
-    # if model_args.freeze_backbone: #FIXME
-    #     model.model.requires_grad_(False)
-
+    
+    
     if training_args.bits in [4, 8]:
         from peft import prepare_model_for_kbit_training
         model.config.torch_dtype=(torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
@@ -1114,82 +1193,51 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, da
     # rank0_print("Adding LoRA adapters...")
     model = get_peft_model(model, lora_config)
 
-    if 'mpt' in model_args.model_name_or_path:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right"
-        )
-    else:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right",
-            use_fast=False,
-        )
 
-    # if model_args.version == "v0":
-    #     if tokenizer.pad_token is None:
-    #         smart_tokenizer_and_embedding_resize(
-    #             special_tokens_dict=dict(pad_token="[PAD]"),
-    #             tokenizer=tokenizer,
-    #             model=model,
-    #         )
-    # elif model_args.version == "v0.5":
-    #     tokenizer.pad_token = tokenizer.unk_token
-    # else:
-    tokenizer.pad_token = tokenizer.unk_token
-    if model_args.version in conversation_lib.conv_templates:
-        conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
-    else:
-        conversation_lib.default_conversation = conversation_lib.conv_templates["vicuna_v1"]
+    if 'llava' in model_args.model_name_or_path.lower():
+        if model_args.version in conversation_lib_llava.conv_templates:
+            conversation_lib_llava.default_conversation = conversation_lib_llava.conv_templates[model_args.version]
+        else:
+            conversation_lib_llava.default_conversation = conversation_lib_llava.conv_templates["vicuna_v1"]
+            
+    elif 'bunny' in model_args.model_name_or_path.lower():
+        if model_args.version in conversation_lib_bunny.conv_templates:
+            conversation_lib_bunny.default_conversation = conversation_lib_bunny.conv_templates[model_args.version]
+        else:
+            conversation_lib_bunny.default_conversation = conversation_lib_bunny.conv_templates["default"]
 
-    if model_args.vision_tower is not None:
-        model.get_model().initialize_vision_modules(
-            model_args=model_args,
-            fsdp=training_args.fsdp
-        )
-        
-        vision_tower = model.get_vision_tower()
-        vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
-        vision_tower.requires_grad_(True)
+    # load vision tower
+    # if model_args.vision_tower is not None:
+    model.get_model().initialize_vision_modules(
+        model_args=model_args,
+        # fsdp=training_args.fsdp
+    )
 
-        data_args.image_processor = vision_tower.image_processor
-        data_args.is_multimodal = True
+    vision_tower = model.get_vision_tower()
+    vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
+    vision_tower.requires_grad_(True)
 
-        model.config.image_aspect_ratio = "pad" #data_args.image_aspect_ratio
-        model.config.tokenizer_padding_side = tokenizer.padding_side
-        model.config.tokenizer_model_max_length = tokenizer.model_max_length
+    data_args.image_processor = vision_tower.image_processor
+    data_args.is_multimodal = True
 
-        # model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
-        # if model_args.tune_mm_mlp_adapter:
-        #     model.requires_grad_(False)
-        #     for p in model.get_model().mm_projector.parameters():
-        #         p.requires_grad = True
+    model.config.image_aspect_ratio = "pad" #data_args.image_aspect_ratio
+    model.config.tokenizer_padding_side = tokenizer.padding_side
+    model.config.tokenizer_model_max_length = tokenizer.model_max_length
+    
+    if training_args.bits in [4, 8]:
+        model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
 
-        # model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
-        # if training_args.freeze_mm_mlp_adapter:
-        #     for p in model.get_model().mm_projector.parameters():
-        #         p.requires_grad = False
-        
-        # model.requires_grad_(False)
-        
-
-        if training_args.bits in [4, 8]:
-            model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
-
-        model.config.mm_use_im_start_end = data_args.mm_use_im_start_end = model_args.mm_use_im_start_end
-        model.config.mm_projector_lr = training_args.mm_projector_lr
-        training_args.use_im_start_end = model_args.mm_use_im_start_end
-        model.config.mm_use_im_patch_token = model_args.mm_use_im_patch_token
+    model.config.mm_use_im_start_end = data_args.mm_use_im_start_end = model_args.mm_use_im_start_end
+    model.config.mm_projector_lr = training_args.mm_projector_lr
+    training_args.use_im_start_end = model_args.mm_use_im_start_end
+    model.config.mm_use_im_patch_token = model_args.mm_use_im_patch_token
+    
+    if 'llava' in model_args.model_name_or_path.lower():
         model.initialize_vision_tokenizer(model_args, tokenizer=tokenizer)
 
     if training_args.bits in [4, 8]:
-        
         for name, module in model.named_modules():
-            if isinstance(module, LoraLayer):# or isinstance(module, torch.nn.LayerNorm):
+            if isinstance(module, LoraLayer)or isinstance(module, torch.nn.LayerNorm):
                 if training_args.bf16:
                     module = module.to(torch.bfloat16)
             # if 'norm' in name and 'vision_tower' not in name:
@@ -1198,17 +1246,6 @@ def get_llavamodel(model_args, training_args, bnb_model_from_pretrained_args, da
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
-    
-    # for name, module in model.named_modules():
-    #         if isinstance(module, LoraLayer) or 'vision_tower' in name or 'mm_projector' in name:
-    #             for p in module.parameters():
-    #                 p.requires_grad = True   
-    #         else:
-    #             for p in module.parameters():
-    #                 p.requires_grad = False   
-    # for name, parameter in model.named_parameters():
-    #     if parameter.requires_grad:
-    #         print(name)              
     
     return model, tokenizer, data_args
 
