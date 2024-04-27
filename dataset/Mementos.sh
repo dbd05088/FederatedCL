@@ -16,6 +16,7 @@ mv image_rw Mementos/train
 unzip image_dailylife.zip
 unzip image_robotics.zip
 unzip image_comics.zip
+mv image image_rw
 mv image_robo Mementos/test
 mv image_cmc Mementos/test
 mv image_rw Mementos/test
