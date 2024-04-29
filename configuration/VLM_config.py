@@ -59,12 +59,10 @@ class TrainingArguments(transformers.TrainingArguments):
     memory_size: int = 500
 
     # federated learning
-    num_clients: int = 10
-    num_rounds: int = 10
+    num_clients: int = 5
+    num_rounds: int = 20
     iter_per_round: int = 1
     state_dir: str = field(default="./client_states")
-
-
     
     # dataloader_num_workers
     optim: str = field(default="adamw_torch")

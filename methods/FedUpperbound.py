@@ -94,4 +94,4 @@ class FedUpperbound_client(CLManagerClient):
             return
         
         self.model.load_state_dict(server_msg, strict=False)
-        self.train_data = []
+        self.trained_data = []

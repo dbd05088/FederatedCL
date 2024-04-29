@@ -1,10 +1,9 @@
 #/bin/bash
-# sysctl -w vm.max_map_count=262144
-sudo sysctl -w vm.max_map_count=262144
+
 # CIL CONFIG
-NOTE="fedavg" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="fedavg"
-MODEL_ARCH="bunny_3b" # llava bunny_3b bunny_8b
+NOTE="debug" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="debug"
+MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 RND_SEED=1
 
 # if [ "$DATASET" == "cifar10" ]; then
@@ -37,21 +36,21 @@ else
     exit 1
 fi
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 python main_VLM.py \
+CUDA_VISIBLE_DEVICES=6 python eval_VLM.py \
     --model_name_or_path $MODEL_NAME \
     --model_name_for_dataarg $MODEL_NAME \
     --model_type $MODEL_TYPE \
     --version $VERSION \
-    --num_clients 6 \
+    --scenario 3 \
+    --num_clients 1 \
     --model_max_length 3200 \
-    --scenario 2 \
     --vision_tower $VISION_TOWER \
     --gradient_checkpointing True \
     --gradient_accumulation_steps 4 \
     --bits $BITS \
     --bf16 True \
     --tf32 True \
-    --mode $MODE --dataloader_num_workers 1 \
+    --mode $MODE --dataloader_num_workers 2 \
     --memory_size $MEM_SIZE \
     --seed $RND_SEED \
     --optim $OPT_NAME --lr_scheduler_type $SCHED_NAME \

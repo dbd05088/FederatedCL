@@ -102,7 +102,7 @@ class CLManagerServer: # == SERVER
         self.waiting_batch = []
         # federated learning
         self.num_clients = kwargs["num_clients"]
-        self.frac_clients = 0.7#0.5
+        self.frac_clients = 1.0#0.5
         self.num_rounds = kwargs["num_rounds"] # num of federated learning round
         self.n_gpu = kwargs["n_gpu"] # first one is for server
 
@@ -150,17 +150,19 @@ class CLManagerServer: # == SERVER
             num_selection = int(round(self.num_clients*self.frac_clients)) #4#
             selected_ids = sorted(random.sample(cids, num_selection)) #[0,1,2,3]#
             self.logger.write(f"Round {curr_round} | selected_ids: {selected_ids}\n")
+            # print(f"Round {curr_round} | selected_ids: {selected_ids}\n")
             # selected_ids = cids
             for idx in range(num_selection):
                 send_queue = self.send_channel[idx % len(self.send_channel)]
                 client_id = selected_ids[idx]
-                send_queue.put({
+                send_msg = {
                     'client_id':client_id,
                     'curr_round':curr_round,
                     'train_datalist':self.train_datalists[client_id],
                     'test_datalist':self.test_datalists[client_id],
                     'server_msg':self.server_msg(),
-                })
+                }
+                send_queue.put(send_msg)
             received_data_from_clients = 0
             
             while True:
@@ -387,7 +389,7 @@ class CLManagerServer: # == SERVER
     def evaluate(self, test_datalist, dataset_name):
         self.logger.write(f"server evaluate {dataset_name}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
-        dataloader = DataLoader(dataset, batch_size= 8, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        dataloader = DataLoader(dataset, batch_size= 4, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         
         self.model.eval()
         predictions = []
@@ -400,6 +402,7 @@ class CLManagerServer: # == SERVER
                 # * prepare data
                 inputs = batch['input_ids']
                 input_labels = batch['labels']
+                imgs = batch['images']
                 batch = self._prepare_inputs(batch)
                 
                 output = self.model(**batch)
@@ -408,7 +411,7 @@ class CLManagerServer: # == SERVER
                 # * keep logs
                 n_correct = 0
                 n_word = 0
-                for inp, pred, gold in zip(inputs, pred_scores_list, input_labels):
+                for inp, pred, gold, img in zip(inputs, pred_scores_list, input_labels, imgs):
                     valid_label_mask = gold.ne(IGNORE_INDEX)
                     valid_idx = valid_label_mask.nonzero()[0].item()
                     
@@ -417,7 +420,7 @@ class CLManagerServer: # == SERVER
                     
                     # image token index
                     img_token_index = (inp==IMAGE_TOKEN_INDEX).nonzero()[0].item()
-                    pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+self.img_feat_size:]))
+                    pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+self.img_feat_size*img.shape[0]:]))
                     
                     n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
                     

@@ -120,6 +120,8 @@ class CLManagerClient: # Client
         self.gradient_accumulation_steps = kwargs['gradient_accumulation_steps']
         self.gradient_checkpointing = kwargs['gradient_checkpointing']
         
+        self.num_rounds = kwargs["num_rounds"]
+        
         # 576 for clip image encoder (llava)
         # 729 for siglip (bunny)
         if 'llava' in self.model_args.model_name_or_path.lower():
@@ -268,9 +270,12 @@ class CLManagerClient: # Client
     @torch.no_grad()
     def init_model(self):
         # reinit vision tower & mm_projector of llava model
-        if 'bunny' in self.model_args.model_name_or_path.lower():
-            self.model.load_state_dict(torch.load('./bunny_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
-            self.logger.write("done loading init bunny vision tower and mm projector\n")
+        if 'bunny' in self.model_args.model_name_or_path.lower() and '3b' in self.model_args.model_name_or_path.lower():
+            self.model.load_state_dict(torch.load('./bunny3b_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
+            self.logger.write("done loading init bunny 3b vision tower and mm projector\n")
+        elif 'bunny' in self.model_args.model_name_or_path.lower() and '8b' in self.model_args.model_name_or_path.lower():
+            self.model.load_state_dict(torch.load('./bunny8b_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
+            self.logger.write("done loading init bunny 8b vision tower and mm projector\n")
         elif 'llava' in self.model_args.model_name_or_path.lower():
             self.model.load_state_dict(torch.load('./llava_vision_tower_mm_projector.pth', map_location='cpu'), strict=False)
             self.logger.write("done loading init llava vision tower and mm projector\n")
@@ -360,7 +365,8 @@ class CLManagerClient: # Client
 
                     self.train_one_round(curr_round, train_datalist, test_datalist)
 
-                    self.send_channel.put(self.client_msg())
+                    msg = self.client_msg()
+                    self.send_channel.put(msg)
     
     def client_msg(self):
         return f"done {self.state['client_id']}"
@@ -372,8 +378,7 @@ class CLManagerClient: # Client
         self.state['round_cnt'] += 1
         self.state['curr_round'] = curr_round
         
-        # FIXME
-        samples_per_round = 1000
+        samples_per_round = len(train_datalist) // self.num_rounds # 4
 
         seen_so_far = self.state['sample_cnt']
         
@@ -385,10 +390,13 @@ class CLManagerClient: # Client
         for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+samples_per_round]):
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
-            if self.state['sample_cnt'] % self.eval_period == 0:
-                for data_info in test_datalist:
-                    if self.state['sample_cnt'] > data_info['eval_cnt']:
-                        self.evaluate(data_info['data_name'], data_info['data'])
+            # if self.state['sample_cnt'] % self.eval_period == 0:
+        
+        # eval at the end of each round
+        for data_info in test_datalist:
+            if self.state['sample_cnt'] > data_info['eval_cnt']:
+                self.evaluate(data_info['data_name'], data_info['data'])
+        
         self.save_state()
 
     # Memory 새로 정의 (not MemoryBase)
@@ -563,7 +571,7 @@ class CLManagerClient: # Client
     def evaluate(self, dataname, test_datalist):
         self.logger.write(f"client {self.state['client_id']} evaluate {dataname}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
-        dataloader = DataLoader(dataset, batch_size= 8, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        dataloader = DataLoader(dataset, batch_size= 4, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         
         self.model.eval()
         predictions = []
@@ -576,6 +584,7 @@ class CLManagerClient: # Client
                 # * prepare data
                 inputs = batch['input_ids']
                 input_labels = batch['labels']
+                imgs = batch['images']
                 batch = self._prepare_inputs(batch)
                 
                 output = self.model(**batch)
@@ -583,7 +592,7 @@ class CLManagerClient: # Client
                 pred_scores_list = output[1]
                 n_correct = 0
                 n_word = 0
-                for inp, pred, gold in zip(inputs, pred_scores_list, input_labels):
+                for inp, pred, gold, img in zip(inputs, pred_scores_list, input_labels, imgs):
                     valid_label_mask = gold.ne(IGNORE_INDEX)
                     valid_idx = valid_label_mask.nonzero()[0].item()
                     
@@ -592,8 +601,7 @@ class CLManagerClient: # Client
                     
                     # image token index
                     img_token_index = (inp==IMAGE_TOKEN_INDEX).nonzero()[0].item()
-                    pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+self.img_feat_size:]))
-                    
+                    pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+self.img_feat_size*img.shape[0]:]))
                     n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
                     
                     gold[valid_label_mask == False] = 0
