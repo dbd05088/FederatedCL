@@ -70,10 +70,92 @@ def main():
     np.random.seed(training_args.seed)
     random.seed(training_args.seed)
 
-    train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
+    # model, tokenizer, data_args = get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args)
+    # breakpoint()
     
-    # model, _, _ = get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args)
-    # # breakpoint()
+    train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
+    # breakpoint()
+    
+    # from utils.data_loader_VLM import DataCollatorForSupervisedDataset, LazySupervisedDataset
+    # from torch.utils.data import DataLoader
+    # from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
+    # from utils.eval_metrics import NLPEvaluator, matching_token_num
+    # from collections.abc import Mapping
+    # def _prepare_input(data):
+    #     """
+    #     Prepares one `data` before feeding it to the model, be it a tensor or a nested list/dictionary of tensors.
+    #     """
+    #     if isinstance(data, Mapping):
+    #         return type(data)({k: _prepare_input(v) for k, v in data.items()})
+    #     elif isinstance(data, (tuple, list)):
+    #         return type(data)(_prepare_input(v) for v in data)
+    #     elif isinstance(data, torch.Tensor):
+    #         kwargs = {"device": device}
+    #         return data.to(**kwargs)
+    #     return data
+
+    # def _prepare_inputs(inputs):
+    #     """
+    #     Prepare `inputs` before feeding them to the model, converting them to tensors if they are not already and
+    #     handling potential state.
+    #     """
+    #     inputs = _prepare_input(inputs)
+    #     if len(inputs) == 0:
+    #         raise ValueError(
+    #             "The batch received was empty, your model won't be able to train on it. Double-check that your "
+    #             "training dataset contains keys expected by the model"
+    #         )
+    #     return inputs
+    
+    # breakpoint()
+    # dataset = LazySupervisedDataset(test_datalists[0][0]['data'], tokenizer, data_args, preprocess=False)
+    # dataloader = DataLoader(dataset, batch_size= 8, collate_fn=DataCollatorForSupervisedDataset(tokenizer=tokenizer))
+    # img_feat_size = 729
+    # model.eval()
+    # predictions = []
+    # total_loss = 0
+    # n_word_total = 0
+    # n_word_correct = 0
+    # cnt = 0
+    # with torch.no_grad():
+    #     for i, batch in enumerate((dataloader)):
+    #         # * prepare data
+    #         breakpoint()
+    #         inputs = batch['input_ids']
+    #         input_labels = batch['labels']
+    #         batch = _prepare_inputs(batch)
+            
+    #         output = model(**batch)
+    #         loss = output[0]
+    #         pred_scores_list = output[1]
+    #         n_correct = 0
+    #         n_word = 0
+    #         for inp, pred, gold in zip(inputs, pred_scores_list, input_labels):
+    #             valid_label_mask = gold.ne(IGNORE_INDEX)
+    #             valid_idx = valid_label_mask.nonzero()[0].item()
+                
+    #             n_word += len(torch.unique(gold[valid_label_mask]))#.sum()
+    #             pred_id = torch.argmax(pred, dim=1).cpu()#.to(device)
+                
+    #             # image token index
+    #             img_token_index = (inp==IMAGE_TOKEN_INDEX).nonzero()[0].item()
+    #             pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+img_feat_size:]))
+                
+    #             n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
+                
+    #             gold[valid_label_mask == False] = 0
+                
+    #             pred_sentence = tokenizer.decode(pred_id[valid_idx:], skip_special_tokens=True)#[valid_label_mask])
+    #             gold_sentence = tokenizer.decode(gold[valid_label_mask], skip_special_tokens=True)#[])
+    #             predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
+
+    #         n_word_total += n_word
+    #         n_word_correct += n_correct
+    #         total_loss += loss
+    #         cnt += 1
+    # scores = NLPEvaluator(predictions).evaluate()
+    # scores["precision"] = n_word_correct / n_word_total
+    # scores["loss"] = total_loss / cnt
     
     # from collections import OrderedDict
     # state_dict = OrderedDict()
@@ -82,8 +164,9 @@ def main():
     #         state_dict[name] = parameters.cpu()
     # print(state_dict.keys())
     # # breakpoint()
-    # torch.save(state_dict, 'bunny_vision_tower_mm_projector.pth')
+    # torch.save(state_dict, 'bunny8b_vision_tower_mm_projector.pth')
     # breakpoint()
+    
     
     
     # create folder
@@ -192,7 +275,7 @@ def get_datalists(args, scenario_num):
             test_datalist.append({
                 "data_name": f"{data['dataset']}-{data['subset_id']}",
                 "data": datalist,
-                "eval_cnt": eval_cnt + len(datalist)})
+                "eval_cnt": eval_cnt})
             eval_cnt += len(datalist)
             
         train_datalists[client_id] = train_datalist

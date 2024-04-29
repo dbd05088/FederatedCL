@@ -80,7 +80,10 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
             processor = data_args.image_processor
             if 'image' in sample:
                 image_file = sample['image']
-                image = Image.open(image_file).convert('RGB')
+                if ' |sep| ' in image_file:
+                    image = [Image.open(image_path).convert('RGB') for image_path in image_file.split(' |sep| ')]
+                else:
+                    image = [Image.open(image_file).convert('RGB')]
                 if data_args.image_aspect_ratio == 'pad':
                     def expand2square(pil_img, background_color):
                         width, height = pil_img.size
@@ -94,8 +97,11 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
                             result = Image.new(pil_img.mode, (height, height), background_color)
                             result.paste(pil_img, ((height - width) // 2, 0))
                             return result
-                    image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
-                image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+                    image = torch.stack([processor.preprocess(expand2square(img, tuple(int(x*255) for x in processor.image_mean)), return_tensors='pt')['pixel_values'][0] for img in image])
+                    # image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+                    # image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+                else:
+                    image = torch.stack([processor.preprocess(img, return_tensors='pt')['pixel_values'][0] for img in image])
                 images.append(image)
                 sources = preprocess_multimodal(
                     copy.deepcopy([sample['conversations']]),
@@ -148,7 +154,10 @@ def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None
             for sample in r:
                 if 'image' in sample:
                     image_file = sample['image']
-                    image = Image.open(image_file).convert('RGB')
+                    if ' |sep| ' in image_file:
+                        image = [Image.open(image_path).convert('RGB') for image_path in image_file.split(' |sep| ')]
+                    else:
+                        image = [Image.open(image_file).convert('RGB')]
                     if data_args.image_aspect_ratio == 'pad':
                         def expand2square(pil_img, background_color):
                             width, height = pil_img.size
@@ -162,8 +171,11 @@ def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None
                                 result = Image.new(pil_img.mode, (height, height), background_color)
                                 result.paste(pil_img, ((height - width) // 2, 0))
                                 return result
-                        image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
-                    image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+                        image = torch.stack([processor.preprocess(expand2square(img, tuple(int(x*255) for x in processor.image_mean)), return_tensors='pt')['pixel_values'][0] for img in image])
+                        # image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+                        # image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+                    else:
+                        image = torch.stack([processor.preprocess(img, return_tensors='pt')['pixel_values'][0] for img in image])
                     images.append(image)
                     sources = preprocess_multimodal(
                         copy.deepcopy([sample['conversations']]),

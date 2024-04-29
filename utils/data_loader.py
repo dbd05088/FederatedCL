@@ -110,20 +110,26 @@ class MultiProcessLoader():
         samples_in_index = []
         samples_in_result = []
         for i in range(len(self.index_queues)):
-            try:
-                r = self.index_queues[i].get(timeout=TIMEOUT)
-                samples_in_index.append(r)
-            except queue.Empty:
-                samples_in_index.append(None)
+            samples_in_thisidx = []
+            while True:
+                try:
+                    r = self.index_queues[i].get(timeout=TIMEOUT)
+                    samples_in_thisidx.append(r)
+                except queue.Empty:
+                    break
+            samples_in_index.append(samples_in_thisidx)
         for i in range(len(self.result_queues)):
-            try:
-                r = self.result_queues[i].get(timeout=3000.0)
-                if r:
-                    samples_in_result.append(r['sample'])
-                else:
-                    samples_in_result.append(None)
-            except queue.Empty:
-                samples_in_result.append(None)
+            samples_in_thisidx = []
+            while True:
+                try:
+                    r = self.result_queues[i].get(timeout=TIMEOUT)
+                    if r:
+                        samples_in_thisidx.append(r['sample'])
+                    else:
+                        samples_in_thisidx.append(None)
+                except queue.Empty:
+                    break
+            samples_in_result.append(samples_in_thisidx)
         state_dict = {
             'index_queues':samples_in_index,
             'result_queues':samples_in_result
@@ -134,12 +140,17 @@ class MultiProcessLoader():
         state_dict = np.load(os.path.join(load_dir, f"{client_id}_client_dataloaderstate.npy"), allow_pickle=True).item()
         
         for i, samples in enumerate(state_dict['result_queues']):
-            if samples:
-                # self.result_queues[i].put(worker(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker))
-                self.result_queues[i].put(worker_multimodal(samples, self.device, tokenizer=self.tokenizer, data_args=self.data_args))
+            for sample in samples:
+                if sample:
+                    # self.result_queues[i].put(worker(samples, self.data_dir, self.transform, self.transform_on_gpu, self.cpu_transform, self.device, self.use_kornia, self.transform_on_worker))
+                    # self.result_queues[i].put(worker_multimodal(sample, self.device, tokenizer=self.tokenizer, data_args=self.data_args))
+                    self.index_queues[i].put(sample)
+                # else:
+                #     self.result_queues[i].put(None)
         for i, samples in enumerate(state_dict['index_queues']):
-            if samples:
-                self.index_queues[i].put(samples)
+            for sample in samples:
+                if sample:
+                    self.index_queues[i].put(sample)
 
 def nonzero_indices(bool_mask_tensor):
     # Returns tensor which contains indices of nonzero elements in bool_mask_tensor

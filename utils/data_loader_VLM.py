@@ -48,7 +48,10 @@ class LazySupervisedDataset(Dataset):
                 image = self.images[i]
             else:
                 image_file = self.datalist[i]['image']
-                image = Image.open(image_file).convert('RGB')
+                if ' |sep| ' in image_file:
+                    image = [Image.open(image_path).convert('RGB') for image_path in image_file.split(' |sep| ')]
+                else:
+                    image = [Image.open(image_file).convert('RGB')]
             if self.data_args.image_aspect_ratio == 'pad':
                 def expand2square(pil_img, background_color):
                     width, height = pil_img.size
@@ -62,10 +65,11 @@ class LazySupervisedDataset(Dataset):
                         result = Image.new(pil_img.mode, (height, height), background_color)
                         result.paste(pil_img, ((height - width) // 2, 0))
                         return result
-                image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
-                image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+                image = torch.stack([processor.preprocess(expand2square(img, tuple(int(x*255) for x in processor.image_mean)), return_tensors='pt')['pixel_values'][0] for img in image])
+                # image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+                # image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
             else:
-                image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+                image = torch.stack([processor.preprocess(img, return_tensors='pt')['pixel_values'][0] for img in image])
             sources = preprocess_multimodal(
                 copy.deepcopy([e["conversations"] for e in sources]),
                 self.data_args)
@@ -705,10 +709,8 @@ def tokenizer_image_token(prompt, tokenizer, image_token_index=IMAGE_TOKEN_INDEX
     if len(prompt_chunks) > 0 and len(prompt_chunks[0]) > 0 and prompt_chunks[0][0] == tokenizer.bos_token_id:
         offset = 1
         input_ids.append(prompt_chunks[0][0])
-
     for x in insert_separator(prompt_chunks, [image_token_index] * (offset + 1)):
         input_ids.extend(x[offset:])
-
     if return_tensors is not None:
         if return_tensors == 'pt':
             return torch.tensor(input_ids, dtype=torch.long)
