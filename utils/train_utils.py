@@ -1048,6 +1048,8 @@ import models.bunny.conversation as conversation_lib_bunny
 from transformers import Trainer
 from peft.tuners.lora import LoraLayer
 
+ACCESS_TOKEN = "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"
+
 def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args):
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
     attn_implementation = "flash_attention_2"
@@ -1074,14 +1076,22 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     # for bunny
     elif (
         model_args.model_type == 'phi-1.5' or model_args.model_type == 'phi-2'
-            or model_args.model_type == 'qwen1.5-1.8b' or model_args.model_type == 'minicpm'
-            or model_args.model_type == 'llama3-8b'):
+            or model_args.model_type == 'qwen1.5-1.8b' or model_args.model_type == 'minicpm'):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
             padding_side="right",
             use_fast=True,
+        )
+    elif model_args.model_type == 'llama3-8b':
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            token=ACCESS_TOKEN
         )
     elif model_args.model_type == 'stablelm-2':
         tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -1149,6 +1159,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             model = BunnyLlamaForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                token = ACCESS_TOKEN,
                 **bnb_model_from_pretrained_args
             )
         else:
