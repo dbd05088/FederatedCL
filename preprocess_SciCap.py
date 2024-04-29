@@ -10,16 +10,16 @@ import random
 random.seed(42)
 
 captioning_prompts = [
-    "Describe <image> concisely.",
-    "Write a caption of <image>.",
-    "Provide a brief description of <image>.",
-    "Come up with a concise caption that captures the essense of <image>.",
-    "Encapsulate the key information presented in <image> in a brief statement.",
-    "I need a succinct caption for <image>.",
-    "Please provide a pithy summary of <image> that effectively communicates its message.",
-    "Can you provide a snappy caption that perfectly encapsulates the message conveyed by <image>?",
-    "Please write a brief but compelling caption that grabs the reader's attention and draws them into <image>.",
-    "Give a short caption that accurately conveys the main idea of <image>."
+    "Describe the image concisely.",
+    "Write a caption of the image.",
+    "Provide a brief description of the image.",
+    "Come up with a concise caption that captures the essense of the image.",
+    "Encapsulate the key information presented in the image in a brief statement.",
+    "I need a succinct caption for the image.",
+    "Please provide a pithy summary of the image that effectively communicates its message.",
+    "Can you provide a snappy caption that perfectly encapsulates the message conveyed by the image?",
+    "Please write a brief but compelling caption that grabs the reader's attention and draws them into the image.",
+    "Give a short caption that accurately conveys the main idea of the image."
 ]
 
 def process_and_save(dataset, output_folder, subset_name):
@@ -58,7 +58,7 @@ def save_dataset(dataset_name, output_folder, subset_name):
             "conversations": [
                 {
                     "from": "human",
-                    "value": random.choice(captioning_prompts)
+                    "value": "<image>\n" + random.choice(captioning_prompts)
                 },
                 { 
                     "from": "gpt",
