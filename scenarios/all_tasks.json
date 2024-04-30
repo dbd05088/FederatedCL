@@ -1,0 +1,17 @@
+[
+    {"dataset": "AQUA","subset_id": 0},
+    {"dataset": "Mementos","subset_id": 0},
+    {"dataset": "SciCap","subset_id": 0, "task_name": "Yes-subfig"},
+    {"dataset": "SciCap","subset_id": 1, "task_name": "No-subfig"},
+    {"dataset": "Bongard-OpenWorld","subset_id": 0},
+    {"dataset": "HRVQA","subset_id": 0, "task_name": "areas"},
+    {"dataset": "HRVQA","subset_id": 1, "task_name": "color"},
+    {"dataset": "HRVQA","subset_id": 2, "task_name": "location"},
+    {"dataset": "HRVQA","subset_id": 3, "task_name": "numbers"},
+    {"dataset": "HRVQA","subset_id": 4, "task_name": "scene"},
+    {"dataset": "HRVQA","subset_id": 5, "task_name": "shape"},
+    {"dataset": "HRVQA","subset_id": 6, "task_name": "size"},
+    {"dataset": "HRVQA","subset_id": 7, "task_name": "sports"},
+    {"dataset": "HRVQA","subset_id": 8, "task_name": "transportation"},
+    {"dataset": "HRVQA","subset_id": 9, "task_name": "yes no"}
+]
