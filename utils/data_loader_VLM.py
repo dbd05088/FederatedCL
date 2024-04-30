@@ -130,7 +130,7 @@ class DataCollatorForSupervisedDataset(object):
             if all(x is not None and x.shape == images[0].shape for x in images):
                 batch['images'] = torch.stack(images).to(torch.bfloat16)
             else:
-                batch['images'] = images
+                batch['images'] = [x.to(torch.bfloat16) for x in images]
 
         return batch
 

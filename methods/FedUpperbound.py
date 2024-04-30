@@ -22,7 +22,7 @@ class FedUpperbound_server(CLManagerServer):
     
     def do_server_work(self):
         dataset = LazySupervisedDataset(self.client_data, self.tokenizer, self.data_args)
-        dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer), shuffle=True)
         self.total_samples = len(dataloader)
         
         if self.gradient_checkpointing:
@@ -68,7 +68,7 @@ class FedUpperbound_client(CLManagerClient):
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = 1000
+        samples_per_round = len(train_datalist) // self.num_rounds # 4
 
         seen_so_far = self.state['sample_cnt']
         
@@ -82,10 +82,12 @@ class FedUpperbound_client(CLManagerClient):
 
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
-            if self.state['sample_cnt'] % self.eval_period == 0:
-                for data_info in test_datalist:
-                    if self.state['sample_cnt'] > data_info['eval_cnt']:
-                        self.evaluate(data_info['data_name'], data_info['data'])
+            # if self.state['sample_cnt'] % self.eval_period == 0:
+            
+        # eval at the end of each round
+        for data_info in test_datalist:
+            if self.state['sample_cnt'] > data_info['eval_cnt']:
+                self.evaluate(data_info['data_name'], data_info['data'])
 
         self.save_state()
     

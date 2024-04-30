@@ -69,11 +69,10 @@ class MultiProcessLoader():
         for i in range(self.n_workers):
             loaded_samples = self.result_queues[i].get(timeout=3000.0)
             if loaded_samples is not None:
-                images.append(loaded_samples["image"])
+                images.extend(loaded_samples["image"])
                 input_ids.extend(loaded_samples["input_id"])
                 labels.extend(loaded_samples["label"])
         if len(images) > 0:
-            images = torch.cat(images)
             input_ids = torch.nn.utils.rnn.pad_sequence(
                     input_ids,
                     batch_first=True,
@@ -94,7 +93,11 @@ class MultiProcessLoader():
             # labels = torch.cat(labels)
             # if self.transform_on_gpu and not self.transform_on_worker:
             #     images = self.transform(images.to(self.device))
-            images = images.to(dtype=torch.bfloat16)
+            # images = images.to(dtype=torch.bfloat16)
+            if all(x is not None and x.shape == images[0].shape for x in images):
+                images = torch.stack(images).to(dtype=torch.bfloat16)
+            else:
+                images = [x.to(torch.bfloat16) for x in images]
             # labels = labels.to(dtype=torch.bfloat16)
             
             data['images'] = images

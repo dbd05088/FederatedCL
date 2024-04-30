@@ -123,7 +123,7 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
             input_ids.append(data_dict['input_ids'][0])
             labels.append(data_dict['labels'][0])
 
-        data['image'] = torch.stack(images)
+        data['image'] = images#torch.stack(images)
         data['input_id'] = input_ids#torch.stack(input_ids)
         data['label'] = labels#torch.stack(labels)
         data['sample'] = r
@@ -196,7 +196,7 @@ def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None
                 input_ids.append(data_dict['input_ids'][0])
                 labels.append(data_dict['labels'][0])
 
-            data['image'] = torch.stack(images)
+            data['image'] = images#torch.stack(images)
             data['input_id'] = input_ids#torch.stack(input_ids)
             data['label'] = labels#torch.stack(labels)
             data['sample'] = r
