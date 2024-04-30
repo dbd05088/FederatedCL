@@ -617,7 +617,7 @@ class CLManagerClient: # Client
                 total_loss += loss
                 cnt += 1
         #save predictions
-        with open(f'./client_states/client{self.state['client_id']}_round{curr_round}_data{dataname}.json', 'w') as fp:
+        with open(f"./client_states/client{self.state['client_id']}_round{curr_round}_data{dataname}.json", 'w') as fp:
             json.dump(predictions, fp, indent=4)
         
         scores = NLPEvaluator(predictions).evaluate()
