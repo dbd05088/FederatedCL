@@ -18,7 +18,7 @@ class FedAvg_server(CLManagerServer):
         
         self.state_dicts.append(msg)
     
-    def do_server_work(self):
+    def do_server_work(self, curr_round):
         num_clients = len(self.state_dicts)
         if num_clients == 0:
             return
@@ -37,7 +37,7 @@ class FedAvg_server(CLManagerServer):
         self.model.load_state_dict(mean_state_dict, strict=False)
         self.mean_state_dict = mean_state_dict
         
-        self.evaluate_seendata()
+        self.evaluate_seendata(curr_round)
         
 class FedAvg_client(CLManagerClient): 
     def client_msg(self):

@@ -29,6 +29,7 @@ from utils.data_worker import ManagerWatchdog
 from utils.eval_metrics import NLPEvaluator, matching_token_num
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 from collections import OrderedDict
+import json
 
 OPTIMIZER_NAME = "optimizer.pt"
 SCHEDULER_NAME = "scheduler.pt"
@@ -177,7 +178,7 @@ class CLManagerServer: # == SERVER
                     if received_data_from_clients == num_selection:
                         break
 
-            self.do_server_work()
+            self.do_server_work(curr_round)
         
         self.logger.write("total done\n")
         self.logger.close()
@@ -191,7 +192,7 @@ class CLManagerServer: # == SERVER
     def handle_msg_per_client(self, msg):
         pass
     
-    def do_server_work(self):
+    def do_server_work(self, cur_rround):
         pass
     
     def save_model(self, output_dir):
@@ -378,15 +379,15 @@ class CLManagerServer: # == SERVER
 
         return (loss, outputs) if return_outputs else loss
 
-    def evaluate_seendata(self):
+    def evaluate_seendata(self, curr_round):
         eval_keys = []
         for i in range(len(self.test_datalists)):
             for data_info in self.test_datalists[i]:
                 if data_info['data_name'] not in eval_keys:
-                    self.evaluate(data_info['data'], data_info['data_name'])
+                    self.evaluate(data_info['data'], data_info['data_name'], curr_round)
                     eval_keys.append(data_info['data_name'])
 
-    def evaluate(self, test_datalist, dataset_name):
+    def evaluate(self, test_datalist, dataset_name, curr_round):
         self.logger.write(f"server evaluate {dataset_name}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
         dataloader = DataLoader(dataset, batch_size= 4, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
@@ -434,6 +435,10 @@ class CLManagerServer: # == SERVER
                 n_word_correct += n_correct
                 total_loss += loss
                 cnt += 1
+        #save predictions
+        with open(f'./client_states/server_round{curr_round}_data{dataset_name}.json', 'w') as fp:
+            json.dump(predictions, fp, indent=4)
+        
         scores = NLPEvaluator(predictions).evaluate()
         scores["precision"] = n_word_correct / n_word_total
         scores["loss"] = total_loss / cnt

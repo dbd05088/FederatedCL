@@ -35,6 +35,8 @@ from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 OPTIMIZER_NAME = "optimizer.pt"
 SCHEDULER_NAME = "scheduler.pt"
 
+import json
+
 class CLManagerClient: # Client
     def __init__(
         self,
@@ -395,7 +397,7 @@ class CLManagerClient: # Client
         # eval at the end of each round
         for data_info in test_datalist:
             if self.state['sample_cnt'] > data_info['eval_cnt']:
-                self.evaluate(data_info['data_name'], data_info['data'])
+                self.evaluate(data_info['data_name'], data_info['data'], curr_round)
         
         self.save_state()
 
@@ -568,7 +570,7 @@ class CLManagerClient: # Client
         )
         self.logger.write('\n')
 
-    def evaluate(self, dataname, test_datalist):
+    def evaluate(self, dataname, test_datalist, curr_round):
         self.logger.write(f"client {self.state['client_id']} evaluate {dataname}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
         dataloader = DataLoader(dataset, batch_size= 4, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
@@ -614,6 +616,10 @@ class CLManagerClient: # Client
                 n_word_correct += n_correct
                 total_loss += loss
                 cnt += 1
+        #save predictions
+        with open(f'./client_states/client{self.state['client_id']}_round{curr_round}_data{dataname}.json', 'w') as fp:
+            json.dump(predictions, fp, indent=4)
+        
         scores = NLPEvaluator(predictions).evaluate()
         scores["precision"] = n_word_correct / n_word_total
         scores["loss"] = total_loss / cnt
