@@ -17,8 +17,8 @@ captioning_prompts = [
     "Encapsulate the key information presented in the image in a brief statement.",
     "I need a succinct caption for the image.",
     "Please provide a pithy summary of the image that effectively communicates its message.",
-    "Can you provide a snappy caption that perfectly encapsulates the message conveyed by the image?",
-    "Please write a brief but compelling caption that grabs the reader's attention and draws them into the image.",
+    # "Can you provide a snappy caption that perfectly encapsulates the message conveyed by the image?",
+    # "Please write a brief but compelling caption that grabs the reader's attention and draws them into the image.",
     "Give a short caption that accurately conveys the main idea of the image."
 ]
 
@@ -92,7 +92,7 @@ def save_dataset(dataset_name, output_folder, subset_name):
             "conversations": [
                 {
                     "from": "human",
-                    "value": random.choice(captioning_prompts)
+                    "value": "<image>\n" + random.choice(captioning_prompts)
                 },
                 { 
                     "from": "gpt",
