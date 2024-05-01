@@ -192,8 +192,16 @@ class CLManagerServer: # == SERVER
     def handle_msg_per_client(self, msg):
         pass
     
-    def do_server_work(self, cur_rround):
-        pass
+    def do_server_work(self, cur_round):
+        self.save_server_model(cur_round)
+        
+    def save_server_model(self, cur_round):
+        state_dict = OrderedDict()
+        with torch.no_grad():
+            for name, parameters in self.model.named_parameters():
+                if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
+                        state_dict[name] = parameters.detach().cpu()
+        torch.save(state_dict, os.path.join('./client_states', f"server_model_round{cur_round}.pth"))
     
     def save_model(self, output_dir):
         state_dict = OrderedDict()
@@ -336,8 +344,9 @@ class CLManagerServer: # == SERVER
         # writer.add_scalar(f"test/METEOR_server", scores["METEOR"], sample_num)
         # writer.add_scalar(f"test/RogueL_server", scores["ROUGE_L"], sample_num)
         # writer.add_scalar(f"test/CIDEr_server", scores["CIDEr"], sample_num)
+        #| test_loss {scores['loss']:.4f}
         self.logger.write(
-            f"Test (Server) | data {dataset_name} | test_loss {scores['loss']:.4f} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
+            f"Test (Server) | data {dataset_name} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
         self.logger.write('\n')
         self.logger.flush()
@@ -390,7 +399,7 @@ class CLManagerServer: # == SERVER
     def evaluate(self, test_datalist, dataset_name, curr_round):
         self.logger.write(f"server evaluate {dataset_name}\n")
         dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
-        dataloader = DataLoader(dataset, batch_size= 4, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        dataloader = DataLoader(dataset, batch_size= 1, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
         
         self.model.eval()
         predictions = []
@@ -401,39 +410,39 @@ class CLManagerServer: # == SERVER
         with torch.no_grad():
             for i, batch in enumerate((dataloader)):
                 # * prepare data
+                batch = self._prepare_inputs(batch)
                 inputs = batch['input_ids']
                 input_labels = batch['labels']
                 imgs = batch['images']
-                batch = self._prepare_inputs(batch)
+                image_sizes = [x.size for x in imgs]
                 
-                output = self.model(**batch)
-                loss = output[0]
-                pred_scores_list = output[1]
-                # * keep logs
-                n_correct = 0
-                n_word = 0
-                for inp, pred, gold, img in zip(inputs, pred_scores_list, input_labels, imgs):
-                    valid_label_mask = gold.ne(IGNORE_INDEX)
-                    valid_idx = valid_label_mask.nonzero()[0].item()
+                with torch.inference_mode():
+                    output_ids = self.model.generate(
+                        inputs,
+                        images=imgs,
+                        # image_sizes=image_sizes,
+                        do_sample=True,# if args.temperature > 0 else False,
+                        temperature=0.2,#args.temperature,
+                        top_p=None,#args.top_p,
+                        num_beams=1,#args.num_beams,
+                        max_new_tokens=512,#args.max_new_tokens,
+                        use_cache=True,
+                    )
+                valid_label_mask = input_labels[0].ne(IGNORE_INDEX)
+                # valid_idx = valid_label_mask.nonzero()[0].item()
+                
+                if 'bunny' in self.model_args.model_name_or_path.lower():
+                    input_token_len = inputs.shape[1]
+                    output_ids = output_ids[:,input_token_len:]
                     
-                    n_word += len(torch.unique(gold[valid_label_mask]))#.sum()
-                    pred_id = torch.argmax(pred, dim=1).cpu()#.to(device)
-                    
-                    # image token index
-                    img_token_index = (inp==IMAGE_TOKEN_INDEX).nonzero()[0].item()
-                    pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+self.img_feat_size*img.shape[0]:]))
-                    
-                    n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
-                    
-                    gold[valid_label_mask == False] = 0
-                    
-                    pred_sentence = self.tokenizer.decode(pred_id[valid_idx:], skip_special_tokens=True)#[valid_label_mask])
-                    gold_sentence = self.tokenizer.decode(gold[valid_label_mask], skip_special_tokens=True)#[])
-                    predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
-
+                n_word = len(torch.unique(input_labels[0][valid_label_mask]))
+                n_correct = matching_token_num(output_ids[0], input_labels[0][valid_label_mask])
+                pred_sentence = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
+                gold_sentence = self.tokenizer.decode(input_labels[0][valid_label_mask], skip_special_tokens=True)
+                predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
+                
                 n_word_total += n_word
                 n_word_correct += n_correct
-                total_loss += loss
                 cnt += 1
         #save predictions
         with open(f'./client_states/server_round{curr_round}_data{dataset_name}.json', 'w') as fp:
@@ -441,7 +450,7 @@ class CLManagerServer: # == SERVER
         
         scores = NLPEvaluator(predictions).evaluate()
         scores["precision"] = n_word_correct / n_word_total
-        scores["loss"] = total_loss / cnt
+        # scores["loss"] = total_loss / cnt
                 
         self.report_test(dataset_name, scores)
         

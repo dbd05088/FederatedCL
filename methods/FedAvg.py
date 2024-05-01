@@ -37,7 +37,8 @@ class FedAvg_server(CLManagerServer):
         self.model.load_state_dict(mean_state_dict, strict=False)
         self.mean_state_dict = mean_state_dict
         
-        self.evaluate_seendata(curr_round)
+        # self.evaluate_seendata(curr_round)
+        self.save_server_model(curr_round)
         
 class FedAvg_client(CLManagerClient): 
     def client_msg(self):

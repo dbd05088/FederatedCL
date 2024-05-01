@@ -8,8 +8,8 @@ import json
 import torch
 
 def matching_token_num(pred, gold, valid_idx, valid_mask):
-    unique_pred = set(pred[valid_idx:].tolist())
-    unique_gold = set(gold[valid_mask].tolist())
+    unique_pred = set(pred.tolist())
+    unique_gold = set(gold.tolist())
     
     matching_token = unique_pred.intersection(unique_gold)
     

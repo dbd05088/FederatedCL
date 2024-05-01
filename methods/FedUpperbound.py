@@ -20,7 +20,7 @@ class FedUpperbound_server(CLManagerServer):
         
         self.client_data.extend(msg)
     
-    def do_server_work(self):
+    def do_server_work(self, cur_round):
         dataset = LazySupervisedDataset(self.client_data, self.tokenizer, self.data_args)
         dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer), shuffle=True)
         self.total_samples = len(dataloader)
@@ -52,7 +52,8 @@ class FedUpperbound_server(CLManagerServer):
 
         self.state_dict = state_dict
         
-        self.evaluate_seendata()
+        # self.evaluate_seendata()
+        self.save_server_model(cur_round)
         
 class FedUpperbound_client(CLManagerClient): 
     def setup(self):

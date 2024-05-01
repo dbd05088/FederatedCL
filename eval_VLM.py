@@ -108,8 +108,8 @@ def main():
         return inputs
 
     dataset = LazySupervisedDataset(test_datalists[0][0]['data'], tokenizer, data_args, preprocess=False)
-    dataloader = DataLoader(dataset, batch_size= 2, collate_fn=DataCollatorForSupervisedDataset(tokenizer=tokenizer))
-    img_feat_size = 729
+    dataloader = DataLoader(dataset, batch_size= 1, collate_fn=DataCollatorForSupervisedDataset(tokenizer=tokenizer))
+    # img_feat_size = 729
     model.eval()
     predictions = []
     total_loss = 0
@@ -119,38 +119,37 @@ def main():
     with torch.no_grad():
         for i, batch in enumerate((dataloader)):
             # * prepare data
-            breakpoint()
+            batch = _prepare_inputs(batch)
             inputs = batch['input_ids']
             input_labels = batch['labels']
             imgs = batch['images']
-            batch = _prepare_inputs(batch)
+            image_sizes = [x.size for x in imgs]
             
-            output = model(**batch)
-            loss = output[0]
-            pred_scores_list = output[1]
-            n_correct = 0
-            n_word = 0
-            for inp, pred, gold, img in zip(inputs, pred_scores_list, input_labels, imgs):
-                valid_label_mask = gold.ne(IGNORE_INDEX)
-                valid_idx = valid_label_mask.nonzero()[0].item()
-                
-                n_word += len(torch.unique(gold[valid_label_mask]))#.sum()
-                pred_id = torch.argmax(pred, dim=1).cpu()#.to(device)
-                
-                # image token index
-                img_token_index = (inp==IMAGE_TOKEN_INDEX).nonzero()[0].item()
-                pred_id = torch.cat((pred_id[:img_token_index], torch.tensor([IMAGE_TOKEN_INDEX]), pred_id[img_token_index+img_feat_size*img.shape[0]:]))
-                n_correct += matching_token_num(pred_id, gold, valid_idx, valid_label_mask)
-                
-                gold[valid_label_mask == False] = 0
-                
-                pred_sentence = tokenizer.decode(pred_id[valid_idx:], skip_special_tokens=True)#[valid_label_mask])
-                gold_sentence = tokenizer.decode(gold[valid_label_mask], skip_special_tokens=True)#[])
-                predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
-
+            with torch.inference_mode():
+                output_ids = model.generate(
+                    inputs,
+                    images=imgs,
+                    # image_sizes=image_sizes,
+                    do_sample=True,# if args.temperature > 0 else False,
+                    temperature=0.2,#args.temperature,
+                    top_p=None,#args.top_p,
+                    num_beams=1,#args.num_beams,
+                    max_new_tokens=512,#args.max_new_tokens,
+                    use_cache=True,
+                )
+            valid_label_mask = input_labels[0].ne(IGNORE_INDEX)
+            input_token_len = inputs.shape[1] #[:,input_token_len:]
+            
+            n_word = len(torch.unique(input_labels[0][valid_label_mask]))
+            n_correct = matching_token_num(output_ids[0], input_labels[0][valid_label_mask])
+            pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
+            gold_sentence = tokenizer.decode(input_labels[0][valid_label_mask], skip_special_tokens=True)
+            predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
+            print(pred_sentence)
+            print(gold_sentence)
+            breakpoint()
             n_word_total += n_word
             n_word_correct += n_correct
-            total_loss += loss
             cnt += 1
     scores = NLPEvaluator(predictions).evaluate()
     scores["precision"] = n_word_correct / n_word_total
