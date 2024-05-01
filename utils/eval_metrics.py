@@ -7,7 +7,7 @@ import numpy as np
 import json
 import torch
 
-def matching_token_num(pred, gold, valid_idx, valid_mask):
+def matching_token_num(pred, gold):
     unique_pred = set(pred.tolist())
     unique_gold = set(gold.tolist())
     

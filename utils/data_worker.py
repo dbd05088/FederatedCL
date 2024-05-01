@@ -80,8 +80,9 @@ def worker_multimodal(r,device='cpu', tokenizer=None, data_args=None):
             processor = data_args.image_processor
             if 'image' in sample:
                 image_file = sample['image']
-                if ' |sep| ' in image_file:
-                    image = [Image.open(image_path).convert('RGB') for image_path in image_file.split(' |sep| ')]
+                # if ' |sep| ' in image_file:
+                if isinstance(image_file, list):
+                    image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
                 else:
                     image = [Image.open(image_file).convert('RGB')]
                 if data_args.image_aspect_ratio == 'pad':
@@ -154,8 +155,9 @@ def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None
             for sample in r:
                 if 'image' in sample:
                     image_file = sample['image']
-                    if ' |sep| ' in image_file:
-                        image = [Image.open(image_path).convert('RGB') for image_path in image_file.split(' |sep| ')]
+                    # if ' |sep| ' in image_file:
+                    if isinstance(image_file, list):
+                        image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
                     else:
                         image = [Image.open(image_file).convert('RGB')]
                     if data_args.image_aspect_ratio == 'pad':
