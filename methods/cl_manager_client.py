@@ -256,16 +256,16 @@ class CLManagerClient: # Client
             )
             # self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}")))
 
-    def save_model(self, client_id, output_dir):
+    def save_model(self, client_id, output_dir, round):
         state_dict = OrderedDict()
         with torch.no_grad():
             for name, parameters in self.model.named_parameters():
                 if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
                         state_dict[name] = parameters.detach().cpu()
-        torch.save(state_dict, os.path.join(output_dir, f"{client_id}_client_model.pth"))
+        torch.save(state_dict, os.path.join(output_dir, f"{client_id}_client_model_round{round}.pth"))
     
-    def load_model(self, client_id, output_dir):
-        state_dict = torch.load(os.path.join(output_dir, f"{client_id}_client_model.pth"), map_location=self.args.device)
+    def load_model(self, client_id, output_dir, round):
+        state_dict = torch.load(os.path.join(output_dir, f"{client_id}_client_model_round{round}.pth"), map_location=self.args.device)
         self.model.load_state_dict(state_dict, strict=False)
 
     @torch.no_grad()
@@ -314,7 +314,7 @@ class CLManagerClient: # Client
 
             self.memory.load_state(client_id, self.args.state_dir)
             self.dataloader.load_state(client_id, self.args.state_dir)
-            self.load_model(client_id, self.args.state_dir)
+            self.load_model(client_id, self.args.state_dir, self.state['round_cnt'])
             self._load_optimizer_and_scheduler(self.args.state_dir)
     
     def init_state(self, cid, data_len):
@@ -324,7 +324,7 @@ class CLManagerClient: # Client
         self.state['done'] = False
         self.state['total_samples'] = data_len
     
-    def save_state(self):
+    def save_state(self, round):
         trainer_state = self.state
         trainer_state['temp_future_batch'] = self.temp_future_batch
         trainer_state['waiting_batch'] = self.waiting_batch
@@ -338,7 +338,7 @@ class CLManagerClient: # Client
         torch.save(self.optimizer.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{OPTIMIZER_NAME}"))
         # torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"))
 
-        self.save_model(self.state['client_id'], self.args.state_dir)
+        self.save_model(self.state['client_id'], self.args.state_dir, round)
         
         self.logger.close()
 
@@ -394,11 +394,11 @@ class CLManagerClient: # Client
             # if self.state['sample_cnt'] % self.eval_period == 0:
         
         # eval at the end of each round
-        for data_info in test_datalist:
-            if self.state['sample_cnt'] > data_info['eval_cnt']:
-                self.evaluate(data_info['data_name'], data_info['data'], curr_round)
+        # for data_info in test_datalist:
+        #     if self.state['sample_cnt'] > data_info['eval_cnt']:
+        #         self.evaluate(data_info['data_name'], data_info['data'], curr_round)
         
-        self.save_state()
+        self.save_state(self.state['round_cnt'])
 
     # Memory 새로 정의 (not MemoryBase)
     def initialize_future(self, train_datalist):
@@ -600,7 +600,7 @@ class CLManagerClient: # Client
                     output_ids = self.model.generate(
                         inputs,
                         images=imgs,
-                        # image_sizes=image_sizes,
+                        image_sizes=image_sizes,
                         do_sample=True,# if args.temperature > 0 else False,
                         temperature=0.2,#args.temperature,
                         top_p=None,#args.top_p,
