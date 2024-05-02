@@ -1,8 +1,8 @@
 #/bin/bash
 
 # CIL CONFIG
-NOTE="debug" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="debug"
+NOTE="fedavg_eval" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="fedavg"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 RND_SEED=1
 
@@ -36,14 +36,15 @@ else
     exit 1
 fi
 
-CUDA_VISIBLE_DEVICES=6 python eval_VLM.py \
+CUDA_VISIBLE_DEVICES=7 python eval_VLM.py \
     --model_name_or_path $MODEL_NAME \
     --model_name_for_dataarg $MODEL_NAME \
     --model_type $MODEL_TYPE \
     --version $VERSION \
     --scenario 3 \
-    --num_clients 1 \
-    --model_max_length 3200 \
+    --num_rounds 10 \
+    --num_clients 10 \
+    --model_max_length 4000 \
     --vision_tower $VISION_TOWER \
     --gradient_checkpointing True \
     --gradient_accumulation_steps 4 \

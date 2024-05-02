@@ -17,10 +17,82 @@ import torch.distributed as dist
 import json
 from transformers import BitsAndBytesConfig
 
-# import warnings
-# warnings.filterwarnings('ignore')
+from utils.data_loader_VLM import GenerationDataset, GenerationDataset2
+from torch.utils.data import DataLoader
+from utils.eval_metrics import NLPEvaluator, matching_token_num
+from tqdm import tqdm
+
+import warnings
+warnings.filterwarnings('ignore')
+
+def evaluate(test_datalist, dataname, round, model, tokenizer, data_args, device, model_args, training_args, logger, client_id=None):
+    dataset = GenerationDataset2(test_datalist, tokenizer, data_args)
+    dataloader = DataLoader(dataset, batch_size= 1)
+    # img_feat_size = 729
+    model.eval()
+    predictions = []
+    n_word_total = 0
+    n_generated_word_total = 0
+    n_word_correct = 0
+    cnt = 0
+    with torch.no_grad():
+        for i, (inputs, imgs, gold, prompt, img_file) in enumerate(tqdm(dataloader)):
+            inputs = inputs.to(device=device, non_blocking=True)
+            imgs = imgs.to(device=device, dtype=torch.bfloat16, non_blocking=True)
+            image_sizes = [x.shape[-2:] for x in imgs]
+            
+            with torch.inference_mode():
+                output_ids = model.generate(
+                    inputs,
+                    images=imgs,
+                    # image_sizes=image_sizes,
+                    do_sample=True,# if args.temperature > 0 else False,
+                    temperature=0.2,#args.temperature,
+                    top_p=None,#args.top_p,
+                    num_beams=1,#args.num_beams,
+                    max_new_tokens=128,#args.max_new_tokens,
+                    use_cache=True,
+                    pad_token_id=tokenizer.eos_token_id
+                )
+            if 'bunny' in model_args.model_name_or_path.lower():
+                input_token_len = inputs.shape[1]
+                output_ids = output_ids[:,input_token_len:]
+                
+            input_label = tokenizer.encode(gold[0])
+            n_word = len(set(input_label))
+            n_generated_word = len(torch.unique(output_ids[0]))
+            n_correct = matching_token_num(output_ids[0].tolist(), input_label)
+            
+            pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+            
+            predictions.append({"image_file":img_file[0], "input":prompt[0], "sentence":pred_sentence, "gt_sentence":gold[0].strip()})
+            
+            n_word_total += n_word
+            n_generated_word_total += n_generated_word
+            n_word_correct += n_correct
+            cnt += 1
+    scores = NLPEvaluator(predictions).evaluate()
+    scores["precision"] = n_word_correct / n_word_total
+    scores["recall"] = n_word_correct / n_generated_word_total
+    
+    predictions.append(scores)
+    #save predictions
+    if client_id:
+        logger.info(f"Test (Client id {client_id}) | Data {dataname} | precision {scores['precision']:.4f} | recall {scores['recall']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |")
+        with open(f"./eval_results/{training_args.mode}/{training_args.note}/client{client_id}_round{round}_{dataname}.json", 'w') as fp:
+            json.dump(predictions, fp, indent=4)
+    else:
+        logger.info(f"Test (Server) | Data {dataname} | precision {scores['precision']:.4f} | recall {scores['recall']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |")
+        with open(f"./eval_results/{training_args.mode}/{training_args.note}/server_round{round}_{dataname}.json", 'w') as fp:
+            json.dump(predictions, fp, indent=4)
+
+    
 
 def main():
+    ##################################
+    round_to_eval = 1
+    ##################################
+    
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
@@ -44,9 +116,8 @@ def main():
     logging.config.fileConfig("./configuration/logging.conf")
     logger = logging.getLogger()
 
-    os.makedirs(f"results/{training_args.mode}/{training_args.note}", exist_ok=True)
-    os.makedirs(f"tensorboard/{training_args.mode}/{training_args.note}", exist_ok=True)
-    fileHandler = logging.FileHandler(f'results/{training_args.mode}/{training_args.note}/seed_{training_args.seed}.log', mode="w")
+    os.makedirs(f"eval_results/{training_args.mode}/{training_args.note}", exist_ok=True)
+    fileHandler = logging.FileHandler(f'eval_results/{training_args.mode}/{training_args.note}/round_{round_to_eval}.log', mode="w")
 
     # writer = SummaryWriter(f'tensorboard/{training_args.mode}/{training_args.note}/federated')
 
@@ -71,96 +142,29 @@ def main():
     random.seed(training_args.seed)
 
     model, tokenizer, data_args = get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args)
-    breakpoint()
     
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
-    # breakpoint()
+    samples_per_round_per_client = [len(train_datalists[i]) // training_args.num_rounds for i in range(training_args.num_clients)]
     
-    from utils.data_loader_VLM import DataCollatorForSupervisedDataset, LazySupervisedDataset, GenerationDataset
-    from torch.utils.data import DataLoader
-    from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
-    from utils.eval_metrics import NLPEvaluator, matching_token_num
-    from collections.abc import Mapping
-    def _prepare_input(data):
-        """
-        Prepares one `data` before feeding it to the model, be it a tensor or a nested list/dictionary of tensors.
-        """
-        if isinstance(data, Mapping):
-            return type(data)({k: _prepare_input(v) for k, v in data.items()})
-        elif isinstance(data, (tuple, list)):
-            return type(data)(_prepare_input(v) for v in data)
-        elif isinstance(data, torch.Tensor):
-            kwargs = {"device": device}
-            return data.to(**kwargs)
-        return data
-
-    def _prepare_inputs(inputs):
-        """
-        Prepare `inputs` before feeding them to the model, converting them to tensors if they are not already and
-        handling potential state.
-        """
-        inputs = _prepare_input(inputs)
-        if len(inputs) == 0:
-            raise ValueError(
-                "The batch received was empty, your model won't be able to train on it. Double-check that your "
-                "training dataset contains keys expected by the model"
-            )
-        return inputs
-
-    # dataset = LazySupervisedDataset(test_datalists[5][0]['data'], tokenizer, data_args, preprocess=False)
-    # dataloader = DataLoader(dataset, batch_size= 1, collate_fn=DataCollatorForSupervisedDataset(tokenizer=tokenizer))
-    dataset = GenerationDataset(test_datalists[5][0]['data'], tokenizer, data_args)
-    dataloader = DataLoader(dataset, batch_size= 1)
-    # img_feat_size = 729
-    model.eval()
-    predictions = []
-    total_loss = 0
-    n_word_total = 0
-    n_word_correct = 0
-    cnt = 0
-    with torch.no_grad():
-        for i, (inputs, imgs, gold) in enumerate((dataloader)):
-            # * prepare data
-            # batch = _prepare_inputs(batch)
-            # inputs = batch['input_ids']
-            # input_labels = batch['labels']
-            # imgs = batch['images']
-            inputs = inputs.to(device)
-            imgs = imgs.to(device=device, dtype=torch.bfloat16)
-            image_sizes = [x.shape[-2:] for x in imgs]
-            
-            with torch.inference_mode():
-                output_ids = model.generate(
-                    inputs,
-                    images=imgs,
-                    # image_sizes=image_sizes,
-                    do_sample=True,# if args.temperature > 0 else False,
-                    temperature=0.2,#args.temperature,
-                    top_p=None,#args.top_p,
-                    num_beams=1,#args.num_beams,
-                    max_new_tokens=512,#args.max_new_tokens,
-                    use_cache=True,
-                    pad_token_id=tokenizer.eos_token_id
-                )
-            # breakpoint()
-            # valid_label_mask = input_labels[0].ne(IGNORE_INDEX)
-            input_token_len = inputs.shape[1] #[:,input_token_len:]
-            
-            # n_word = len(torch.unique(input_labels[0][valid_label_mask]))
-            # n_correct = matching_token_num(output_ids[0], input_labels[0][valid_label_mask])
-            pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0] #[:,input_token_len:]
-            # gold_sentence = tokenizer.decode(input_labels[0][valid_label_mask], skip_special_tokens=True)
-            predictions.append({"sentence":pred_sentence, "gt_sentence":gold})
-            print(pred_sentence)
-            print(gold)
-            breakpoint()
-            # n_word_total += n_word
-            # n_word_correct += n_correct
-            cnt += 1
-    scores = NLPEvaluator(predictions).evaluate()
-    scores["precision"] = n_word_correct / n_word_total
-    scores["loss"] = total_loss / cnt
-
+    
+    logger.info(f'Evaluatiing clients and server at round {round_to_eval}')
+    
+    server_eval_key = []
+    server_state_dict = torch.load(f'./client_states/server_model_round{round_to_eval}.pth', map_location='cpu')
+    for client_id in range(training_args.num_clients):
+        # load client weight
+        client_state_dict = torch.load(f'./client_states/{client_id}_client_model_round{round_to_eval}.pth', map_location='cpu')
+        test_datalist = test_datalists[client_id]
+        for data_info in test_datalist:
+            if samples_per_round_per_client[client_id]*round_to_eval > data_info['eval_cnt']:
+                model.load_state_dict(client_state_dict, strict=False)
+                evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, client_id)
+        
+                if data_info['data_name'] not in server_eval_key:
+                    model.load_state_dict(server_state_dict, strict=False)
+                    evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, None)
+                    server_eval_key.append(data_info['data_name'])
+    
 def get_datalists(args, scenario_num):
     with open(f"./scenarios/scenario-{scenario_num}.json") as fp:
         scenario = json.load(fp)
