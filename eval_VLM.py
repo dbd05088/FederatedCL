@@ -71,12 +71,12 @@ def main():
     random.seed(training_args.seed)
 
     model, tokenizer, data_args = get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args)
-    # breakpoint()
+    breakpoint()
     
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     # breakpoint()
     
-    from utils.data_loader_VLM import DataCollatorForSupervisedDataset, LazySupervisedDataset
+    from utils.data_loader_VLM import DataCollatorForSupervisedDataset, LazySupervisedDataset, GenerationDataset
     from torch.utils.data import DataLoader
     from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
     from utils.eval_metrics import NLPEvaluator, matching_token_num
@@ -107,8 +107,10 @@ def main():
             )
         return inputs
 
-    dataset = LazySupervisedDataset(test_datalists[0][0]['data'], tokenizer, data_args, preprocess=False)
-    dataloader = DataLoader(dataset, batch_size= 1, collate_fn=DataCollatorForSupervisedDataset(tokenizer=tokenizer))
+    # dataset = LazySupervisedDataset(test_datalists[5][0]['data'], tokenizer, data_args, preprocess=False)
+    # dataloader = DataLoader(dataset, batch_size= 1, collate_fn=DataCollatorForSupervisedDataset(tokenizer=tokenizer))
+    dataset = GenerationDataset(test_datalists[5][0]['data'], tokenizer, data_args)
+    dataloader = DataLoader(dataset, batch_size= 1)
     # img_feat_size = 729
     model.eval()
     predictions = []
@@ -117,13 +119,15 @@ def main():
     n_word_correct = 0
     cnt = 0
     with torch.no_grad():
-        for i, batch in enumerate((dataloader)):
+        for i, (inputs, imgs, gold) in enumerate((dataloader)):
             # * prepare data
-            batch = _prepare_inputs(batch)
-            inputs = batch['input_ids']
-            input_labels = batch['labels']
-            imgs = batch['images']
-            image_sizes = [x.size for x in imgs]
+            # batch = _prepare_inputs(batch)
+            # inputs = batch['input_ids']
+            # input_labels = batch['labels']
+            # imgs = batch['images']
+            inputs = inputs.to(device)
+            imgs = imgs.to(device=device, dtype=torch.bfloat16)
+            image_sizes = [x.shape[-2:] for x in imgs]
             
             with torch.inference_mode():
                 output_ids = model.generate(
@@ -136,20 +140,22 @@ def main():
                     num_beams=1,#args.num_beams,
                     max_new_tokens=512,#args.max_new_tokens,
                     use_cache=True,
+                    pad_token_id=tokenizer.eos_token_id
                 )
-            valid_label_mask = input_labels[0].ne(IGNORE_INDEX)
+            # breakpoint()
+            # valid_label_mask = input_labels[0].ne(IGNORE_INDEX)
             input_token_len = inputs.shape[1] #[:,input_token_len:]
             
-            n_word = len(torch.unique(input_labels[0][valid_label_mask]))
-            n_correct = matching_token_num(output_ids[0], input_labels[0][valid_label_mask])
-            pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
-            gold_sentence = tokenizer.decode(input_labels[0][valid_label_mask], skip_special_tokens=True)
-            predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
+            # n_word = len(torch.unique(input_labels[0][valid_label_mask]))
+            # n_correct = matching_token_num(output_ids[0], input_labels[0][valid_label_mask])
+            pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0] #[:,input_token_len:]
+            # gold_sentence = tokenizer.decode(input_labels[0][valid_label_mask], skip_special_tokens=True)
+            predictions.append({"sentence":pred_sentence, "gt_sentence":gold})
             print(pred_sentence)
-            print(gold_sentence)
+            print(gold)
             breakpoint()
-            n_word_total += n_word
-            n_word_correct += n_correct
+            # n_word_total += n_word
+            # n_word_correct += n_correct
             cnt += 1
     scores = NLPEvaluator(predictions).evaluate()
     scores["precision"] = n_word_correct / n_word_total

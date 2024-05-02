@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 # from torch.utils.tensorboard import SummaryWriter
 
-from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
+from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset, GenerationDataset
 from utils.train_utils import get_VLMmodel
 from collections.abc import Mapping
 import random
@@ -346,7 +346,7 @@ class CLManagerServer: # == SERVER
         # writer.add_scalar(f"test/CIDEr_server", scores["CIDEr"], sample_num)
         #| test_loss {scores['loss']:.4f}
         self.logger.write(
-            f"Test (Server) | data {dataset_name} | precision {scores['precision']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
+            f"Test (Server) | data {dataset_name} | precision {scores['precision']:.4f} | recall {scores['recall']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |"
         )
         self.logger.write('\n')
         self.logger.flush()
@@ -398,23 +398,29 @@ class CLManagerServer: # == SERVER
 
     def evaluate(self, test_datalist, dataset_name, curr_round):
         self.logger.write(f"server evaluate {dataset_name}\n")
-        dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
-        dataloader = DataLoader(dataset, batch_size= 1, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        # dataset = LazySupervisedDataset(test_datalist, self.tokenizer, self.data_args, preprocess=False)
+        # dataloader = DataLoader(dataset, batch_size= 1, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer))
+        dataset = GenerationDataset(test_datalist, self.tokenizer, self.data_args)
+        dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
         
         self.model.eval()
         predictions = []
         total_loss = 0
         n_word_total = 0
+        n_generated_word_total = 0
         n_word_correct = 0
         cnt = 0
         with torch.no_grad():
-            for i, batch in enumerate((dataloader)):
+            for i, (inputs, imgs, gold) in enumerate((dataloader)):
                 # * prepare data
-                batch = self._prepare_inputs(batch)
-                inputs = batch['input_ids']
-                input_labels = batch['labels']
-                imgs = batch['images']
-                image_sizes = [x.size for x in imgs]
+                # batch = self._prepare_inputs(batch)
+                # inputs = batch['input_ids']
+                # input_labels = batch['labels']
+                # imgs = batch['images']
+                # attn_mask = batch['attention_mask']
+                inputs = inputs.to(self.device)
+                imgs = imgs.to(device=self.device, dtype=torch.bfloat16)
+                image_sizes = [x.shape[-2:] for x in imgs]
                 
                 with torch.inference_mode():
                     output_ids = self.model.generate(
@@ -427,21 +433,25 @@ class CLManagerServer: # == SERVER
                         num_beams=1,#args.num_beams,
                         max_new_tokens=512,#args.max_new_tokens,
                         use_cache=True,
+                        pad_token_id=self.tokenizer.eos_token_id
                     )
-                valid_label_mask = input_labels[0].ne(IGNORE_INDEX)
+                # valid_label_mask = input_labels[0].ne(IGNORE_INDEX)
                 # valid_idx = valid_label_mask.nonzero()[0].item()
                 
                 if 'bunny' in self.model_args.model_name_or_path.lower():
                     input_token_len = inputs.shape[1]
                     output_ids = output_ids[:,input_token_len:]
                     
-                n_word = len(torch.unique(input_labels[0][valid_label_mask]))
-                n_correct = matching_token_num(output_ids[0], input_labels[0][valid_label_mask])
+                input_label = self.tokenizer.encode(gold[0])
+                n_word = len(set(input_label))
+                n_generated_word = len(torch.unique(output_ids[0]))
+                n_correct = matching_token_num(output_ids[0].tolist(), input_label)
                 pred_sentence = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
-                gold_sentence = self.tokenizer.decode(input_labels[0][valid_label_mask], skip_special_tokens=True)
-                predictions.append({"sentence":pred_sentence, "gt_sentence":gold_sentence})
+                # gold_sentence = self.tokenizer.decode(input_labels[0][valid_label_mask], skip_special_tokens=True)
+                predictions.append({"sentence":pred_sentence, "gt_sentence":gold[0]})
                 
                 n_word_total += n_word
+                n_generated_word_total += n_generated_word
                 n_word_correct += n_correct
                 cnt += 1
         #save predictions
@@ -450,6 +460,7 @@ class CLManagerServer: # == SERVER
         
         scores = NLPEvaluator(predictions).evaluate()
         scores["precision"] = n_word_correct / n_word_total
+        scores["recall"] = n_word_correct / n_generated_word_total
         # scores["loss"] = total_loss / cnt
                 
         self.report_test(dataset_name, scores)
