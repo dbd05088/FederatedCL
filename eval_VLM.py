@@ -77,7 +77,7 @@ def evaluate(test_datalist, dataname, round, model, tokenizer, data_args, device
     
     predictions.append(scores)
     #save predictions
-    if client_id:
+    if client_id is not None:
         logger.info(f"Test (Client id {client_id}) | Data {dataname} | precision {scores['precision']:.4f} | recall {scores['recall']:.4f} | Bleu_1 {scores['Bleu_1']} | Bleu_2 {scores['Bleu_2']} | Bleu_3 {scores['Bleu_3']} |Bleu_4 {scores['Bleu_4']} | METEOR {scores['METEOR']} | ROUGE_L {scores['ROUGE_L']} | CIDEr {scores['CIDEr']} |")
         with open(f"./eval_results/{training_args.mode}/{training_args.note}/client{client_id}_round{round}_{dataname}.json", 'w') as fp:
             json.dump(predictions, fp, indent=4)
@@ -150,7 +150,7 @@ def main():
     logger.info(f'Evaluatiing clients and server at round {round_to_eval}')
     
     server_eval_key = []
-    server_state_dict = torch.load(f'./client_states/server_model_round{round_to_eval}.pth', map_location='cpu')
+    server_state_dict = torch.load(f'./client_states/server_model_round{round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
         # load client weight
         client_state_dict = torch.load(f'./client_states/{client_id}_client_model_round{round_to_eval}.pth', map_location='cpu')
