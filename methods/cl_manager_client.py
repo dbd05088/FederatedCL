@@ -379,7 +379,7 @@ class CLManagerClient: # Client
         self.state['round_cnt'] += 1
         self.state['curr_round'] = curr_round
         
-        samples_per_round = len(train_datalist) // self.num_rounds # 4
+        self.samples_per_round = len(train_datalist) // self.num_rounds # 4
 
         seen_so_far = self.state['sample_cnt']
         
@@ -388,7 +388,7 @@ class CLManagerClient: # Client
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
         
         self.optimizer.zero_grad()
-        for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+samples_per_round]):
+        for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+self.samples_per_round]):
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
             # if self.state['sample_cnt'] % self.eval_period == 0:
@@ -524,13 +524,15 @@ class CLManagerClient: # Client
         for i in range(iterations):
             self.model.train()
             data = self.get_batch()
-            self.before_model_update()
+            # self.before_model_update()
 
             data = self._prepare_inputs(data)
             loss = self.compute_loss(self.model, data)
+            # loss /= self.gradient_accumulation_steps
             loss.backward()
             
             if (self.state['sample_cnt']) % self.gradient_accumulation_steps == 0:
+                self.before_optimizer_step()
                 self.optimizer.step()
                 # self.lr_scheduler.step()
                 self.optimizer.zero_grad()
@@ -539,6 +541,9 @@ class CLManagerClient: # Client
 
             total_loss += loss.item()
         return total_loss / iterations
+
+    def before_optimizer_step(self):
+        pass
 
     def before_model_update(self):
         pass
