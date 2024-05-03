@@ -25,9 +25,31 @@ from tqdm import tqdm
 import warnings
 warnings.filterwarnings('ignore')
 
-def evaluate(test_datalist, dataname, round, model, tokenizer, data_args, device, model_args, training_args, logger, client_id=None):
-    dataset = GenerationDataset2(test_datalist, tokenizer, data_args)
-    dataloader = DataLoader(dataset, batch_size= 1)
+from transformers import StoppingCriteria, StoppingCriteriaList
+
+class CustomStoppingCriteria(StoppingCriteria):
+    def __init__(self, repeat_len = 2):
+      self.n = repeat_len
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> bool:
+        should_stop =False
+        if input_ids.shape[1] > self.n*3:
+            last_n_ids = input_ids[0][-self.n:]		# 마지막으로 생성한 n개의 토큰
+            lastlast_n_ids = input_ids[0][-self.n*2:-self.n]
+            lastlastlast_n_ids = input_ids[0][-self.n*2:-self.n]
+            for i in range(self.n):
+                if lastlastlast_n_ids[i] != lastlast_n_ids[i] or lastlast_n_ids[i] != last_n_ids[i]: # stop sequence와 비교
+                    should_stop = False
+                    break
+                else :
+                    should_stop = True
+        return should_stop
+
+def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None):
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    
+    stopping_criteria = CustomStoppingCriteria()
+    stopping_criteria = StoppingCriteriaList([stopping_criteria])
     # img_feat_size = 729
     model.eval()
     predictions = []
@@ -52,19 +74,20 @@ def evaluate(test_datalist, dataname, round, model, tokenizer, data_args, device
                     num_beams=1,#args.num_beams,
                     max_new_tokens=128,#args.max_new_tokens,
                     use_cache=True,
-                    pad_token_id=tokenizer.eos_token_id
+                    pad_token_id=tokenizer.eos_token_id,
+                    stopping_criteria = stopping_criteria
                 )
             if 'bunny' in model_args.model_name_or_path.lower():
                 input_token_len = inputs.shape[1]
                 output_ids = output_ids[:,input_token_len:]
-                
+
             input_label = tokenizer.encode(gold[0])
             n_word = len(set(input_label))
             n_generated_word = len(torch.unique(output_ids[0]))
             n_correct = matching_token_num(output_ids[0].tolist(), input_label)
             
             pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-            
+            # print(pred_sentence)
             predictions.append({"image_file":img_file[0], "input":prompt[0], "sentence":pred_sentence, "gt_sentence":gold[0].strip()})
             
             n_word_total += n_word
@@ -90,7 +113,7 @@ def evaluate(test_datalist, dataname, round, model, tokenizer, data_args, device
 
 def main():
     ##################################
-    round_to_eval = 1
+    round_to_eval = 10
     ##################################
     
     parser = transformers.HfArgumentParser(
@@ -157,12 +180,15 @@ def main():
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
             if samples_per_round_per_client[client_id]*round_to_eval > data_info['eval_cnt']:
+                # breakpoint()
                 model.load_state_dict(client_state_dict, strict=False)
-                evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, client_id)
-        
+                dataset = GenerationDataset2(data_info['data'], tokenizer, data_args)
+                # evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, client_id)
+                evaluate(dataset, data_info['data_name'], round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
                 if data_info['data_name'] not in server_eval_key:
                     model.load_state_dict(server_state_dict, strict=False)
-                    evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, None)
+                    # evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, None)
+                    evaluate(dataset, data_info['data_name'], round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
                     server_eval_key.append(data_info['data_name'])
     
 def get_datalists(args, scenario_num):
