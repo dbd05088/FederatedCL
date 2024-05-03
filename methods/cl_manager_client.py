@@ -380,6 +380,7 @@ class CLManagerClient: # Client
         self.state['curr_round'] = curr_round
         
         self.samples_per_round = len(train_datalist) // self.num_rounds # 4
+        self.iter = 0
 
         seen_so_far = self.state['sample_cnt']
         
@@ -528,17 +529,17 @@ class CLManagerClient: # Client
 
             data = self._prepare_inputs(data)
             loss = self.compute_loss(self.model, data)
-            # loss /= self.gradient_accumulation_steps
+            loss /= self.gradient_accumulation_steps
             loss.backward()
             
-            if (self.state['sample_cnt']) % self.gradient_accumulation_steps == 0:
+            if (self.iter) % self.gradient_accumulation_steps == 0:
                 self.before_optimizer_step()
                 self.optimizer.step()
                 # self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
             # self.after_model_update()
-
+            self.iter += 1
             total_loss += loss.item()
         return total_loss / iterations
 

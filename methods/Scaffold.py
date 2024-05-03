@@ -15,7 +15,8 @@ class Scaffold_server(CLManagerServer):
         with torch.no_grad():
             for name, parameters in self.model.named_parameters():
                 if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
-                        self.aux[name] = torch.zeros_like(parameters)
+                        self.mean_state_dict[name] = parameters.detach().cpu()
+                        self.aux[name] = torch.zeros_like(parameters).cpu()
     
     def server_msg(self):
         return (self.mean_state_dict, self.aux)
@@ -24,7 +25,7 @@ class Scaffold_server(CLManagerServer):
         assert isinstance(msg, tuple) and len(msg) == 2
         
         self.state_dicts.append(msg[0])
-        self.aux_deltas.appenx(msg[1])
+        self.aux_deltas.append(msg[1])
     
     def do_server_work(self, curr_round):
         num_clients = len(self.state_dicts)
@@ -63,21 +64,20 @@ class Scaffold_client(CLManagerClient):
         self.global_aux = OrderedDict()
     
     def before_optimizer_step(self):
-        model_params = self.model.state_dict()
-        local_aux_params = self.local_aux.state_dict()
+        model_params = OrderedDict(self.model.named_parameters())
         for name, global_param in self.global_aux.items():
-            global_param = global_param.to(self.device)
-            model_params[name].grad.data += (global_param - local_aux_params[name])
-        
+            if model_params[name].grad is not None:
+                global_param = global_param.to(self.device)
+                model_params[name].grad.data += (global_param - self.local_aux[name])
         
     def client_msg(self):
         
         # update local_aux
-        model_params = self.model.state_dict()
+        model_params = OrderedDict(self.model.named_parameters())
         original_local_aux = copy.deepcopy(self.local_aux)
         with torch.no_grad():
             for name, local_aux_param in self.local_aux.items():
-                local_aux_param.data = local_aux_param - self.global_aux[name].to(self.device) + (self.global_model_param[name].to(self.device) - model_params[name]) / (self.samples_per_round*self.lr)
+                local_aux_param.copy_(local_aux_param.data - self.global_aux[name].to(self.device) + (self.global_model_param[name].to(self.device) - model_params[name]) / ((self.iter//self.gradient_accumulation_steps)*self.lr))
         
         state_dict = OrderedDict()
         with torch.no_grad():
@@ -101,3 +101,6 @@ class Scaffold_client(CLManagerClient):
         
         if self.local_aux is None:
             self.local_aux = copy.deepcopy(server_msg[1])
+            for k, v in self.local_aux.items():
+                self.local_aux[k] = v.to(self.device)
+                

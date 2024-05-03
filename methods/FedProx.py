@@ -49,11 +49,12 @@ class FedProx_client(CLManagerClient):
         self.mu = 0.01
         
     def before_optimizer_step(self):
-        model_params = self.model.state_dict()
+        model_params = OrderedDict(self.model.named_parameters())
         for name, global_param in self.global_model_param.items():
-            global_param = global_param.to(self.device)
-            model_params[name].grad.data += self.mu*torch.abs(model_params[name] - global_param)
-        
+            if model_params[name].grad is not None:
+                global_param = global_param.to(self.device)
+                model_params[name].grad.data += self.mu*torch.abs(model_params[name].data - global_param)
+
     def client_msg(self):
         state_dict = OrderedDict()
         with torch.no_grad():
