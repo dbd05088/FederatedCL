@@ -1227,7 +1227,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
 
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
-    vision_tower.requires_grad_(True)
+    # vision_tower.requires_grad_(True)
 
     data_args.image_processor = vision_tower.image_processor
     data_args.is_multimodal = True
