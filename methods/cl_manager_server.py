@@ -201,7 +201,7 @@ class CLManagerServer: # == SERVER
             for name, parameters in self.model.named_parameters():
                 if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
                         state_dict[name] = parameters.detach().cpu()
-        torch.save(state_dict, os.path.join('./client_states', f"server_model_round{cur_round}.pth"))
+        torch.save(state_dict, os.path.join(self.args.state_dir, f"server_model_round{cur_round}.pth"))
     
     def save_model(self, output_dir):
         state_dict = OrderedDict()

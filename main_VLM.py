@@ -72,6 +72,15 @@ def main():
 
     # model, tokenizer, data_args = get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args)
     # breakpoint()
+    # from collections import OrderedDict
+    # state_dict = OrderedDict()
+    # for name, parameters in model.named_parameters():
+    #     if 'vision_tower' in name or 'mm_projector' in name:
+    #         state_dict[name] = parameters.cpu()
+    # print(state_dict.keys())
+    # # breakpoint()
+    # torch.save(state_dict, 'bunny3b_vision_tower_mm_projector.pth')
+    # breakpoint()
     
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     # breakpoint()
@@ -157,19 +166,8 @@ def main():
     # scores["precision"] = n_word_correct / n_word_total
     # scores["loss"] = total_loss / cnt
     
-    # from collections import OrderedDict
-    # state_dict = OrderedDict()
-    # for name, parameters in model.named_parameters():
-    #     if 'vision_tower' in name or 'mm_projector' in name:
-    #         state_dict[name] = parameters.cpu()
-    # print(state_dict.keys())
-    # # breakpoint()
-    # torch.save(state_dict, 'bunny8b_vision_tower_mm_projector.pth')
-    # breakpoint()
-    
-    
-    
     # create folder
+    training_args.state_dir = training_args.state_dir + '_' + training_args.note
     if not os.path.exists(training_args.state_dir):
         os.makedirs(training_args.state_dir)
 
