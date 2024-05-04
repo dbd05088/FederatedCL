@@ -1228,8 +1228,14 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-
+    
+    if not training_args.is_eval:
+        data_args.img_mean = vision_tower.image_processor.image_mean
+        data_args.img_std = vision_tower.image_processor.image_std
+        vision_tower.image_processor.do_normalize=False
+    # vision_tower.image_processor.do_rescale=False
     data_args.image_processor = vision_tower.image_processor
+    
     data_args.is_multimodal = True
 
     model.config.image_aspect_ratio = "pad" #data_args.image_aspect_ratio

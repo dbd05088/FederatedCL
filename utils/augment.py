@@ -36,17 +36,17 @@ class Preprocess(nn.Module):
 
 class DataAugmentation(nn.Module):
 
-    def __init__(self, inp_size, mean, std) -> None:
+    def __init__(self, mean, std) -> None:
         super().__init__()
         self.randaugmentation = Kornia_Randaugment()
-        self.inp_size = inp_size
+        # self.inp_size = inp_size
         self.mean = mean
         self.std = std
 
         additional_aug = self.randaugmentation.form_transforms()
         self.transforms = nn.Sequential(
-            K.Resize(size=(inp_size, inp_size)),
-            K.RandomCrop(size=(inp_size, inp_size)),
+            # K.Resize(size=(inp_size, inp_size)),
+            # K.RandomCrop(size=(inp_size, inp_size)),
             K.RandomHorizontalFlip(p=1.0),
             *additional_aug,
             K.Normalize(mean, std)
@@ -67,8 +67,8 @@ class DataAugmentation(nn.Module):
         # if labels is None or len(self.randaugmentation.cls_num_ops) == 0:
         additional_aug = self.randaugmentation.form_transforms()
         self.transforms = nn.Sequential(
-            K.Resize(size=(self.inp_size, self.inp_size)),
-            K.RandomCrop(size=(self.inp_size, self.inp_size)),
+            # K.Resize(size=(self.inp_size, self.inp_size)),
+            # K.RandomCrop(size=(self.inp_size, self.inp_size)),
             K.RandomHorizontalFlip(p=1.0),
             *additional_aug,
             K.Normalize(self.mean, self.std)

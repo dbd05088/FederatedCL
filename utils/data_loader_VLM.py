@@ -12,6 +12,7 @@ from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAG
 from models.llava import conversation as conversation_lib_llava
 from models.bunny import conversation as conversation_lib_bunny
 from packaging import version
+from utils.augment import DataAugmentation
 # IS_TOKENIZER_GREATER_THAN_0_14 = version.parse(tokenizers.__version__) >= version.parse('0.14')
 IS_TOKENIZER_GREATER_THAN_0_14 = True
 
@@ -72,11 +73,22 @@ class GenerationDataset(Dataset):
 class GenerationDataset2(Dataset):
     def __init__(self, datalist,
                  tokenizer,
-                 data_args):
+                 data_args,
+                 preprocess=False):
         super(GenerationDataset2, self).__init__()
         self.tokenizer = tokenizer
         self.datalist = datalist
         self.data_args = data_args
+        self.preprocess = preprocess
+        if preprocess:
+            self.images = []
+            for data in self.datalist:
+                image_file = data['image']
+                if isinstance(image_file, list):
+                    image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
+                else:
+                    image = [Image.open(image_file).convert('RGB')]
+                self.images.append(image)
 
     def __getitem__(self, index):
         source = self.datalist[index]
@@ -92,10 +104,14 @@ class GenerationDataset2(Dataset):
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
 
-        if isinstance(image_file, list):
-            image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
+        if self.preprocess:
+            image = self.images[index]
         else:
-            image = [Image.open(image_file).convert('RGB')]
+            if isinstance(image_file, list):
+                image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
+            else:
+                image = [Image.open(image_file).convert('RGB')]
+        
         if self.data_args.image_aspect_ratio == 'pad':
             def expand2square(pil_img, background_color):
                 width, height = pil_img.size
@@ -208,6 +224,8 @@ class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
     tokenizer: transformers.PreTrainedTokenizer
+    device:torch.device
+    transform:DataAugmentation
 
     def __call__(self, instances):
         input_ids, labels = tuple([instance[key] for instance in instances]
@@ -229,17 +247,21 @@ class DataCollatorForSupervisedDataset(object):
                 input_id[input_id == -300] = self.tokenizer.eos_token_id
         
         batch = dict(
-            input_ids=input_ids,
-            labels=labels,
-            attention_mask=attention_mask,
+            input_ids=input_ids.to(self.device),
+            labels=labels.to(self.device),
+            attention_mask=attention_mask.to(self.device),
         )
 
         if 'image' in instances[0]:
             images = [instance['image'] for instance in instances]
             if all(x is not None and x.shape == images[0].shape for x in images):
-                batch['images'] = torch.stack(images).to(torch.bfloat16)
+                images = torch.stack(images).to(device=self.device)
+                b, n, c, h, w = images.shape
+                images = images.reshape(b*n,c,h,w)
+                images = self.transform(images).to(dtype=torch.bfloat16)
+                batch['images'] = images.reshape(b,n,c,h,w)
             else:
-                batch['images'] = [x.to(torch.bfloat16) for x in images]
+                batch['images'] = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) for x in images]
 
         return batch
 

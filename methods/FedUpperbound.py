@@ -3,6 +3,7 @@ from methods.cl_manager_client import CLManagerClient
 from collections import OrderedDict
 from torch.utils.data import DataLoader
 from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
+from utils.augment import DataAugmentation
 import torch
 
 class FedUpperbound_server(CLManagerServer):
@@ -22,7 +23,7 @@ class FedUpperbound_server(CLManagerServer):
     
     def do_server_work(self, cur_round):
         dataset = LazySupervisedDataset(self.client_data, self.tokenizer, self.data_args)
-        dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer), shuffle=True)
+        dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer, device=self.device, transform=DataAugmentation(self.data_args.img_mean,self.data_args.img_std).to(self.device)), shuffle=True)
         self.total_samples = len(dataloader)
         
         if self.gradient_checkpointing:
@@ -32,13 +33,14 @@ class FedUpperbound_server(CLManagerServer):
         # train for one epoch
         self.model.train()
         self.optimizer.zero_grad()
+        self.create_scheduler((len(dataset)//self.gradient_accumulation_steps)+1,num_cycles=1)
         for i, data in enumerate(dataloader):
             data = self._prepare_inputs(data)
             loss = self.compute_loss(self.model, data)
             loss.backward()
             if (i + 1) % self.gradient_accumulation_steps == 0:
                 self.optimizer.step()
-                # self.lr_scheduler.step()
+                self.lr_scheduler.step()
                 self.optimizer.zero_grad()
             
             self.report_training(i+1, loss)

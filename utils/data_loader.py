@@ -38,6 +38,7 @@ class MultiProcessLoader():
         self.index_queues = []
         self.tokenizer = tokenizer
         self.data_args = data_args
+        self.transform = DataAugmentation(data_args.img_mean,data_args.img_std).to(self.device)
         # self.data_dir = data_dir
         if init:
             for i in range(self.n_workers):
@@ -94,10 +95,15 @@ class MultiProcessLoader():
             # if self.transform_on_gpu and not self.transform_on_worker:
             #     images = self.transform(images.to(self.device))
             # images = images.to(dtype=torch.bfloat16)
+            
             if all(x is not None and x.shape == images[0].shape for x in images):
-                images = torch.stack(images).to(dtype=torch.bfloat16)
+                images = torch.stack(images).to(device=self.device)
+                b, n, c, h, w = images.shape
+                images = images.reshape(b*n,c,h,w)
+                images = self.transform(images).to(dtype=torch.bfloat16)
+                images = images.reshape(b,n,c,h,w)
             else:
-                images = [x.to(torch.bfloat16) for x in images]
+                images = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) for x in images]
             # labels = labels.to(dtype=torch.bfloat16)
             
             data['images'] = images
