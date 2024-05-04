@@ -226,7 +226,7 @@ class CLManagerClient: # Client
 
         return self.optimizer
 
-    def create_scheduler(self, num_training_steps: int, optimizer: torch.optim.Optimizer = None):
+    def create_scheduler(self, num_training_steps: int, num_cycles:int, optimizer: torch.optim.Optimizer = None):
         """
         Setup the scheduler. The optimizer of the trainer must have been set up either before this method is called or
         passed as an argument.
@@ -240,7 +240,8 @@ class CLManagerClient: # Client
                 optimizer=self.optimizer if optimizer is None else optimizer,
                 num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
                 num_training_steps=num_training_steps,
-                scheduler_specific_kwargs=self.args.lr_scheduler_kwargs,
+                # scheduler_specific_kwargs=self.args.lr_scheduler_kwargs,
+                scheduler_specific_kwargs={"num_cycles": num_cycles,}
             )
             self._created_lr_scheduler = True
         return self.lr_scheduler
@@ -254,7 +255,8 @@ class CLManagerClient: # Client
             self.optimizer.load_state_dict(
                 torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{OPTIMIZER_NAME}"), map_location=map_location)
             )
-            # self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}")))
+        if os.path.isfile(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}")):
+            self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"), map_location=map_location))
 
     def save_model(self, client_id, output_dir, round):
         state_dict = OrderedDict()
@@ -297,6 +299,9 @@ class CLManagerClient: # Client
             self.init_state(client_id, len(train_datalist))
             self.init_model()
             self.data_stream = iter(train_datalist)
+            
+            self.create_scheduler((len(train_datalist)//self.gradient_accumulation_steps)+1, self.num_rounds)
+            
             self.initialize_future(train_datalist)
         else: # load_state
             # if client_id != self.state['client_id']:
@@ -336,7 +341,7 @@ class CLManagerClient: # Client
         self.dataloader.save_state(self.state['client_id'], self.args.state_dir)
 
         torch.save(self.optimizer.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{OPTIMIZER_NAME}"))
-        # torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"))
+        torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"))
 
         self.save_model(self.state['client_id'], self.args.state_dir, round)
         
@@ -535,7 +540,7 @@ class CLManagerClient: # Client
             if (self.iter) % self.gradient_accumulation_steps == 0:
                 self.before_optimizer_step()
                 self.optimizer.step()
-                # self.lr_scheduler.step()
+                self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
             # self.after_model_update()

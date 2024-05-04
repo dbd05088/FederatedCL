@@ -3,21 +3,26 @@
 sudo sysctl -w vm.max_map_count=262144
 # CIL CONFIG
 NOTE="debug" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="scaffold"
-MODEL_ARCH="bunny_3b" # llava bunny_3b bunny_8b
+MODE="fedprox"
+MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 RND_SEED=1
 
-# if [ "$DATASET" == "cifar10" ]; then
-MEM_SIZE=1000
+# fed args
+SCENARIO=1
+NUM_ROUNDS=10
+NUM_CLIENTS=1
+MODEL_MAX_LEN=2048
+
+MEM_SIZE=50000
 ONLINE_ITER=1
 BATCHSIZE=4
-LR=2e-4
-OPT_NAME="adamw_torch"
-SCHED_NAME="cosine"
-TEMP_BATCHSIZE=2
-MM_PROJECTOR_LR=2e-5
+TEMP_BATCHSIZE=1
 
-# adam8bit_bnb adamw_torch
+LR=2e-4
+MM_PROJECTOR_LR=2e-5
+OPT_NAME="adamw_torch" # adam8bit_bnb adamw_torch
+SCHED_NAME="cosine_with_restarts" #cosine
+WARMUP_RATIO=0.003 # SHOULD BE 0.03 / NUM_ROUNDS
 
 if [ "$MODEL_ARCH" == "llava" ]; then
     MODEL_NAME="liuhaotian/llava-v1.5-7b"
@@ -48,10 +53,10 @@ CUDA_VISIBLE_DEVICES=0,1 python main_VLM.py \
     --model_name_for_dataarg $MODEL_NAME \
     --model_type $MODEL_TYPE \
     --version $VERSION \
-    --num_clients 1 \
-    --model_max_length 2048 \
-    --num_rounds 10 \
-    --scenario 1 \
+    --num_clients $NUM_CLIENTS \
+    --model_max_length $MODEL_MAX_LEN \
+    --num_rounds $NUM_ROUNDS \
+    --scenario $SCENARIO \
     --vision_tower $VISION_TOWER \
     --gradient_checkpointing True \
     --gradient_accumulation_steps 4 \
@@ -62,6 +67,8 @@ CUDA_VISIBLE_DEVICES=0,1 python main_VLM.py \
     --memory_size $MEM_SIZE \
     --seed $RND_SEED \
     --optim $OPT_NAME --lr_scheduler_type $SCHED_NAME \
+    --weight_decay 0. \
+    --warmup_ratio $WARMUP_RATIO \
     --learning_rate $LR --per_gpu_train_batch_size $BATCHSIZE \
     --mm_projector_lr $MM_PROJECTOR_LR \
     --temp_batchsize $TEMP_BATCHSIZE \

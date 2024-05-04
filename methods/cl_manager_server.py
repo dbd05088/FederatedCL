@@ -292,7 +292,7 @@ class CLManagerServer: # == SERVER
 
         return self.optimizer
 
-    def create_scheduler(self, num_training_steps: int, optimizer: torch.optim.Optimizer = None):
+    def create_scheduler(self, num_training_steps: int, num_cycles:int, optimizer: torch.optim.Optimizer = None):
         """
         Setup the scheduler. The optimizer of the trainer must have been set up either before this method is called or
         passed as an argument.
@@ -306,7 +306,8 @@ class CLManagerServer: # == SERVER
                 optimizer=self.optimizer if optimizer is None else optimizer,
                 num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
                 num_training_steps=num_training_steps,
-                scheduler_specific_kwargs=self.args.lr_scheduler_kwargs,
+                # scheduler_specific_kwargs=self.args.lr_scheduler_kwargs,
+                scheduler_specific_kwargs={"num_cycles": num_cycles,}
             )
             self._created_lr_scheduler = True
         return self.lr_scheduler
