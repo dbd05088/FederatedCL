@@ -528,6 +528,7 @@ class CLManagerClient: # Client
         total_loss, correct, num_data = 0.0, 0.0, 0.0
 
         for i in range(iterations):
+            self.iter += 1
             self.model.train()
             data = self.get_batch()
             # self.before_model_update()
@@ -544,7 +545,6 @@ class CLManagerClient: # Client
                 self.optimizer.zero_grad()
 
             # self.after_model_update()
-            self.iter += 1
             total_loss += loss.item()
         return total_loss / iterations
 
