@@ -1,14 +1,16 @@
 #/bin/bash
 
 # CIL CONFIG
-NOTE="fedavg_eval" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="debug" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="fedavg"
-MODEL_ARCH="llava" # llava bunny_3b bunny_8b
-RND_SEED=1
+MODEL_ARCH="bunny_3b" # llava bunny_3b bunny_8b
 
-# if [ "$DATASET" == "cifar10" ]; then
-MEM_SIZE=50 ONLINE_ITER=1
-BATCHSIZE=4; LR=2e-5 OPT_NAME="adamw_torch" SCHED_NAME="cosine" IMP_UPDATE_PERIOD=1
+# fed args
+SCENARIO=3
+NUM_ROUNDS=10
+NUM_CLIENTS=10
+MODEL_MAX_LEN=4000
+MAX_NEW_TOKENS=128
 
 # adam8bit_bnb adamw_torch
 
@@ -36,29 +38,22 @@ else
     exit 1
 fi
 
-CUDA_VISIBLE_DEVICES=7 python eval_VLM.py \
+CUDA_VISIBLE_DEVICES=0 python eval_VLM.py \
+    --is_eval True \
     --model_name_or_path $MODEL_NAME \
     --model_name_for_dataarg $MODEL_NAME \
     --model_type $MODEL_TYPE \
     --version $VERSION \
-    --scenario 3 \
-    --num_rounds 10 \
-    --num_clients 10 \
-    --model_max_length 4000 \
+    --scenario $SCENARIO \
+    --num_rounds $NUM_ROUNDS \
+    --num_clients $NUM_CLIENTS \
+    --model_max_length $MODEL_MAX_LEN \
+    --max_new_tokens $MAX_NEW_TOKENS \
     --vision_tower $VISION_TOWER \
-    --gradient_checkpointing True \
-    --gradient_accumulation_steps 4 \
     --bits $BITS \
     --bf16 True \
     --tf32 True \
-    --mode $MODE --dataloader_num_workers 2 \
-    --memory_size $MEM_SIZE \
-    --seed $RND_SEED \
-    --optim $OPT_NAME --lr_scheduler_type $SCHED_NAME \
-    --learning_rate $LR --per_gpu_train_batch_size $BATCHSIZE \
-    --temp_batchsize $BATCHSIZE \
-    --online_iter $ONLINE_ITER \
     --note $NOTE \
-    --output_dir "./nohup" #> ./nohup/fedavg_bs16.log 2>&1 &
+    --output_dir "./nohup" #> ./nohup/fedavg_bunn3b_round10_eval.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD

@@ -17,6 +17,7 @@ class ModelArguments:
     mm_use_im_patch_token: bool = field(default=False)
     mm_patch_merge_type: Optional[str] = field(default='flat')
     mm_vision_select_feature: Optional[str] = field(default="patch")
+    max_new_tokens: Optional[int] = field(default=512)
 
 
 @dataclass
@@ -38,6 +39,8 @@ class TrainingArguments(transformers.TrainingArguments):
     # cuda
     device: "torch.device" = torch.device(f"cuda:0")
     n_gpu:int = len(os.environ['CUDA_VISIBLE_DEVICES'].split(','))
+    
+    is_eval: bool = False
 
     # cl config
     mode: str = field(default="er")

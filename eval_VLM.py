@@ -72,7 +72,7 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
                     temperature=0.2,#args.temperature,
                     top_p=None,#args.top_p,
                     num_beams=1,#args.num_beams,
-                    max_new_tokens=128,#args.max_new_tokens,
+                    max_new_tokens=model_args.max_new_tokens,#args.max_new_tokens,
                     use_cache=True,
                     pad_token_id=tokenizer.eos_token_id,
                     stopping_criteria = stopping_criteria
@@ -80,13 +80,14 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
             if 'bunny' in model_args.model_name_or_path.lower():
                 input_token_len = inputs.shape[1]
                 output_ids = output_ids[:,input_token_len:]
-
-            input_label = tokenizer.encode(gold[0])
-            n_word = len(set(input_label))
-            n_generated_word = len(torch.unique(output_ids[0]))
-            n_correct = matching_token_num(output_ids[0].tolist(), input_label)
             
             pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+            
+            input_label = tokenizer.encode(gold[0])
+            output_id = tokenizer.encode(pred_sentence)
+            n_word = len(set(input_label))
+            n_generated_word = len(set(output_id))
+            n_correct = matching_token_num(output_id, input_label)
             # print(pred_sentence)
             predictions.append({"image_file":img_file[0], "input":prompt[0], "sentence":pred_sentence, "gt_sentence":gold[0].strip()})
             
