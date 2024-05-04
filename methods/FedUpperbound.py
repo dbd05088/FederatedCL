@@ -51,6 +51,7 @@ class FedUpperbound_server(CLManagerServer):
                         state_dict[name] = parameters.detach().cpu()
 
         self.state_dict = state_dict
+        self.client_data = []
         
         # self.evaluate_seendata()
         self.save_server_model(cur_round)
@@ -69,8 +70,9 @@ class FedUpperbound_client(CLManagerClient):
         self.state['curr_round'] = curr_round
         
         # FIXME
-        samples_per_round = len(train_datalist) // self.num_rounds # 4
-
+        self.samples_per_round = len(train_datalist) // self.num_rounds # 4
+        self.iter = 0
+        
         seen_so_far = self.state['sample_cnt']
         
         if self.gradient_checkpointing:
@@ -78,7 +80,7 @@ class FedUpperbound_client(CLManagerClient):
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
         
         self.optimizer.zero_grad()
-        for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+samples_per_round]):
+        for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+self.samples_per_round]):
             self.trained_data.append(data)
 
             self.state['sample_cnt'] += 1
@@ -86,11 +88,11 @@ class FedUpperbound_client(CLManagerClient):
             # if self.state['sample_cnt'] % self.eval_period == 0:
             
         # eval at the end of each round
-        for data_info in test_datalist:
-            if self.state['sample_cnt'] > data_info['eval_cnt']:
-                self.evaluate(data_info['data_name'], data_info['data'])
+        # for data_info in test_datalist:
+        #     if self.state['sample_cnt'] > data_info['eval_cnt']:
+        #         self.evaluate(data_info['data_name'], data_info['data'])
 
-        self.save_state()
+        self.save_state(self.state['round_cnt'])
     
     def handle_server_msg(self, server_msg):
         if not isinstance(server_msg, OrderedDict):
