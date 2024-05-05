@@ -34,22 +34,15 @@ class FedYogi_server(CLManagerServer):
         num_clients = len(self.state_dicts)
         if num_clients == 0:
             return
-        keys = self.state_dicts[0].keys()
+
+        for key, param in self.opt_proxy_dict.items():
+            delta_w = sum([state_dict[key] - self.mean_state_dict[key] for state_dict in self.state_dicts]) / len(self.state_dicts)
+            self.proxy_dict[key] = self.beta1 * self.proxy_dict[key] + (1 - self.beta1) * delta_w if curr_round > 0 else delta_w
+            delta_square = torch.square(self.proxy_dict[key])
+            self.opt_proxy_dict[key] = param - (1-self.beta2)*delta_square*torch.sign(param - delta_square)
+            self.mean_state_dict[key] += self.eta * torch.div(self.proxy_dict[key], torch.sqrt(self.opt_proxy_dict[key])+self.tau)
         
-        mean_state_dict = OrderedDict()
-        for k in keys:
-            if isinstance(self.state_dicts[0][k], torch.Tensor):
-                for key, param in self.opt_proxy_dict.items():
-                    delta_w = sum([state_dict[key] - self.mean_state_dict[key] for state_dict in self.state_dicts]) / len(self.state_dicts)
-                    self.proxy_dict[key] = self.beta1 * self.proxy_dict[key] + (1 - self.beta1) * delta_w if curr_round > 0 else delta_w
-                    delta_square = torch.square(self.proxy_dict[key])
-                    self.opt_proxy_dict[key] = param - (1-self.beta2)*delta_square*torch.sign(param - delta_square)
-                    self.mean_state_dict[key] += self.eta * torch.div(self.proxy_dict[key], torch.sqrt(self.opt_proxy_dict[key])+self.tau)
-            else:
-                mean_state_dict[k] = self.state_dicts[0][k]
-        
-        self.model.load_state_dict(mean_state_dict, strict=False)
-        self.mean_state_dict = mean_state_dict
+        self.model.load_state_dict(self.mean_state_dict, strict=False)
         self.state_dicts = []
         
         # self.evaluate_seendata(curr_round)
