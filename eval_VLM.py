@@ -174,10 +174,10 @@ def main():
     logger.info(f'Evaluatiing clients and server at round {round_to_eval}')
     
     server_eval_key = []
-    server_state_dict = torch.load(f'./client_states/server_model_round{round_to_eval-1}.pth', map_location='cpu')
+    server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
         # load client weight
-        client_state_dict = torch.load(f'./client_states/{client_id}_client_model_round{round_to_eval}.pth', map_location='cpu')
+        client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{round_to_eval}.pth', map_location='cpu')
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
             if samples_per_round_per_client[client_id]*round_to_eval > data_info['eval_cnt']:
