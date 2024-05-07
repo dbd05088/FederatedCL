@@ -234,16 +234,16 @@ class CLManagerClient: # Client
         Args:
             num_training_steps (int): The number of training steps to do.
         """
-        if self.lr_scheduler is None:
-            self.lr_scheduler = get_scheduler(
-                self.args.lr_scheduler_type,
-                optimizer=self.optimizer if optimizer is None else optimizer,
-                num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
-                num_training_steps=num_training_steps,
-                # scheduler_specific_kwargs=self.args.lr_scheduler_kwargs,
-                scheduler_specific_kwargs={"num_cycles": num_cycles,}
-            )
-            self._created_lr_scheduler = True
+        # if self.lr_scheduler is None:
+        self.lr_scheduler = get_scheduler(
+            self.args.lr_scheduler_type,
+            optimizer=self.optimizer if optimizer is None else optimizer,
+            num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
+            num_training_steps=num_training_steps,
+            # scheduler_specific_kwargs=self.args.lr_scheduler_kwargs,
+            scheduler_specific_kwargs={"num_cycles": num_cycles,}
+        )
+        self._created_lr_scheduler = True
         return self.lr_scheduler
 
     def _load_optimizer_and_scheduler(self, checkpoint):
@@ -300,7 +300,7 @@ class CLManagerClient: # Client
             self.init_model()
             self.data_stream = iter(train_datalist)
             
-            self.create_scheduler((len(train_datalist)//self.gradient_accumulation_steps)+1, self.num_rounds)
+            # self.create_scheduler((len(train_datalist)//self.gradient_accumulation_steps)+1, self.num_rounds)
             
             self.initialize_future(train_datalist)
         else: # load_state
@@ -321,6 +321,7 @@ class CLManagerClient: # Client
             self.dataloader.load_state(client_id, self.args.state_dir)
             self.load_model(client_id, self.args.state_dir, self.state['round_cnt'])
             self._load_optimizer_and_scheduler(self.args.state_dir)
+        self.create_scheduler((len(train_datalist)//self.gradient_accumulation_steps*self.online_iter)+1, num_cycles=1)
     
     def init_state(self, cid, data_len):
         self.state['client_id'] = cid

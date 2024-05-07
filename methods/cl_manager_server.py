@@ -300,16 +300,16 @@ class CLManagerServer: # == SERVER
         Args:
             num_training_steps (int): The number of training steps to do.
         """
-        if self.lr_scheduler is None:
-            self.lr_scheduler = get_scheduler(
-                self.args.lr_scheduler_type,
-                optimizer=self.optimizer if optimizer is None else optimizer,
-                num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
-                num_training_steps=num_training_steps,
-                # scheduler_specific_kwargs=self.args.lr_scheduler_kwargs,
-                scheduler_specific_kwargs={"num_cycles": num_cycles,}
-            )
-            self._created_lr_scheduler = True
+        # if self.lr_scheduler is None:
+        self.lr_scheduler = get_scheduler(
+            self.args.lr_scheduler_type,
+            optimizer=self.optimizer if optimizer is None else optimizer,
+            num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
+            num_training_steps=num_training_steps,
+            # scheduler_specific_kwargs=self.args.lr_scheduler_kwargs,
+            scheduler_specific_kwargs={"num_cycles": num_cycles,}
+        )
+        self._created_lr_scheduler = True
         return self.lr_scheduler
 
     def _load_optimizer_and_scheduler(self, checkpoint):

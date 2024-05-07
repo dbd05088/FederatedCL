@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
 from utils.augment import DataAugmentation
 import torch
+import copy
 
 class FedUpperbound_server(CLManagerServer):
     def setup(self):
@@ -23,7 +24,7 @@ class FedUpperbound_server(CLManagerServer):
     
     def do_server_work(self, cur_round):
         dataset = LazySupervisedDataset(self.client_data, self.tokenizer, self.data_args)
-        dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=self.n_worker, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer, device=self.device, transform=DataAugmentation(self.data_args.img_mean,self.data_args.img_std).to(self.device)), shuffle=True)
+        dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=0, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer, device=self.device, transform=DataAugmentation(self.data_args.img_mean,self.data_args.img_std).to(self.device)), shuffle=True)
         self.total_samples = len(dataloader)
         
         if self.gradient_checkpointing:
@@ -53,7 +54,10 @@ class FedUpperbound_server(CLManagerServer):
                         state_dict[name] = parameters.detach().cpu()
 
         self.state_dict = state_dict
+        # self.client_data = []
+        del self.client_data
         self.client_data = []
+        self.lr_scheduler = None
         
         # self.evaluate_seendata()
         self.save_server_model(cur_round)
@@ -83,7 +87,7 @@ class FedUpperbound_client(CLManagerClient):
         
         self.optimizer.zero_grad()
         for i, data in enumerate(train_datalist[seen_so_far:seen_so_far+self.samples_per_round]):
-            self.trained_data.append(data)
+            self.trained_data.append(copy.deepcopy(data))
 
             self.state['sample_cnt'] += 1
             self.online_step(data, self.state['sample_cnt'], self.args.dataloader_num_workers)
@@ -101,4 +105,5 @@ class FedUpperbound_client(CLManagerClient):
             return
         
         self.model.load_state_dict(server_msg, strict=False)
+        del self.trained_data
         self.trained_data = []
