@@ -114,7 +114,7 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
 
 def main():
     ##################################
-    round_to_eval = 10
+    # round_to_eval = 1
     ##################################
     
     parser = transformers.HfArgumentParser(
@@ -141,7 +141,7 @@ def main():
     logger = logging.getLogger()
 
     os.makedirs(f"eval_results/{training_args.mode}/{training_args.note}", exist_ok=True)
-    fileHandler = logging.FileHandler(f'eval_results/{training_args.mode}/{training_args.note}/round_{round_to_eval}.log', mode="w")
+    fileHandler = logging.FileHandler(f'eval_results/{training_args.mode}/{training_args.note}/round_{training_args.round_to_eval}.log', mode="w")
 
     # writer = SummaryWriter(f'tensorboard/{training_args.mode}/{training_args.note}/federated')
 
@@ -171,25 +171,25 @@ def main():
     samples_per_round_per_client = [len(train_datalists[i]) // training_args.num_rounds for i in range(training_args.num_clients)]
     
     
-    logger.info(f'Evaluatiing clients and server at round {round_to_eval}')
+    logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     
     server_eval_key = []
-    server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{round_to_eval-1}.pth', map_location='cpu')
+    server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
         # load client weight
-        client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{round_to_eval}.pth', map_location='cpu')
+        client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
-            if samples_per_round_per_client[client_id]*round_to_eval > data_info['eval_cnt']:
+            if samples_per_round_per_client[client_id]*training_args.round_to_eval > data_info['eval_cnt']:
                 # breakpoint()
                 model.load_state_dict(client_state_dict, strict=False)
                 dataset = GenerationDataset2(data_info['data'], tokenizer, data_args)
                 # evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, client_id)
-                evaluate(dataset, data_info['data_name'], round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
+                evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
                 if data_info['data_name'] not in server_eval_key:
                     model.load_state_dict(server_state_dict, strict=False)
                     # evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, None)
-                    evaluate(dataset, data_info['data_name'], round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                    evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
                     server_eval_key.append(data_info['data_name'])
     
 def get_datalists(args, scenario_num):

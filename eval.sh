@@ -1,8 +1,8 @@
 #/bin/bash
 
 # CIL CONFIG
-NOTE="debug" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="fedavg"
+NOTE="feddyn_randaug_cosinesched_mem" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="feddyn"
 MODEL_ARCH="bunny_3b" # llava bunny_3b bunny_8b
 
 # fed args
@@ -38,7 +38,7 @@ else
     exit 1
 fi
 
-CUDA_VISIBLE_DEVICES=0 python eval_VLM.py \
+CUDA_VISIBLE_DEVICES=5 python eval_VLM.py \
     --is_eval True \
     --model_name_or_path $MODEL_NAME \
     --model_name_for_dataarg $MODEL_NAME \
@@ -54,6 +54,7 @@ CUDA_VISIBLE_DEVICES=0 python eval_VLM.py \
     --bf16 True \
     --tf32 True \
     --note $NOTE \
-    --output_dir "./nohup" #> ./nohup/fedavg_bunn3b_round10_eval.log 2>&1 &
+    --round_to_eval 10 \
+    --output_dir "./nohup" > ./nohup/feddyn_bunny3b_round10_eval.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD

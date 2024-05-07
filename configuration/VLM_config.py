@@ -41,6 +41,7 @@ class TrainingArguments(transformers.TrainingArguments):
     n_gpu:int = len(os.environ['CUDA_VISIBLE_DEVICES'].split(','))
     
     is_eval: bool = False
+    round_to_eval: int = None
 
     # cl config
     mode: str = field(default="er")
