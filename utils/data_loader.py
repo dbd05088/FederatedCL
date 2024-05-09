@@ -25,6 +25,7 @@ from utils.data_worker import worker_loop_multimodal, worker_multimodal
 from models.llava.constants import IGNORE_INDEX
 
 logger = logging.getLogger()
+PIL.Image.MAX_IMAGE_PIXELS = None
 
 import queue
 TIMEOUT = 5.0
@@ -96,14 +97,14 @@ class MultiProcessLoader():
             #     images = self.transform(images.to(self.device))
             # images = images.to(dtype=torch.bfloat16)
             
-            if all(x is not None and x.shape == images[0].shape for x in images):
+            if all(x is not None and x.shape[0] != 0 and x.shape == images[0].shape for x in images):
                 images = torch.stack(images).to(device=self.device)
                 b, n, c, h, w = images.shape
                 images = images.reshape(b*n,c,h,w)
                 images = self.transform(images).to(dtype=torch.bfloat16)
                 images = images.reshape(b,n,c,h,w)
             else:
-                images = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) for x in images]
+                images = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) if x.shape[0] != 0 else x.to(torch.bfloat16) for x in images]
             # labels = labels.to(dtype=torch.bfloat16)
             
             data['images'] = images
@@ -131,7 +132,7 @@ class MultiProcessLoader():
             samples_in_thisidx = []
             while True:
                 try:
-                    r = self.result_queues[i].get(timeout=TIMEOUT)
+                    r = self.result_queues[i].get(timeout=TIMEOUT*2)
                     if r:
                         samples_in_thisidx.append(r['sample'])
                     else:

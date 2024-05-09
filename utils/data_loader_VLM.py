@@ -15,80 +15,27 @@ from packaging import version
 from utils.augment import DataAugmentation
 # IS_TOKENIZER_GREATER_THAN_0_14 = version.parse(tokenizers.__version__) >= version.parse('0.14')
 IS_TOKENIZER_GREATER_THAN_0_14 = True
+Image.MAX_IMAGE_PIXELS = None
 
-# Custom dataset class
 class GenerationDataset(Dataset):
-    def __init__(self, datalist,
-                 tokenizer,
-                 data_args):
-        super(GenerationDataset, self).__init__()
-        self.tokenizer = tokenizer
-        self.datalist = datalist
-        self.data_args = data_args
-
-    def __getitem__(self, index):
-        source = self.datalist[index]
-        image_file = source["image"]
-        qs = source["conversations"][0]['value']
-        gold = source["conversations"][1]['value']
-
-        if 'llava' in self.data_args.model_name_for_dataarg.lower():
-            conv = conversation_lib_llava.default_conversation.copy()
-        elif 'bunny' in self.data_args.model_name_for_dataarg.lower():
-            conv = conversation_lib_bunny.default_conversation.copy()
-        conv.append_message(conv.roles[0], qs)
-        conv.append_message(conv.roles[1], None)
-        prompt = conv.get_prompt()
-
-        if isinstance(image_file, list):
-            image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
-        else:
-            image = [Image.open(image_file).convert('RGB')]
-        if self.data_args.image_aspect_ratio == 'pad':
-            def expand2square(pil_img, background_color):
-                width, height = pil_img.size
-                if width == height:
-                    return pil_img
-                elif width > height:
-                    result = Image.new(pil_img.mode, (width, width), background_color)
-                    result.paste(pil_img, (0, (width - height) // 2))
-                    return result
-                else:
-                    result = Image.new(pil_img.mode, (height, height), background_color)
-                    result.paste(pil_img, ((height - width) // 2, 0))
-                    return result
-            image = torch.stack([self.data_args.image_processor.preprocess(expand2square(img, tuple(int(x*255) for x in self.data_args.image_processor.image_mean)), return_tensors='pt')['pixel_values'][0] for img in image])
-            # image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
-            # image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
-        else:
-            image = torch.stack([self.data_args.image_processor.preprocess(img, return_tensors='pt')['pixel_values'][0] for img in image])
-
-        input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
-
-        return input_ids, image, gold
-
-    def __len__(self):
-        return len(self.datalist)
-    
-class GenerationDataset2(Dataset):
     def __init__(self, datalist,
                  tokenizer,
                  data_args,
                  preprocess=False):
-        super(GenerationDataset2, self).__init__()
+        super(GenerationDataset, self).__init__()
         self.tokenizer = tokenizer
         self.datalist = datalist
         self.data_args = data_args
         self.preprocess = preprocess
-        if preprocess:
-            self.images = []
-            for data in self.datalist:
-                image_file = data['image']
-                if isinstance(image_file, list):
-                    image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
-                else:
-                    image = [Image.open(image_file).convert('RGB')]
-                self.images.append(image)
+        # if preprocess:
+        #     self.images = []
+        #     for data in self.datalist:
+        #         image_file = data['image']
+        #         if isinstance(image_file, list):
+        #             image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
+        #         else:
+        #             image = [Image.open(image_file).convert('RGB')]
+        #         self.images.append(image)
 
     def __getitem__(self, index):
         source = self.datalist[index]
@@ -104,33 +51,33 @@ class GenerationDataset2(Dataset):
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
 
-        if self.preprocess:
-            image = self.images[index]
-        else:
+        # if self.preprocess:
+        #     image = self.images[index]
+        if 'image' in source:
+            image_file = source["image"]
             if isinstance(image_file, list):
                 image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
             else:
                 image = [Image.open(image_file).convert('RGB')]
-        
-        if self.data_args.image_aspect_ratio == 'pad':
-            def expand2square(pil_img, background_color):
-                width, height = pil_img.size
-                if width == height:
-                    return pil_img
-                elif width > height:
-                    result = Image.new(pil_img.mode, (width, width), background_color)
-                    result.paste(pil_img, (0, (width - height) // 2))
-                    return result
-                else:
-                    result = Image.new(pil_img.mode, (height, height), background_color)
-                    result.paste(pil_img, ((height - width) // 2, 0))
-                    return result
-            image = torch.stack([self.data_args.image_processor.preprocess(expand2square(img, tuple(int(x*255) for x in self.data_args.image_processor.image_mean)), return_tensors='pt')['pixel_values'][0] for img in image])
-            # image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
-            # image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
-        else:
-            image = torch.stack([self.data_args.image_processor.preprocess(img, return_tensors='pt')['pixel_values'][0] for img in image])
-
+            if self.data_args.image_aspect_ratio == 'pad':
+                def expand2square(pil_img, background_color):
+                    width, height = pil_img.size
+                    if width == height:
+                        return pil_img
+                    elif width > height:
+                        result = Image.new(pil_img.mode, (width, width), background_color)
+                        result.paste(pil_img, (0, (width - height) // 2))
+                        return result
+                    else:
+                        result = Image.new(pil_img.mode, (height, height), background_color)
+                        result.paste(pil_img, ((height - width) // 2, 0))
+                        return result
+                image = torch.stack([self.data_args.image_processor.preprocess(expand2square(img, tuple(int(x*255) for x in self.data_args.image_processor.image_mean)), return_tensors='pt')['pixel_values'][0] for img in image])
+                # image = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+                # image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+            else:
+                image = torch.stack([self.data_args.image_processor.preprocess(img, return_tensors='pt')['pixel_values'][0] for img in image])
+        else: image = None
         input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
 
         return input_ids, image, gold, prompt, image_file
@@ -151,12 +98,12 @@ class LazySupervisedDataset(Dataset):
         self.datalist = datalist
         self.data_args = data_args
         self.preprocess = preprocess
-        if preprocess:
-            self.images = []
-            for data in self.datalist:
-                image_file = data['image']
-                image = Image.open(image_file).convert('RGB')
-                self.images.append(image)
+        # if preprocess:
+        #     self.images = []
+        #     for data in self.datalist:
+        #         image_file = data['image']
+        #         image = Image.open(image_file).convert('RGB')
+        #         self.images.append(image)
 
     def __len__(self):
         return len(self.datalist)
@@ -200,6 +147,7 @@ class LazySupervisedDataset(Dataset):
                 self.data_args)
         else:
             sources = copy.deepcopy([e["conversations"] for e in sources])
+            image=torch.zeros(0)
         if 'llava' in self.data_args.model_name_for_dataarg.lower():
             data_dict = preprocess_text_llava(
                 sources,
@@ -215,8 +163,8 @@ class LazySupervisedDataset(Dataset):
                              labels=data_dict["labels"][0])
 
         # image exist in the data
-        if 'image' in self.datalist[i]:
-            data_dict['image'] = image
+        # if 'image' in self.datalist[i]:
+        data_dict['image'] = image
         return data_dict
 
 @dataclass
@@ -261,7 +209,7 @@ class DataCollatorForSupervisedDataset(object):
                 images = self.transform(images).to(dtype=torch.bfloat16)
                 batch['images'] = images.reshape(b,n,c,h,w)
             else:
-                batch['images'] = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) for x in images]
+                batch['images'] = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) if x.shape[0] != 0 else x.to(torch.bfloat16) for x in images]
 
         return batch
 

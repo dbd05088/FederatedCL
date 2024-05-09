@@ -75,7 +75,7 @@ class BunnyMetaForCausalLM(ABC):
             self, input_ids, position_ids, attention_mask, past_key_values, labels, images
     ):
         vision_tower = self.get_vision_tower()
-        if vision_tower is None or images is None or input_ids.shape[1] == 1:
+        if vision_tower is None or images is None or input_ids.shape[1] == 1 or all(img.shape[0] == 0 for img in images):
             if past_key_values is not None and vision_tower is not None and images is not None and input_ids.shape[
                 1] == 1:
                 target_shape = past_key_values[-1][-1].shape[-2] + 1
@@ -123,9 +123,9 @@ class BunnyMetaForCausalLM(ABC):
         for batch_idx, cur_input_ids in enumerate(input_ids):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
             if num_images == 0:
-                cur_image_features = image_features[cur_image_idx]
-                cur_input_embeds_1 = self.get_model().embed_tokens(cur_input_ids)
-                cur_input_embeds = torch.cat([cur_input_embeds_1, cur_image_features[0:0]], dim=0)
+                cur_image_features = image_features[batch_idx] #cur_image_idx
+                cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)
+                # cur_input_embeds = torch.cat([cur_input_embeds_1, cur_image_features[0:0]], dim=0)
                 new_input_embeds.append(cur_input_embeds)
                 new_labels.append(labels[batch_idx])
                 cur_image_idx += 1

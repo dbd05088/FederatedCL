@@ -14,6 +14,7 @@ from utils.data_loader_VLM import preprocess_multimodal, preprocess_text_llava, 
 
 IS_WINDOWS = sys.platform == "win32"
 TIMEOUT = 5.0
+Image.MAX_IMAGE_PIXELS = None
 
 # from PyTorch Official Code
 if IS_WINDOWS:
@@ -183,7 +184,8 @@ def worker_loop_multimodal(index_queue, data_queue, device='cpu', tokenizer=None
                         copy.deepcopy([sample['conversations']]),
                         data_args)
                 else:
-                    sources = copy.deepcopy([e["conversations"] for e in sample])
+                    sources = copy.deepcopy([sample["conversations"]])
+                    images.append(torch.zeros(0))
                 if 'llava' in data_args.model_name_for_dataarg.lower():
                     data_dict = preprocess_text_llava(
                         sources,
