@@ -37,7 +37,7 @@ for task in tasks:
     for item in test_json_data:
         values.append(item['conversations'][1]['value'])
     
-    unique_values = list(set(values))
+    unique_values = sorted(list(set(values)))
     option_num = min(4, len(unique_values))
     options = global_options[option_num]
     
