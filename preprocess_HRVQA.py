@@ -6,111 +6,8 @@ import os
 import json
 import glob
 import shutil
-
-
-# def process_and_save(dataset, output_folder, subset_name):
-#     question_list = dataset[0]['questions']
-#     answer_list = dataset[1]['annotations']
-#     # Initialize list to hold all JSON data
-#     json_data_list = []
-    
-#     subset_folder = os.path.join(output_folder, subset_name)
-#     if not os.path.exists(subset_folder):
-#         os.makedirs(subset_folder)
-
-#     assert len(question_list) == len(answer_list)
-    
-#     for i in range(len(question_list)):
-#         question = question_list[i]
-#         answer = answer_list[i]
-        
-#         assert question['question_id'] == answer['question_id']
-        
-#         image_id = question['image_id']
-#         image_name = "dataset/HRVQA-1.0/images/" + str(image_id) + ".png"
-#         input_q = question['question']
-#         output_a = answer['multiple_choice_answer']
-
-#         # Structure for LLaVA JSON
-#         json_data = {
-#             "id": str(image_id),
-#             "image": image_name,
-#             "conversations": [
-#                 {
-#                     "from": "human",
-#                     "value": "<image>\n" + input_q
-#                 },
-#                 {
-#                     "from": "gpt",
-#                     "value": output_a
-#                 }
-#             ]
-#         }
-
-
-#         # Append to list
-#         json_data_list.append(json_data)
-
-
-#     # Save the JSON data list to a file
-#     json_output_path = os.path.join(output_folder, subset_name, 'dataset.json')
-#     with open(json_output_path, 'w') as json_file:
-#         json.dump(json_data_list, json_file, indent=4)
-
-
-# def save_dataset(dataset_name, output_folder):
-#     # Load the dataset from Hugging Face
-#     # dataset = load_dataset(dataset_name, split=subset_name)
-
-
-#     # Filter for images with the specified class in 'question_type'
-#     # filtered_dataset = [item for item in dataset if item['question_type'] == class_name]
-    
-
-#     # Determine the split for training and validation
-#     # if val_samples is not None and subset_name == 'train':
-#     #     train_dataset = filtered_dataset[val_samples:]
-#     #     val_dataset = filtered_dataset[:val_samples]
-#     # else:
-#     #     train_dataset = filtered_dataset
-#     #     val_dataset = []
-#     with open(f"dataset/{dataset_name}/jsons/train_question.json") as fp:
-#         train_questions = json.load(fp)
-#     with open(f"dataset/{dataset_name}/jsons/train_answer.json") as fp:
-#         train_answers = json.load(fp)
-    
-#     with open(f"dataset/{dataset_name}/jsons/val_question.json") as fp:
-#         val_questions = json.load(fp)
-#     with open(f"dataset/{dataset_name}/jsons/val_answer.json") as fp:
-#         val_answers = json.load(fp)
-    
-    
-    
-#     # Process and save the datasets
-#     for subset, data in [('train', [train_questions, train_answers]), ('validation', [val_questions, val_answers])]: 
-#         if data:
-#             process_and_save(data, output_folder, subset)
-
-
-# imgs = glob.glob('./dataset/HRVQA-1.0/images/*.png')
-# print(len(imgs))
-# breakpoint()
-
-# imgs = glob.glob('./dataset/AQUA/images/*.jpg')
-# print(len(imgs))
-# breakpoint()
-# # Usage example
-# # output_folder = 'dataset/AQUA'
-# output_folder = 'dataset/HRVQA-1.0'
-# # class_name = 'other'
-# # val_samples = 300
-
-# # save_dataset('AQUA', output_folder)
-# save_dataset('HRVQA-1.0', output_folder)
-
-# # save_dataset('Multimodal-Fatima/OK-VQA_train', output_folder, class_name, 'train', val_samples)
-# # save_dataset('Multimodal-Fatima/OK-VQA_test', output_folder, class_name, 'test')
-
+import numpy as np
+np.random.seed(42)
 
 dir = 'dataset/HRVQA'
 tasks = sorted(glob.glob(dir + '/tasks/*'))
@@ -125,8 +22,41 @@ if not os.path.exists(subset_folder):
 
 print(tasks)
 idx = 0
-for task in tasks:
-    shutil.copyfile(task+'/train.json', f'./dataset/HRVQA/train/dataset-{idx}.json')
-    shutil.copyfile(task+'/test.json', f'./dataset/HRVQA/test/dataset-{idx}.json')
-    idx += 1
+global_options = {2:['A','B'], 3:['A','B','C'], 4:['A','B','C','D']}
     
+for task in tasks:
+    print(task)
+    with open(task+'/train.json', 'r') as fp:
+        train_json_data = json.load(fp)
+    with open(task+'/test.json', 'r') as fp:
+        test_json_data = json.load(fp)
+    
+    values = []
+    for item in train_json_data:
+        values.append(item['conversations'][1]['value'])
+    for item in test_json_data:
+        values.append(item['conversations'][1]['value'])
+    
+    unique_values = list(set(values))
+    option_num = min(4, len(unique_values))
+    options = global_options[option_num]
+    
+    for jsondata in [train_json_data, test_json_data]:
+        for item in jsondata:
+            answer_idx = np.random.randint(0, len(options))
+            answer = item['conversations'][1]['value']
+            answer_idx_inlist = unique_values.index(answer)
+            choices = list(np.random.choice(unique_values[:answer_idx_inlist] + unique_values[answer_idx_inlist+1:], size=len(options) - 1, replace=False))
+            choices.insert(answer_idx, answer)
+            
+            for i in range(len(options)):
+                item['conversations'][0]['value'] += "\n"
+                item['conversations'][0]['value'] += options[i] + '. ' + choices[i]
+            item['conversations'][1]['value'] = f"The correct answer is {options[answer_idx]}."
+            item['conversations'][0]['value'] += '\n' + "Answer with the option's letter from the given choices directly."
+    
+    with open(f'./dataset/HRVQA/train/dataset-{idx}.json', 'w') as json_file:
+        json.dump(train_json_data, json_file, indent=4)
+    with open(f'./dataset/HRVQA/test/dataset-{idx}.json', 'w') as json_file:
+        json.dump(test_json_data, json_file, indent=4)
+    idx += 1
