@@ -310,6 +310,7 @@ class CLManagerClient: # Client
             self.state['client_id'] = trainer_state['client_id']
             self.state['sample_cnt'] = trainer_state['sample_cnt']
             self.state['round_cnt'] = trainer_state['round_cnt']
+            self.state['total_samples'] = trainer_state['total_samples']
             self.state['done'] = trainer_state['done']
             self.temp_future_batch = trainer_state['temp_future_batch']
             self.waiting_batch = trainer_state['waiting_batch']
@@ -321,7 +322,7 @@ class CLManagerClient: # Client
             self.dataloader.load_state(client_id, self.args.state_dir)
             self.load_model(client_id, self.args.state_dir, self.state['round_cnt'])
             self._load_optimizer_and_scheduler(self.args.state_dir)
-        self.create_scheduler((len(train_datalist)//self.gradient_accumulation_steps*self.online_iter)+1, num_cycles=1)
+        self.create_scheduler((len(train_datalist)*self.online_iter//self.gradient_accumulation_steps)+1, num_cycles=1)
     
     def init_state(self, cid, data_len):
         self.state['client_id'] = cid
@@ -691,6 +692,7 @@ class MemoryBase:
     def save_state(self, client_id, save_dir):
         path = os.path.join(save_dir, f"{client_id}_client_memory.npy")
         mem_state = {
+            'memory_size':self.memory_size,
             'images':self.images,
             'labels':self.labels
         }
@@ -701,3 +703,4 @@ class MemoryBase:
         mem_state = np.load(path, allow_pickle=True).item()
         self.images = mem_state['images']
         self.labels = mem_state['labels']
+        self.memory_size = mem_state['memory_size']

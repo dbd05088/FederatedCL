@@ -122,6 +122,7 @@ class BunnyMetaForCausalLM(ABC):
         cur_image_idx = 0
         for batch_idx, cur_input_ids in enumerate(input_ids):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
+            assert num_images == len(image_features[batch_idx])
             if num_images == 0:
                 cur_image_features = image_features[batch_idx] #cur_image_idx
                 cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)
