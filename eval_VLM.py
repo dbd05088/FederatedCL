@@ -17,9 +17,9 @@ import torch.distributed as dist
 import json
 from transformers import BitsAndBytesConfig
 
-from utils.data_loader_VLM import GenerationDataset, GenerationDataset2
+from utils.data_loader_VLM import GenerationDataset
 from torch.utils.data import DataLoader
-from utils.eval_metrics import NLPEvaluator, matching_token_num
+from utils.eval_metrics import NLPEvaluator, matching_token_num, can_infer
 from tqdm import tqdm
 
 import warnings
@@ -60,8 +60,9 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
     with torch.no_grad():
         for i, (inputs, imgs, gold, prompt, img_file) in enumerate(tqdm(dataloader)):
             inputs = inputs.to(device=device, non_blocking=True)
-            imgs = imgs.to(device=device, dtype=torch.bfloat16, non_blocking=True)
-            image_sizes = [x.shape[-2:] for x in imgs]
+            if imgs is not None:
+                imgs = imgs.to(device=device, dtype=torch.bfloat16, non_blocking=True)
+                image_sizes = [x.shape[-2:] for x in imgs]
             
             with torch.inference_mode():
                 output_ids = model.generate(
@@ -110,12 +111,79 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
         with open(f"./eval_results/{training_args.mode}/{training_args.note}/server_round{round}_{dataname}.json", 'w') as fp:
             json.dump(predictions, fp, indent=4)
 
+def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None):
+    choices = {'A','B','C','D'}
     
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    
+    stopping_criteria = CustomStoppingCriteria()
+    stopping_criteria = StoppingCriteriaList([stopping_criteria])
+    # img_feat_size = 729
+    model.eval()
+    predictions = []
+    total = 0
+    correct = 0
+
+    with torch.no_grad():
+        for i, (inputs, imgs, gold, prompt, img_file) in enumerate(tqdm(dataloader)):
+            inputs = inputs.to(device=device, non_blocking=True)
+            if imgs is not None:
+                imgs = imgs.to(device=device, dtype=torch.bfloat16, non_blocking=True)
+                image_sizes = [x.shape[-2:] for x in imgs]
+            
+            with torch.inference_mode():
+                output_ids = model.generate(
+                    inputs,
+                    images=imgs,
+                    # image_sizes=image_sizes,
+                    do_sample=True,# if args.temperature > 0 else False,
+                    temperature=0.2,#args.temperature,
+                    top_p=None,#args.top_p,
+                    num_beams=1,#args.num_beams,
+                    max_new_tokens=model_args.max_new_tokens,#args.max_new_tokens,
+                    use_cache=True,
+                    pad_token_id=tokenizer.eos_token_id,
+                    stopping_criteria = stopping_criteria
+                )
+            if 'bunny' in model_args.model_name_or_path.lower():
+                input_token_len = inputs.shape[1]
+                output_ids = output_ids[:,input_token_len:]
+            
+            pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+
+            pred_option = can_infer(pred_sentence, choices)
+            
+            if isinstance(pred_option, str):
+                if gold[0] == pred_option:
+                    correct += 1
+                    status='correct'
+                else:
+                    status='wrong'
+            else:
+                status = 'unkown'
+            total += 1
+            # print(pred_sentence)
+            predictions.append({"image_file":img_file[0], "input":prompt[0], "sentence":pred_sentence, "gt_sentence":gold[0].strip(), 'status':status})
+            
+    scores = {'accuracy': correct/total}
+    
+    predictions.append(scores)
+    #save predictions
+    if client_id is not None:
+        logger.info(f"Test (Client id {client_id}) | Data {dataname} | accuracy {scores['accuracy']} |")
+        with open(f"./eval_results/{training_args.mode}/{training_args.note}/client{client_id}_round{round}_{dataname}.json", 'w') as fp:
+            json.dump(predictions, fp, indent=4)
+    else:
+        logger.info(f"Test (Server) | Data {dataname} | accuracy {scores['accuracy']} |")
+        with open(f"./eval_results/{training_args.mode}/{training_args.note}/server_round{round}_{dataname}.json", 'w') as fp:
+            json.dump(predictions, fp, indent=4)
+
 
 def main():
     ##################################
     # round_to_eval = 1
     ##################################
+    CHOICE_DATA = ['HRVQA-0','HRVQA-1','HRVQA-2','HRVQA-3','HRVQA-4','HRVQA-5','HRVQA-6','HRVQA-7','HRVQA-8','HRVQA-9',]
     
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
@@ -183,15 +251,21 @@ def main():
             if samples_per_round_per_client[client_id]*training_args.round_to_eval > data_info['eval_cnt']:
                 # breakpoint()
                 model.load_state_dict(client_state_dict, strict=False)
-                dataset = GenerationDataset2(data_info['data'], tokenizer, data_args)
+                dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
                 # evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, client_id)
-                evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
+                
+                if data_info['data_name'] in CHOICE_DATA: 
+                    evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
+                else:
+                    evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
                 if data_info['data_name'] not in server_eval_key:
                     model.load_state_dict(server_state_dict, strict=False)
-                    # evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, None)
-                    evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                    if data_info['data_name'] in CHOICE_DATA: 
+                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                    else:
+                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
                     server_eval_key.append(data_info['data_name'])
-    
+
 def get_datalists(args, scenario_num):
     with open(f"./scenarios/scenario-{scenario_num}.json") as fp:
         scenario = json.load(fp)

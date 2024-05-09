@@ -52,7 +52,7 @@ for task in tasks:
             for i in range(len(options)):
                 item['conversations'][0]['value'] += "\n"
                 item['conversations'][0]['value'] += options[i] + '. ' + choices[i]
-            item['conversations'][1]['value'] = f"The correct answer is {options[answer_idx]}."
+            item['conversations'][1]['value'] = f"{options[answer_idx]}"
             item['conversations'][0]['value'] += '\n' + "Answer with the option's letter from the given choices directly."
     
     with open(f'./dataset/HRVQA/train/dataset-{idx}.json', 'w') as json_file:
