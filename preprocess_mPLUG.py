@@ -26,9 +26,10 @@ for i in range(len(invalid_img_files)):
         invalid_img_files[i] = invalid_img_files[i][2:-1] 
     else:
         invalid_img_files[i] = invalid_img_files[i][2:] 
-
+print(f'total invalid image file num: {len(invalid_img_files)}')
 print(tasks)
 task_idx = 0
+total_removed_num = 0
 for task in tasks:
     with open(task+'/train.json', 'r') as fp:
         train_json_data = json.load(fp)
@@ -47,13 +48,14 @@ for task in tasks:
                         print(img)
                         idx_to_del.append(idx)
                         break
-        for idx in idx_to_del:
+        for idx in reversed(idx_to_del):
             del jsondata[idx]
         print(len(jsondata))
+        total_removed_num += len(idx_to_del)
 
     with open(f'./dataset/mPLUG/train/dataset-{task_idx}.json', 'w') as json_file:
         json.dump(train_json_data, json_file, indent=4)
     with open(f'./dataset/mPLUG/test/dataset-{task_idx}.json', 'w') as json_file:
         json.dump(test_json_data, json_file, indent=4)
     task_idx += 1
-    
+print(total_removed_num)
