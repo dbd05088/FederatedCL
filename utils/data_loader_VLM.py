@@ -172,8 +172,8 @@ class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
     tokenizer: transformers.PreTrainedTokenizer
-    device:torch.device
-    transform:DataAugmentation
+    # device:torch.device
+    # transform:DataAugmentation
 
     def __call__(self, instances):
         input_ids, labels = tuple([instance[key] for instance in instances]
@@ -195,21 +195,22 @@ class DataCollatorForSupervisedDataset(object):
                 input_id[input_id == -300] = self.tokenizer.eos_token_id
         
         batch = dict(
-            input_ids=input_ids.to(self.device),
-            labels=labels.to(self.device),
-            attention_mask=attention_mask.to(self.device),
+            input_ids=input_ids,#.to(self.device),
+            labels=labels,#.to(self.device),
+            attention_mask=attention_mask,#.to(self.device),
         )
 
         if 'image' in instances[0]:
             images = [instance['image'] for instance in instances]
             if all(x is not None and x.shape == images[0].shape for x in images):
-                images = torch.stack(images).to(device=self.device)
-                b, n, c, h, w = images.shape
-                images = images.reshape(b*n,c,h,w)
-                images = self.transform(images).to(dtype=torch.bfloat16)
-                batch['images'] = images.reshape(b,n,c,h,w)
+                images = torch.stack(images).to(torch.bfloat16)#.to(device=self.device)
+                # b, n, c, h, w = images.shape
+                # images = images.reshape(b*n,c,h,w)
+                # images = self.transform(images).to(dtype=torch.bfloat16)
+                batch['images'] = images#.reshape(b,n,c,h,w)
             else:
-                batch['images'] = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) if x.shape[0] != 0 else x.to(torch.bfloat16) for x in images]
+                # batch['images'] = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) if x.shape[0] != 0 else x.to(torch.bfloat16) for x in images]
+                batch['images'] = [x.to(dtype=torch.bfloat16) for x in images]
 
         return batch
 

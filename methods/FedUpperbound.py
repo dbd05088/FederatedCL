@@ -24,7 +24,7 @@ class FedUpperbound_server(CLManagerServer):
     
     def do_server_work(self, cur_round):
         dataset = LazySupervisedDataset(self.client_data, self.tokenizer, self.data_args)
-        dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=0, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer, device=self.device, transform=DataAugmentation(self.data_args.img_mean,self.data_args.img_std).to(self.device)), shuffle=True)
+        dataloader = DataLoader(dataset, batch_size= self.batch_size, num_workers=0, collate_fn=DataCollatorForSupervisedDataset(tokenizer=self.tokenizer), shuffle=True)
         self.total_samples = len(dataloader)
         
         if self.gradient_checkpointing:

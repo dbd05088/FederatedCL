@@ -1229,10 +1229,10 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
     
-    if not training_args.is_eval:
-        data_args.img_mean = vision_tower.image_processor.image_mean
-        data_args.img_std = vision_tower.image_processor.image_std
-        vision_tower.image_processor.do_normalize=False
+    # if not training_args.is_eval:
+    #     data_args.img_mean = vision_tower.image_processor.image_mean
+    #     data_args.img_std = vision_tower.image_processor.image_std
+    #     vision_tower.image_processor.do_normalize=False
     # vision_tower.image_processor.do_rescale=False
     data_args.image_processor = vision_tower.image_processor
     
