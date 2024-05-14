@@ -112,7 +112,7 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
             json.dump(predictions, fp, indent=4)
 
 def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None):
-    choices = {'A','B','C','D'}
+    choices = {'A':'','B':'','C':'','D':''}
     
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     
@@ -263,7 +263,7 @@ def main():
                     if data_info['data_name'] in CHOICE_DATA: 
                         evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
                     else:
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
+                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
                     server_eval_key.append(data_info['data_name'])
 
 def get_datalists(args, scenario_num):
