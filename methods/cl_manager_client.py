@@ -73,6 +73,7 @@ class CLManagerClient: # Client
         self.receive_channel=receive_channel
 
         self.lr = kwargs["learning_rate"]
+        self.mm_projector_lr = kwargs["mm_projector_lr"]
 
         assert kwargs["temp_batchsize"] <= kwargs["per_gpu_train_batch_size"]
         self.batch_size = kwargs["per_gpu_train_batch_size"]
@@ -258,6 +259,17 @@ class CLManagerClient: # Client
         if os.path.isfile(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}")):
             self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"), map_location=map_location))
 
+    def get_lr(self):
+        if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            last_lr = self.optimizer.param_groups[0]["lr"]
+        else:
+            last_lr = self.lr_scheduler.get_last_lr()[0]
+        if torch.is_tensor(last_lr):
+            last_lr = last_lr.item()
+        return last_lr
+        # return self.lr
+    
+
     def save_model(self, client_id, output_dir, round):
         state_dict = OrderedDict()
         with torch.no_grad():
@@ -322,7 +334,7 @@ class CLManagerClient: # Client
             self.dataloader.load_state(client_id, self.args.state_dir)
             self.load_model(client_id, self.args.state_dir, self.state['round_cnt'])
             self._load_optimizer_and_scheduler(self.args.state_dir)
-        self.create_scheduler((len(train_datalist)*self.online_iter//self.gradient_accumulation_steps)+1, num_cycles=1)
+        # self.create_scheduler((len(train_datalist)*self.online_iter//self.gradient_accumulation_steps)+1, num_cycles=1)
     
     def init_state(self, cid, data_len):
         self.state['client_id'] = cid
@@ -343,7 +355,7 @@ class CLManagerClient: # Client
         self.dataloader.save_state(self.state['client_id'], self.args.state_dir)
 
         torch.save(self.optimizer.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{OPTIMIZER_NAME}"))
-        torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"))
+        # torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.state_dir, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"))
 
         self.save_model(self.state['client_id'], self.args.state_dir, round)
         
@@ -386,8 +398,10 @@ class CLManagerClient: # Client
         self.state['round_cnt'] += 1
         self.state['curr_round'] = curr_round
         
-        self.samples_per_round = len(train_datalist) // self.num_rounds # 4
+        self.samples_per_round =  len(train_datalist) // self.num_rounds # 4
         self.iter = 0
+        
+        self.create_scheduler(2*(self.samples_per_round*self.online_iter//self.gradient_accumulation_steps)+1, num_cycles=1)
 
         seen_so_far = self.state['sample_cnt']
         
@@ -544,6 +558,7 @@ class CLManagerClient: # Client
                 self.before_optimizer_step()
                 self.optimizer.step()
                 self.lr_scheduler.step()
+                self.after_optimizer_step()
                 self.optimizer.zero_grad()
 
             # self.after_model_update()
@@ -556,6 +571,9 @@ class CLManagerClient: # Client
     def before_model_update(self):
         pass
 
+    def after_optimizer_step(self):
+        pass
+
     # def after_model_update(self):
     #     # self.update_schedule()
     #     self.lr_scheduler.step()
@@ -564,7 +582,7 @@ class CLManagerClient: # Client
         # writer.add_scalar(f"train/loss", train_loss, sample_num)
         # if sample_num % 5 == 0:
         self.logger.write(
-            f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} |"# TFLOPs {self.total_flops/1000:.2f} | "
+            f"Client {self.state['client_id']} Train | Sample # {sample_num} | train_loss {train_loss:.4f} | LR {self.get_lr()} |"# TFLOPs {self.total_flops/1000:.2f} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.state['total_samples']-sample_num) / sample_num))}"
         )
