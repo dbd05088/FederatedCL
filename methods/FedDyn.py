@@ -19,7 +19,7 @@ class FedDyn_server(CLManagerServer):
                 if isinstance(parameters, torch.Tensor) and parameters.requires_grad:
                     self.server_state[name] = torch.zeros_like(parameters.detach().cpu())
     
-    def server_msg(self):
+    def server_msg(self, client_id=None):
         return self.mean_state_dict
     
     def handle_msg_per_client(self, msg):

@@ -14,7 +14,7 @@ class FedUpperbound_server(CLManagerServer):
         self.client_data = []
         self.state_dict = None
     
-    def server_msg(self):
+    def server_msg(self, client_id=None):
         return self.state_dict
     
     def handle_msg_per_client(self, msg):

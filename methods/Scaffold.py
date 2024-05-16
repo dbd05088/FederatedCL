@@ -18,7 +18,7 @@ class Scaffold_server(CLManagerServer):
                         self.mean_state_dict[name] = parameters.detach().cpu()
                         self.aux[name] = torch.zeros_like(parameters).cpu()
     
-    def server_msg(self):
+    def server_msg(self, client_id=None):
         return (self.mean_state_dict, self.aux)
     
     def handle_msg_per_client(self, msg):
@@ -63,12 +63,21 @@ class Scaffold_client(CLManagerClient):
         self.local_aux = None
         self.global_aux = OrderedDict()
     
-    def before_optimizer_step(self):
+    # def before_optimizer_step(self):
+    #     model_params = OrderedDict(self.model.named_parameters())
+    #     for name, global_param in self.global_aux.items():
+    #         if model_params[name].grad is not None:
+    #             global_param = global_param.to(self.device)
+    #             model_params[name].grad.data += (global_param - self.local_aux[name])
+    
+    def after_optimizer_step(self):
         model_params = OrderedDict(self.model.named_parameters())
-        for name, global_param in self.global_aux.items():
-            if model_params[name].grad is not None:
-                global_param = global_param.to(self.device)
-                model_params[name].grad.data += (global_param - self.local_aux[name])
+        with torch.no_grad():
+            for name, global_param in self.global_aux.items():
+                if 'mm_projector' in name:
+                    model_params[name].copy_(model_params[name].data - self.mm_projector_lr*(global_param.to(self.device) - self.local_aux[name]))
+                else:
+                    model_params[name].copy_(model_params[name].data - self.lr*(global_param.to(self.device) - self.local_aux[name]))
         
     def client_msg(self):
         

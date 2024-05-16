@@ -161,7 +161,7 @@ class CLManagerServer: # == SERVER
                     'curr_round':curr_round,
                     'train_datalist':self.train_datalists[client_id],
                     'test_datalist':self.test_datalists[client_id],
-                    'server_msg':self.server_msg(),
+                    'server_msg':self.server_msg(client_id),
                 }
                 send_queue.put(send_msg)
             received_data_from_clients = 0
@@ -186,7 +186,7 @@ class CLManagerServer: # == SERVER
             send_queue.put("done")
         return
     
-    def server_msg(self):
+    def server_msg(self, client_id=None):
         pass
     
     def handle_msg_per_client(self, msg):

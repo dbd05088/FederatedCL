@@ -1047,6 +1047,8 @@ import models.llava.conversation as conversation_lib_llava
 import models.bunny.conversation as conversation_lib_bunny
 from transformers import Trainer
 from peft.tuners.lora import LoraLayer
+from models.bunny.prompt_tuning_model import Bunny_PT
+from models.llava.prompt_tuning_model import Llava_PT
 
 ACCESS_TOKEN = "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"
 
@@ -1054,6 +1056,9 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
     attn_implementation = "flash_attention_2"
     assert model_args.vision_tower is not None
+    
+    if training_args.mode == 'pfedpg':
+        assert training_args.lora_enable == False, "no lora in pFedPG"
     
     # load tokenizer
     # for llava
@@ -1110,6 +1115,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         tokenizer.pad_token = tokenizer.eos_token
     
     if 'llava' in model_args.model_name_or_path.lower():
+        # prompt tuning
+        if training_args.mode == 'pfedpg':
+            assert model_args.model_type != 'mpt'
+            model = Llava_PT.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load pfedpg')
         if 'mpt' == model_args.model_type:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
             config.attn_config['attn_impl'] = training_args.mpt_attn_impl
@@ -1129,7 +1145,18 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             )
     
     elif 'bunny' in model_args.model_name_or_path.lower():
-        if model_args.model_type == 'phi-1.5' or model_args.model_type == 'phi-2':
+        # prompt tuning
+        if training_args.mode == 'pfedpg':
+            assert model_args.model_type == 'phi-2'
+            model = Bunny_PT.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                **bnb_model_from_pretrained_args
+            )
+            print('load pfedpg')
+        elif model_args.model_type == 'phi-1.5' or model_args.model_type == 'phi-2':
             model = BunnyPhiForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
@@ -1188,22 +1215,24 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 output.requires_grad_(True)
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
     
-    from peft import LoraConfig, get_peft_model
-    lora_config = LoraConfig(
-        r=training_args.lora_r,
-        lora_alpha=training_args.lora_alpha,
-        target_modules=find_all_linear_names(model),
-        lora_dropout=training_args.lora_dropout,
-        bias=training_args.lora_bias,
-        task_type="CAUSAL_LM",
-    )
     if training_args.bits == 16:
-        if training_args.bf16:
-            model.to(torch.bfloat16)
-        if training_args.fp16:
-            model.to(torch.float16)
-    # rank0_print("Adding LoRA adapters...")
-    model = get_peft_model(model, lora_config)
+            if training_args.bf16:
+                model.to(torch.bfloat16)
+            if training_args.fp16:
+                model.to(torch.float16)
+    if training_args.lora_enable:
+        from peft import LoraConfig, get_peft_model
+        lora_config = LoraConfig(
+            r=training_args.lora_r,
+            lora_alpha=training_args.lora_alpha,
+            target_modules=find_all_linear_names(model),
+            lora_dropout=training_args.lora_dropout,
+            bias=training_args.lora_bias,
+            task_type="CAUSAL_LM",
+        )
+        
+        # rank0_print("Adding LoRA adapters...")
+        model = get_peft_model(model, lora_config)
 
 
     if 'llava' in model_args.model_name_or_path.lower():

@@ -10,9 +10,9 @@ class FedProx_server(CLManagerServer):
         self.state_dicts = []
         self.mean_state_dict = OrderedDict()
     
-    def server_msg(self):
+    def server_msg(self, client_id=None):
         return self.mean_state_dict
-    
+
     def handle_msg_per_client(self, msg):
         assert isinstance(msg, OrderedDict)
         
@@ -48,12 +48,22 @@ class FedProx_client(CLManagerClient):
         self.global_model_param = OrderedDict()
         self.mu = 0.01
         
-    def before_optimizer_step(self):
+    # def before_optimizer_step(self):
+    #     model_params = OrderedDict(self.model.named_parameters())
+    #     for name, global_param in self.global_model_param.items():
+    #         if model_params[name].grad is not None:
+    #             global_param = global_param.to(self.device)
+    #             model_params[name].grad.data += self.mu*torch.abs(model_params[name].data - global_param)
+
+    def after_optimizer_step(self):
         model_params = OrderedDict(self.model.named_parameters())
-        for name, global_param in self.global_model_param.items():
-            if model_params[name].grad is not None:
-                global_param = global_param.to(self.device)
-                model_params[name].grad.data += self.mu*torch.abs(model_params[name].data - global_param)
+        with torch.no_grad():
+            for name, global_param in self.global_model_param.items():
+                if 'mm_projector' in name:
+                    model_params[name].copy_(model_params[name].data - self.mm_projector_lr*(self.mu*torch.abs(model_params[name].to(self.device) - global_param)))
+                else:
+                    model_params[name].copy_(model_params[name].data - self.lr*(self.mu*torch.abs(model_params[name].to(self.device) - global_param)))
+        
 
     def client_msg(self):
         state_dict = OrderedDict()
