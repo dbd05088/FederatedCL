@@ -80,10 +80,58 @@ class GenerationDataset(Dataset):
         else: image = None
         input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
 
-        return input_ids, image, gold, prompt, image_file
+        # return input_ids, image, gold, prompt, image_file
+        return {
+            'input_ids':input_ids,
+            'image':image,
+            'gold':gold,
+            'prompt':prompt,
+            'image_file':image_file
+        }
 
     def __len__(self):
         return len(self.datalist)
+
+@dataclass
+class DataCollatorForGenerationDataset(object):
+    """Collate examples for supervised fine-tuning."""
+
+    tokenizer: transformers.PreTrainedTokenizer
+
+    def __call__(self, instances):
+        input_ids, gold, prompt, image_file = tuple([instance[key] for instance in instances]
+                                  for key in ("input_ids", 'gold', 'prompt', 'image_file'))
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            input_ids,
+            batch_first=True,
+            padding_value=self.tokenizer.pad_token_id)
+        input_ids = input_ids[:, :self.tokenizer.model_max_length]
+        
+        attention_mask=input_ids.ne(self.tokenizer.pad_token_id)
+            
+        if self.tokenizer.pad_token_id == self.tokenizer.eos_token_id:
+            for input_id in input_ids:
+                input_id[input_id == -300] = self.tokenizer.eos_token_id
+        
+        batch = dict(
+            input_ids=input_ids,#.to(self.device),
+            attention_mask=attention_mask,#.to(self.device),
+            gold=gold,
+            prompt=prompt,
+            image_file=image_file
+        )
+        images = [instance['image'] for instance in instances]
+        if all(x is not None and x.shape == images[0].shape for x in images):
+            images = torch.stack(images).to(torch.bfloat16)#.to(device=self.device)
+            # b, n, c, h, w = images.shape
+            # images = images.reshape(b*n,c,h,w)
+            # images = self.transform(images).to(dtype=torch.bfloat16)
+            batch['images'] = images#.reshape(b,n,c,h,w)
+        else:
+            # batch['images'] = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) if x.shape[0] != 0 else x.to(torch.bfloat16) for x in images]
+            batch['images'] = [x.to(dtype=torch.bfloat16) for x in images]
+
+        return batch
 
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""

@@ -17,13 +17,18 @@ import torch.distributed as dist
 import json
 from transformers import BitsAndBytesConfig
 
-from utils.data_loader_VLM import GenerationDataset
+from utils.data_loader_VLM import GenerationDataset, DataCollatorForGenerationDataset
 from torch.utils.data import DataLoader
 from utils.eval_metrics import NLPEvaluator, matching_token_num, can_infer
 from tqdm import tqdm
 
+from models.llava.mm_utils import KeywordsStoppingCriteria
+from models.llava import conversation as conversation_lib_llava
+from models.bunny import conversation as conversation_lib_bunny
+
 import warnings
 warnings.filterwarnings('ignore')
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 from transformers import StoppingCriteria, StoppingCriteriaList
 
@@ -46,10 +51,17 @@ class CustomStoppingCriteria(StoppingCriteria):
         return should_stop
 
 def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None):
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    dataloader = DataLoader(dataset, batch_size=16, shuffle=False, pin_memory=True, num_workers=8, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
+    # dataloader = DataLoader(dataset, batch_size=1, shuffle=False, pin_memory=True, num_workers=4, drop_last=False)
     
-    stopping_criteria = CustomStoppingCriteria()
-    stopping_criteria = StoppingCriteriaList([stopping_criteria])
+    if 'llava' in model_args.model_name_or_path.lower():
+        conv = conversation_lib_llava.default_conversation
+    elif 'bunny' in model_args.model_name_or_path.lower():
+        conv = conversation_lib_bunny.default_conversation
+    repeat_criteria = CustomStoppingCriteria()
+    stop_str = conv.sep2
+    keywords = [stop_str]
+    
     # img_feat_size = 729
     model.eval()
     predictions = []
@@ -58,15 +70,22 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
     n_word_correct = 0
     cnt = 0
     with torch.no_grad():
-        for i, (inputs, imgs, gold, prompt, img_file) in enumerate(tqdm(dataloader)):
+        # for i, (inputs, imgs, golds, prompts, img_files) in enumerate(tqdm(dataloader)):
+        for i, batch in enumerate(tqdm(dataloader)):
+            inputs, imgs, golds, prompts, img_files = batch['input_ids'], batch['images'], batch['gold'], batch['prompt'], batch['image_file']
+            attention_mask = batch['attention_mask'].to(device=device)
+            
             inputs = inputs.to(device=device, non_blocking=True)
             if imgs is not None:
                 imgs = imgs.to(device=device, dtype=torch.bfloat16, non_blocking=True)
                 image_sizes = [x.shape[-2:] for x in imgs]
-            
+            keyword_criteria = KeywordsStoppingCriteria(keywords, tokenizer, inputs)
+            stopping_criteria = StoppingCriteriaList([repeat_criteria, keyword_criteria])
+
             with torch.inference_mode():
                 output_ids = model.generate(
                     inputs,
+                    attention_mask=attention_mask,
                     images=imgs,
                     # image_sizes=image_sizes,
                     do_sample=True,# if args.temperature > 0 else False,
@@ -78,24 +97,35 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
                     pad_token_id=tokenizer.eos_token_id,
                     stopping_criteria = stopping_criteria
                 )
-            if 'bunny' in model_args.model_name_or_path.lower():
-                input_token_len = inputs.shape[1]
-                output_ids = output_ids[:,input_token_len:]
+            # if 'bunny' in model_args.model_name_or_path.lower():
+            #     input_token_len = inputs.shape[1]
+            #     output_ids = output_ids[:,input_token_len:]
             
-            pred_sentence = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-            
-            input_label = tokenizer.encode(gold[0])
-            output_id = tokenizer.encode(pred_sentence)
-            n_word = len(set(input_label))
-            n_generated_word = len(set(output_id))
-            n_correct = matching_token_num(output_id, input_label)
-            # print(pred_sentence)
-            predictions.append({"image_file":img_file[0], "input":prompt[0], "sentence":pred_sentence, "gt_sentence":gold[0].strip()})
-            
-            n_word_total += n_word
-            n_generated_word_total += n_generated_word
-            n_word_correct += n_correct
-            cnt += 1
+            pred_sentences = tokenizer.batch_decode(output_ids, skip_special_tokens=True)#[0].strip()
+            # breakpoint()
+            for pred_sentence, gold, prompt, img_file in zip(pred_sentences, golds, prompts, img_files):
+                # input_label = tokenizer.encode(gold[0])
+                # output_id = tokenizer.encode(pred_sentence)
+                # n_word = len(set(input_label))
+                # n_generated_word = len(set(output_id))
+                # n_correct = matching_token_num(output_id, input_label)
+                # # print(pred_sentence)
+                # predictions.append({"image_file":img_file[0], "input":prompt[0], "sentence":pred_sentence, "gt_sentence":gold[0].strip()})
+                
+                pred_sentence = pred_sentence.strip()
+                input_label = tokenizer.encode(gold)
+                output_id = tokenizer.encode(pred_sentence)
+                n_word = len(set(input_label))
+                n_generated_word = len(set(output_id))
+                n_correct = matching_token_num(output_id, input_label)
+                # print(pred_sentence)
+                predictions.append({"image_file":img_file, "input":prompt, "sentence":pred_sentence, "gt_sentence":gold.strip()})
+                
+                
+                n_word_total += n_word
+                n_generated_word_total += n_generated_word
+                n_word_correct += n_correct
+                cnt += 1
     scores = NLPEvaluator(predictions).evaluate()
     scores["precision"] = n_word_correct / n_word_total
     scores["recall"] = n_word_correct / n_generated_word_total
@@ -183,7 +213,7 @@ def main():
     ##################################
     # round_to_eval = 1
     ##################################
-    CHOICE_DATA = ['HRVQA-0','HRVQA-1','HRVQA-2','HRVQA-3','HRVQA-4','HRVQA-5','HRVQA-6','HRVQA-7','HRVQA-8','HRVQA-9',]
+    CHOICE_DATA = []#['HRVQA-0','HRVQA-1','HRVQA-2','HRVQA-3','HRVQA-4','HRVQA-5','HRVQA-6','HRVQA-7','HRVQA-8','HRVQA-9',]
     
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
@@ -242,15 +272,20 @@ def main():
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     
     server_eval_key = []
+    logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
     server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
         # load client weight
+        logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
         client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
+        
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
             if samples_per_round_per_client[client_id]*training_args.round_to_eval > data_info['eval_cnt']:
                 # breakpoint()
                 model.load_state_dict(client_state_dict, strict=False)
+                # model.load_state_dict(server_state_dict, strict=False)
+                
                 dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
                 # evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, client_id)
                 
