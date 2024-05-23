@@ -43,7 +43,7 @@ for subdir in subdirs:
         item = full_data[idx]
         new_item = {}
         new_item['id'] = item['sample_id']
-        new_item['image'] = [os.path.join(dir, 'full/images', img) for img in item['task_instance']['images_path']]
+        new_item['image'] = [os.path.join(dir, f'{subdir}/full/images', img) for img in item['task_instance']['images_path']]
         question = item['task_instance']['context']
         for i in range(len(new_item['image'])):
             rmv_i = '{image#%d}'% (i+1)

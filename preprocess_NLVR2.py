@@ -47,6 +47,15 @@ for full_data in full_datas:
         new_item = {}
         new_item['id'] = item['sample_id']
         new_item['image'] = [os.path.join(dir, 'full/images', img) for img in item['task_instance']['images_path']]
+        invalid = False
+        for img in new_item['image']:
+            image = Image.open(img)
+            if image.width == 1 and image.height == 1:
+                invalid = True
+                break
+        if invalid:
+            continue
+        
         question = item['task_instance']['context']
         for i in range(len(new_item['image'])):
             rmv_i = '{image#%d}'% (i+1)
