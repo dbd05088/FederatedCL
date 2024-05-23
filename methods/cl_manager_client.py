@@ -165,7 +165,7 @@ class CLManagerClient: # Client
             decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
             decay_parameters = [name for name in decay_parameters if "bias" not in name]
             if self.args.mm_projector_lr is not None:
-                projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name or "vision_tower" in name]
+                projector_parameters = [name for name, _ in opt_model.named_parameters() if ("mm_projector" in name)]
                 optimizer_grouped_parameters = [
                     {
                         "params": [
@@ -260,14 +260,14 @@ class CLManagerClient: # Client
             self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, f"{self.state['client_id']}_client_{SCHEDULER_NAME}"), map_location=map_location))
 
     def get_lr(self):
-        if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-            last_lr = self.optimizer.param_groups[0]["lr"]
-        else:
-            last_lr = self.lr_scheduler.get_last_lr()[0]
-        if torch.is_tensor(last_lr):
-            last_lr = last_lr.item()
-        return last_lr
-        # return self.lr
+        # if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        #     last_lr = self.optimizer.param_groups[0]["lr"]
+        # else:
+        #     last_lr = self.lr_scheduler.get_last_lr()[0]
+        # if torch.is_tensor(last_lr):
+        #     last_lr = last_lr.item()
+        # return last_lr
+        return self.lr
     
 
     def save_model(self, client_id, output_dir, round):
@@ -401,7 +401,7 @@ class CLManagerClient: # Client
         self.samples_per_round =  len(train_datalist) // self.num_rounds # 4
         self.iter = 0
         
-        self.create_scheduler(2*(self.samples_per_round*self.online_iter//self.gradient_accumulation_steps)+1, num_cycles=1)
+        # self.create_scheduler(2*(self.samples_per_round*self.online_iter//self.gradient_accumulation_steps)+1, num_cycles=1)
 
         seen_so_far = self.state['sample_cnt']
         
@@ -557,7 +557,7 @@ class CLManagerClient: # Client
             if (self.iter) % self.gradient_accumulation_steps == 0:
                 self.before_optimizer_step()
                 self.optimizer.step()
-                self.lr_scheduler.step()
+                # self.lr_scheduler.step()
                 self.after_optimizer_step()
                 self.optimizer.zero_grad()
 
