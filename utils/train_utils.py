@@ -1113,6 +1113,10 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     
     if model_args.model_type == 'llama3-8b':
         tokenizer.pad_token = tokenizer.eos_token
+        
+    if training_args.is_eval:
+        tokenizer.padding_side = "left"
+        tokenizer.pad_token = tokenizer.eos_token
     
     if 'llava' in model_args.model_name_or_path.lower():
         # prompt tuning

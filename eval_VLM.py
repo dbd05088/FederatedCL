@@ -51,7 +51,7 @@ class CustomStoppingCriteria(StoppingCriteria):
         return should_stop
 
 def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None):
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=False, pin_memory=True, num_workers=8, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=False, pin_memory=True, num_workers=4, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
     # dataloader = DataLoader(dataset, batch_size=1, shuffle=False, pin_memory=True, num_workers=4, drop_last=False)
     
     if 'llava' in model_args.model_name_or_path.lower():
@@ -293,13 +293,13 @@ def main():
                     evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
                 else:
                     evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
-                if data_info['data_name'] not in server_eval_key:
-                    model.load_state_dict(server_state_dict, strict=False)
-                    if data_info['data_name'] in CHOICE_DATA: 
-                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
-                    else:
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
-                    server_eval_key.append(data_info['data_name'])
+                # if data_info['data_name'] not in server_eval_key:
+                #     model.load_state_dict(server_state_dict, strict=False)
+                #     if data_info['data_name'] in CHOICE_DATA: 
+                #         evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                #     else:
+                #         evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                #     server_eval_key.append(data_info['data_name'])
 
 def get_datalists(args, scenario_num):
     with open(f"./scenarios/scenario-{scenario_num}.json") as fp:
