@@ -27,19 +27,9 @@ class GenerationDataset(Dataset):
         self.datalist = datalist
         self.data_args = data_args
         self.preprocess = preprocess
-        # if preprocess:
-        #     self.images = []
-        #     for data in self.datalist:
-        #         image_file = data['image']
-        #         if isinstance(image_file, list):
-        #             image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
-        #         else:
-        #             image = [Image.open(image_file).convert('RGB')]
-        #         self.images.append(image)
 
     def __getitem__(self, index):
         source = self.datalist[index]
-        image_file = source["image"]
         qs = source["conversations"][0]['value']
         gold = source["conversations"][1]['value']
 
@@ -53,7 +43,7 @@ class GenerationDataset(Dataset):
 
         # if self.preprocess:
         #     image = self.images[index]
-        if 'image' in source:
+        if "image" in source.keys():
             image_file = source["image"]
             if isinstance(image_file, list):
                 image = [Image.open(image_path).convert('RGB') for image_path in image_file] #.split(' |sep| ')
