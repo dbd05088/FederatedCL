@@ -7,6 +7,8 @@ import json
 import glob
 import shutil
 
+TOKEN = '<image>'
+
 dir = 'dataset/mPLUG'
 tasks = sorted(glob.glob(dir + '/tasks/*/*'))
 
@@ -21,6 +23,10 @@ if not os.path.exists(subset_folder):
 invalid_file = open('./mPLUG_invalid.txt', 'r')
 invalid_img_files = invalid_file.readlines()
 invalid_file.close()
+
+# with open('./invalid_mPLUG_data.json', 'r') as fp:
+#     invalid_json = json.load(fp)
+
 for i in range(len(invalid_img_files)):
     if i < len(invalid_img_files)-1:
         invalid_img_files[i] = invalid_img_files[i][2:-1] 
@@ -43,11 +49,21 @@ for task in tasks:
             if len(jsondata[idx]['image']) == 0:
                 del jsondata[idx]['image']
             else:
+                # check image token invalidity
+                valid_img_num = len(jsondata[idx]['image'])
+                input_text = jsondata[idx]['conversations'][0]['value']
+                count = input_text.count(TOKEN)
+                if count != valid_img_num:
+                    idx_to_del.append(idx)
+                    continue
+                # check for img invalidity
                 for img in jsondata[idx]['image']:
                     if img in invalid_img_files:
                         print(img)
                         idx_to_del.append(idx)
                         break
+                
+                
         for idx in reversed(idx_to_del):
             del jsondata[idx]
         print(len(jsondata))
