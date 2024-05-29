@@ -88,6 +88,10 @@ for task in tasks:
         train_json_data = json.load(fp)
     with open(task+'/test.json', 'r') as fp:
         test_json_data = json.load(fp)
+    
+    for jsondata in [train_json_data, test_json_data]:
+        for item in jsondata:
+            item['conversations'][0]['value'] += ' Answer with a single word or a single number.'
 
     with open(f'./dataset/HRVQA/train/dataset-{task_idx}.json', 'w') as json_file:
         json.dump(train_json_data, json_file, indent=4)
