@@ -46,8 +46,8 @@ def save_dataset(dataset_name, output_folder, subset_name):
                     "conversations": [
                         {
                             "from": "human",
-                            # "value": "Positive:" +  " <image>"*num_per_set + "\nNegative:" + " <image>"*num_per_set + "\n" + prompts
-                            "value": "<image> "*len(imgs) + "\n" + prompts
+                            "value": "Positive: " +  "<image>"*num_per_set + "\nNegative: " + "<image>"*num_per_set + "\n" + prompts
+                            # "value": "<image>"*len(imgs) + "\n" + prompts
                         },
                         { 
                             "from": "gpt",

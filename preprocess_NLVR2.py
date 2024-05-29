@@ -66,7 +66,7 @@ for full_data in full_datas:
         new_item['conversations'] = [
             {
                 "from": "human",
-                "value": meta_data['task_instruction'][item['task_instruction_id']] + question
+                "value": meta_data['task_instruction'][item['task_instruction_id']] + question + '\nChoice list:[True, False]. Your answer is:'
             },
             {
                 "from": "gpt",
