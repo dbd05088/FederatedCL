@@ -67,7 +67,9 @@ class GenerationDataset(Dataset):
                 # image = processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
             else:
                 image = torch.stack([self.data_args.image_processor.preprocess(img, return_tensors='pt')['pixel_values'][0] for img in image])
-        else: image = None
+        else: 
+            image = torch.zeros(0)
+            image_file = []
         input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
 
         # return input_ids, image, gold, prompt, image_file
@@ -111,7 +113,8 @@ class DataCollatorForGenerationDataset(object):
             image_file=image_file
         )
         images = [instance['image'] for instance in instances]
-        if all(x is not None and x.shape == images[0].shape for x in images):
+        # if all(x is not None and x.shape == images[0].shape for x in images):
+        if all(x is not None and x.shape[0] != 0 and x.shape == images[0].shape for x in images):
             images = torch.stack(images).to(torch.bfloat16)#.to(device=self.device)
             # b, n, c, h, w = images.shape
             # images = images.reshape(b*n,c,h,w)

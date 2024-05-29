@@ -85,7 +85,7 @@ class BunnyMetaForCausalLM(ABC):
                     device=attention_mask.device
                 )), dim=1)
                 position_ids = torch.sum(attention_mask, dim=1).unsqueeze(-1) - 1
-            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+            return None, position_ids, attention_mask, past_key_values, self.get_model().embed_tokens(input_ids), labels
 
         if type(images) is list or images.ndim == 5:
             concat_images = torch.cat([image for image in images], dim=0)

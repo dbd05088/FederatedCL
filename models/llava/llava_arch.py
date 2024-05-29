@@ -148,7 +148,7 @@ class LlavaMetaForCausalLM(ABC):
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1 or all(img.shape[0] == 0 for img in images):
-            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+            return None, position_ids, attention_mask, past_key_values, self.get_model().embed_tokens(input_ids), labels
 
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
