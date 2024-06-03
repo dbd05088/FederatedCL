@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.utils.data import Sampler
 
 from transformers import Trainer
+from trl import SFTTrainer   
 from transformers.trainer import (
     is_sagemaker_mp_enabled,
     get_parameter_names,
@@ -130,7 +131,7 @@ class LengthGroupedSampler(Sampler):
         return iter(indices)
 
 
-class LLaVATrainer(Trainer):
+class LLaVATrainer(SFTTrainer):
 
     def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
         if self.train_dataset is None or not has_length(self.train_dataset):
