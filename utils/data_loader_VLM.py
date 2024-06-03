@@ -145,6 +145,23 @@ class LazySupervisedDataset(Dataset):
         #         image_file = data['image']
         #         image = Image.open(image_file).convert('RGB')
         #         self.images.append(image)
+    
+    @property
+    def lengths(self):
+        length_list = []
+        for sample in self.datalist:
+            img_tokens = 128 if 'image' in sample else 0
+            length_list.append(sum(len(conv['value'].split()) for conv in sample['conversations']) + img_tokens)
+        return length_list
+
+    @property
+    def modality_lengths(self):
+        length_list = []
+        for sample in self.datalist:
+            cur_len = sum(len(conv['value'].split()) for conv in sample['conversations'])
+            cur_len = cur_len if 'image' in sample else -cur_len
+            length_list.append(cur_len)
+        return length_list
 
     def __len__(self):
         return len(self.datalist)
