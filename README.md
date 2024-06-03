@@ -11,3 +11,21 @@ pip install peft
 pip install bitsandbytes
 pip install pandas kornia opencv-python timm torch_optimizer easydict pycocoevalcap sentencepiece protobuf
 ```
+
+# How to run
+**Many lines of code are commented/uncommented for variations. Make sure to check `cl_manager_client.py` and method python file before training or `eval_VLM.py` before evaluation.**
+
+1. Train
+- Client parallel running: `bash run_VLM.sh`
+Arguments:
+- Note: experiment name **All the models are saved in client_states_$NOTE folder**
+- scenario
+
+- Client for-loop running: `bash train_VLM.sh` (NOT COMPLETE YET)
+
+2. Eval
+`bash eval.sh`
+Arguments:
+- Note: experiment name **Models in client_states_$NOTE folder will be loaded**
+- scenario
+- round_to_eval: model weights ends with round{round_to_eval}.pth / round{round_to_eval-1}.pth for client/server will be loaded

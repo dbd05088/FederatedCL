@@ -2,27 +2,27 @@
 # sysctl -w vm.max_map_count=262144
 sudo sysctl -w vm.max_map_count=262144
 # CIL CONFIG
-NOTE="debug" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="fedprox"
-MODEL_ARCH="llava" # llava bunny_3b bunny_8b
+NOTE="fedavg_demon8_lr1e-6_iter2" # experiment name *****All the models are saved in client_states_$NOTE folder*******
+MODE="fedavg" # method name
+MODEL_ARCH="bunny_3b" # llava bunny_3b bunny_8b
 RND_SEED=1
 
 # fed args
-SCENARIO=1
+SCENARIO=6 # run scenario-$SCENARIO.json from scenarios folder
 NUM_ROUNDS=10
-NUM_CLIENTS=1
-MODEL_MAX_LEN=2048
+NUM_CLIENTS=8 # should be the same as the number of clients in scenario-$SCENARIO.json
+MODEL_MAX_LEN=6000
 
 MEM_SIZE=50000
-ONLINE_ITER=1
+ONLINE_ITER=2
 BATCHSIZE=4
 TEMP_BATCHSIZE=1
 
-LR=2e-4
-MM_PROJECTOR_LR=2e-5
+LR=1e-6
+MM_PROJECTOR_LR=1e-6
 OPT_NAME="adamw_torch" # adam8bit_bnb adamw_torch
 SCHED_NAME="cosine_with_restarts" #cosine
-WARMUP_RATIO=0.003 # SHOULD BE 0.03 / NUM_ROUNDS
+WARMUP_RATIO=0.03 # SHOULD BE 0.03 / NUM_ROUNDS
 
 if [ "$MODEL_ARCH" == "llava" ]; then
     MODEL_NAME="liuhaotian/llava-v1.5-7b"
@@ -48,7 +48,7 @@ else
     exit 1
 fi
 
-CUDA_VISIBLE_DEVICES=0,1 python main_VLM.py \
+CUDA_VISIBLE_DEVICES=3,4,5,6,7 python main_VLM.py \
     --model_name_or_path $MODEL_NAME \
     --model_name_for_dataarg $MODEL_NAME \
     --model_type $MODEL_TYPE \
@@ -74,6 +74,6 @@ CUDA_VISIBLE_DEVICES=0,1 python main_VLM.py \
     --temp_batchsize $TEMP_BATCHSIZE \
     --online_iter $ONLINE_ITER \
     --note $NOTE \
-    --output_dir "./nohup" #> ./nohup/fedavg.log 2>&1 &
+    --output_dir "./nohup" > ./nohup/fedavg_demon8_lr1e-6_iter2.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD
