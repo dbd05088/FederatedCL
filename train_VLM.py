@@ -20,6 +20,7 @@ from transformers import BitsAndBytesConfig
 from models.llava.llava_trainer import LLaVATrainer
 from collections import OrderedDict
 from deepspeed import zero
+import shutil
 # import warnings
 # warnings.filterwarnings('ignore')
 
@@ -125,6 +126,7 @@ def main():
                     model.load_state_dict(global_state_dict, strict=False)    
                 
                 print('model loading done')
+            
 
             sub_dataset = get_dataset_this_round(train_datalists[client_id], curr_round, training_args)
             
@@ -143,15 +145,24 @@ def main():
                 max_seq_length=training_args.model_max_length,
                 **data_module)
 
+            # if curr_round > 0:
+            #     path = os.path.join(training_args.state_dir, f"{client_id}_trainer_state.json")
+            #     shutil.copy(path, os.path.join(training_args.output_dir, "trainer_state.json"))
+            #     results = trainer.train(resume_from_checkpoint=True)
+            # else:
             results = trainer.train()
             training_loss[client_id].append(results.training_loss)
+            
+            if training_args.local_rank == 0 or training_args.local_rank == -1: 
+                path = os.path.join(training_args.state_dir, f"{client_id}_trainer_state.json")
+                trainer.state.save_to_json(path)
             
             model.config.use_cache = True
             
             
             
             # save local model
-            output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_model_round{curr_round}.pth")
+            output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_model_round{curr_round+1}.pth")
             if training_args.lora_enable:
                 state_dict = get_peft_state_maybe_zero_3(
                     model.named_parameters(), training_args.lora_bias
@@ -179,7 +190,8 @@ def main():
             global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
     
         # TODO: Save server model
-        
+        if training_args.local_rank == 0 or training_args.local_rank == -1: 
+            torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
         
     logger.info("total done\n")
 

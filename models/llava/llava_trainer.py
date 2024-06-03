@@ -13,8 +13,15 @@ from transformers.trainer import (
     ALL_LAYERNORM_LAYERS,
     logger,
 )
-from typing import List, Optional
+from typing import List, Optional, Tuple
+import random
+from collections import defaultdict
+from torch.utils.data import DataLoader
+from transformers.utils import is_datasets_available
+from transformers.trainer_utils import seed_worker
 
+if is_datasets_available():
+    import datasets
 
 def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
@@ -96,6 +103,37 @@ def get_length_grouped_indices(lengths, batch_size, world_size, generator=None, 
 
     return [i for megabatch in megabatches for batch in megabatch for i in batch]
 
+class MemoryBatchSampler(torch.utils.data.sampler.BatchSampler):
+    def __init__(
+        self,
+        stream: List,
+        memory_size: int = 50000,
+        batch_size: int = 64,
+        num_iterations: int = 1
+    ):
+        self.stream = stream
+        self.memory_size = memory_size
+        self.batch_size = batch_size
+        self.temp_batch_size = self.batch_size // 2
+        self.num_iterations = num_iterations
+        self.memory = []#defaultdict(list)
+
+    def __iter__(self):
+        for idx in self.stream:
+            # if sum(len(v) for v in self.memory.values()) == self.memory_size:
+            if len(self.memory) == self.memory_size:
+                #FIXME
+                self.memory.pop(random.randrange(self.memory_size))
+
+            self.memory.append(idx)
+            for _ in range(self.num_iterations):
+                batch = random.sample(self.memory, k=min(len(self.memory), self.batch_size))
+                len(batch)
+                #print("yield idx", idx, "len mem buffer", len(self.memory_buffers))
+                yield batch #+ [idx]
+
+    def __len__(self):
+        return len(self.stream) * self.num_iterations
 
 class LengthGroupedSampler(Sampler):
     r"""
@@ -147,6 +185,45 @@ class LLaVATrainer(SFTTrainer):
             )
         else:
             return super()._get_train_sampler()
+    # def get_train_dataloader(self) -> DataLoader:
+    #     """
+    #     Returns the training [`~torch.utils.data.DataLoader`].
+
+    #     Will use no sampler if `train_dataset` does not implement `__len__`, a random sampler (adapted to distributed
+    #     training if necessary) otherwise.
+
+    #     Subclass and override this method if you want to inject some custom behavior.
+    #     """
+    #     if self.train_dataset is None:
+    #         raise ValueError("Trainer: training requires a train_dataset.")
+
+    #     train_dataset = self.train_dataset
+    #     data_collator = self.data_collator
+    #     if is_datasets_available() and isinstance(train_dataset, datasets.Dataset):
+    #         train_dataset = self._remove_unused_columns(train_dataset, description="training")
+    #     else:
+    #         data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
+
+    #     dataloader_params = {
+    #         # "batch_size": self._train_batch_size,
+    #         "collate_fn": data_collator,
+    #         "num_workers": self.args.dataloader_num_workers,
+    #         "pin_memory": self.args.dataloader_pin_memory,
+    #         "persistent_workers": self.args.dataloader_persistent_workers,
+    #     }
+
+    #     if not isinstance(train_dataset, torch.utils.data.IterableDataset):
+    #         # dataloader_params["sampler"] = self._get_train_sampler()
+    #         # dataloader_params["drop_last"] = self.args.dataloader_drop_last
+    #         dataloader_params["worker_init_fn"] = seed_worker
+    #         dataloader_params["prefetch_factor"] = self.args.dataloader_prefetch_factor
+    #     dataloader_params['batch_sampler'] = MemoryBatchSampler(list(range(len(self.train_dataset))),
+    #                                                             memory_size=50000,
+    #                                                             batch_size=self._train_batch_size*self.args.world_size * self.args.gradient_accumulation_steps,
+    #                                                             num_iterations=1
+    #                                                             )
+
+    #     return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
 
     def create_optimizer(self):
         """
