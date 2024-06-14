@@ -1,5 +1,7 @@
 [
-    {"dataset": "AQUA","subset_id": 0},
+    {"dataset": "AQUA","subset_id": 0, "task_name": "no external knowledge"},
+    {"dataset": "AQUA","subset_id": 1, "task_name": "need external knowledge 1"},
+    {"dataset": "AQUA","subset_id": 2, "task_name": "need external knowledge 2"},
     {"dataset": "Mementos","subset_id": 0},
     {"dataset": "SciCap","subset_id": 0, "task_name": "Yes-subfig"},
     {"dataset": "SciCap","subset_id": 1, "task_name": "No-subfig"},

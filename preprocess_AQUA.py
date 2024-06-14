@@ -5,11 +5,13 @@ import requests
 import os
 import json
 import uuid
+import numpy as np
+import random
 
+np.random.seed(42)
+random.seed(42)
 
-
-
-def process_and_save(dataset, output_folder, subset_name):
+def process_and_save(dataset, output_folder, subset_name, size):
     # Define image subfolder within output folder
     subset_folder = os.path.join(output_folder, subset_name)
     image_subfolder = os.path.join(output_folder, 'images')
@@ -24,7 +26,10 @@ def process_and_save(dataset, output_folder, subset_name):
 
 
     # Initialize list to hold all JSON data
+    # dataset-0 : no need external knowledge
+    # dataset-1 : need external knowledge
     json_data_list = []
+    json_data_list2 = []
 
 
     # Process and save images and labels
@@ -59,7 +64,7 @@ def process_and_save(dataset, output_folder, subset_name):
             "conversations": [
                 {
                     "from": "human",
-                    "value": "<image>\n" + item['question'] + "?"
+                    "value": "<image>\n" + item['question'] + "? Answer as concise as possible." 
                 },
                 {
                     "from": "gpt",
@@ -70,13 +75,36 @@ def process_and_save(dataset, output_folder, subset_name):
 
 
         # Append to list
-        json_data_list.append(json_data)
+        if item['need_external_knowledge']:
+            json_data_list2.append(json_data)
+        else:
+            json_data_list.append(json_data)
 
-
+    print(len(json_data_list))
+    print(len(json_data_list2))
+    # 2777 7259
+    # 29568 40244
     # Save the JSON data list to a file
-    json_output_path = os.path.join(output_folder, subset_name, 'dataset.json')
+    json_output_path = os.path.join(output_folder, subset_name, 'dataset-0.json')
+    json_data_list = np.random.choice(json_data_list, replace=False, size=min(size, len(json_data_list))).tolist()
+    print(len(json_data_list))
     with open(json_output_path, 'w') as json_file:
         json.dump(json_data_list, json_file, indent=4)
+    
+    random.shuffle(json_data_list2)
+    json_data_list2_sub1 = json_data_list2[:len(json_data_list2)//2]
+    json_output_path = os.path.join(output_folder, subset_name, 'dataset-1.json')
+    json_data_list2_sub1 = np.random.choice(json_data_list2_sub1, replace=False, size=min(size, len(json_data_list2_sub1))).tolist()
+    print(len(json_data_list2_sub1))
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list2_sub1, json_file, indent=4)
+    
+    json_output_path = os.path.join(output_folder, subset_name, 'dataset-2.json')
+    json_data_list2_sub2 = json_data_list2[len(json_data_list2)//2:]
+    json_data_list2_sub2 = np.random.choice(json_data_list2_sub2, replace=False, size=min(size, len(json_data_list2_sub2))).tolist()
+    print(len(json_data_list2_sub2))
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list2_sub2, json_file, indent=4)
 
 
 def save_dataset(dataset_name, output_folder):
@@ -97,17 +125,16 @@ def save_dataset(dataset_name, output_folder):
     #     val_dataset = []
     with open(f"dataset/{dataset_name}/train.json") as fp:
         train_dataset = json.load(fp)
-    
-    with open(f"dataset/{dataset_name}/val.json") as fp:
-        val_dataset = json.load(fp)
 
     with open(f"dataset/{dataset_name}/test.json") as fp:
         test_dataset = json.load(fp)
-
+    with open(f"dataset/{dataset_name}/val.json") as fp:
+        val_dataset = json.load(fp)
+    test_dataset.extend(val_dataset)
     # Process and save the datasets
-    for subset, data in [('test', test_dataset), ('train', train_dataset), ('validation', val_dataset), ]:
+    for subset, data, size in [('test', test_dataset, 4000), ('train', train_dataset, 20000), ]:
         if data:
-            process_and_save(data, output_folder, subset)
+            process_and_save(data, output_folder, subset, size)
 
 # Usage example
 output_folder = 'dataset/AQUA'
