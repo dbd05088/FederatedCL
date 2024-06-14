@@ -392,9 +392,9 @@ def maybe_zero_3(param, ignore_status=False, name=None):
     return param
 
 from torch import nn
-import deepspeed
 
 def load_deepspeed(state_dict, module: nn.Module, prefix="", strict=True):
+    import deepspeed
     # because zero3 puts placeholders in model params, this context
     # manager gathers (unpartitions) the params of the current layer, then loads from
     # the state dict and then re-partitions them again

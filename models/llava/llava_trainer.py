@@ -103,6 +103,44 @@ def get_length_grouped_indices(lengths, batch_size, world_size, generator=None, 
 
     return [i for megabatch in megabatches for batch in megabatch for i in batch]
 
+class MemorySampler(Sampler[int]):
+    r"""Samples elements randomly from a given list of indices, without replacement.
+
+    Args:
+        indices (sequence): a sequence of indices
+        generator (Generator): Generator used in sampling.
+    """
+
+    def __init__(self, stream, generator=None, memory_size:int=50000, batch_size=64, world_size=1, num_iterations=1) -> None:
+        self.stream=stream
+        self.memory = []
+        self.indices = []
+        self.total_batchsize = batch_size*world_size
+        self.memory_size=memory_size
+        self.generator = generator
+        
+        iteration = 0
+        for idx in stream:
+            if len(self.memory) == self.memory_size:
+                self.memory.pop(random.randrange(self.memory_size))
+            self.memory.append(idx)
+            iteration += num_iterations
+            if iteration >= 1:
+                for _ in range(int(iteration)):
+                    batch = random.sample(self.memory, k=min(len(self.memory), self.total_batchsize))
+                    mul = (self.total_batchsize//len(batch)) + 1
+                    batch = (batch*mul)[:self.total_batchsize]
+                    self.indices.extend(batch[:])
+                    iteration -= 1
+        print(len(self.indices))
+    def __iter__(self):
+        for i in range(len(self.indices)):
+            print(f"yield idx {i} self.indices {self.indices[i]}")
+            yield self.indices[i]
+        # return iter(self.indices)
+
+    def __len__(self) -> int:
+        return len(self.indices)
 class MemoryBatchSampler(torch.utils.data.sampler.BatchSampler):
     def __init__(
         self,
@@ -126,9 +164,11 @@ class MemoryBatchSampler(torch.utils.data.sampler.BatchSampler):
                 self.memory.pop(random.randrange(self.memory_size))
 
             self.memory.append(idx)
+            print("memory", len(self.memory))
             for _ in range(self.num_iterations):
                 batch = random.sample(self.memory, k=min(len(self.memory), self.batch_size))
-                len(batch)
+                print("batch", len(batch))
+                
                 #print("yield idx", idx, "len mem buffer", len(self.memory_buffers))
                 yield batch #+ [idx]
 
@@ -171,59 +211,55 @@ class LengthGroupedSampler(Sampler):
 
 class LLaVATrainer(SFTTrainer):
 
-    def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
-        if self.train_dataset is None or not has_length(self.train_dataset):
-            return None
+    # def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
+        # if self.train_dataset is None or not has_length(self.train_dataset):
+        #     return None
 
-        if self.args.group_by_modality_length:
-            lengths = self.train_dataset.modality_lengths
-            return LengthGroupedSampler(
-                self.args.train_batch_size,
-                world_size=self.args.world_size * self.args.gradient_accumulation_steps,
-                lengths=lengths,
-                group_by_modality=True,
-            )
+        # if self.args.group_by_modality_length:
+        #     lengths = self.train_dataset.modality_lengths
+        #     return LengthGroupedSampler(
+        #         self.args.train_batch_size,
+        #         world_size=self.args.world_size * self.args.gradient_accumulation_steps,
+        #         lengths=lengths,
+        #         group_by_modality=True,
+        #     )
+        # else:
+        #     return super()._get_train_sampler()
+    def get_train_dataloader(self) -> DataLoader:
+        """
+        Returns the training [`~torch.utils.data.DataLoader`].
+
+        Will use no sampler if `train_dataset` does not implement `__len__`, a random sampler (adapted to distributed
+        training if necessary) otherwise.
+
+        Subclass and override this method if you want to inject some custom behavior.
+        """
+        if self.train_dataset is None:
+            raise ValueError("Trainer: training requires a train_dataset.")
+
+        train_dataset = self.train_dataset
+        data_collator = self.data_collator
+        if is_datasets_available() and isinstance(train_dataset, datasets.Dataset):
+            train_dataset = self._remove_unused_columns(train_dataset, description="training")
         else:
-            return super()._get_train_sampler()
-    # def get_train_dataloader(self) -> DataLoader:
-    #     """
-    #     Returns the training [`~torch.utils.data.DataLoader`].
+            data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
 
-    #     Will use no sampler if `train_dataset` does not implement `__len__`, a random sampler (adapted to distributed
-    #     training if necessary) otherwise.
+        dataloader_params = {
+            "batch_size": self._train_batch_size,
+            "collate_fn": data_collator,
+            "num_workers": self.args.dataloader_num_workers,
+            "pin_memory": self.args.dataloader_pin_memory,
+            "persistent_workers": self.args.dataloader_persistent_workers,
+        }
 
-    #     Subclass and override this method if you want to inject some custom behavior.
-    #     """
-    #     if self.train_dataset is None:
-    #         raise ValueError("Trainer: training requires a train_dataset.")
-
-    #     train_dataset = self.train_dataset
-    #     data_collator = self.data_collator
-    #     if is_datasets_available() and isinstance(train_dataset, datasets.Dataset):
-    #         train_dataset = self._remove_unused_columns(train_dataset, description="training")
-    #     else:
-    #         data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
-
-    #     dataloader_params = {
-    #         # "batch_size": self._train_batch_size,
-    #         "collate_fn": data_collator,
-    #         "num_workers": self.args.dataloader_num_workers,
-    #         "pin_memory": self.args.dataloader_pin_memory,
-    #         "persistent_workers": self.args.dataloader_persistent_workers,
-    #     }
-
-    #     if not isinstance(train_dataset, torch.utils.data.IterableDataset):
-    #         # dataloader_params["sampler"] = self._get_train_sampler()
-    #         # dataloader_params["drop_last"] = self.args.dataloader_drop_last
-    #         dataloader_params["worker_init_fn"] = seed_worker
-    #         dataloader_params["prefetch_factor"] = self.args.dataloader_prefetch_factor
-    #     dataloader_params['batch_sampler'] = MemoryBatchSampler(list(range(len(self.train_dataset))),
-    #                                                             memory_size=50000,
-    #                                                             batch_size=self._train_batch_size*self.args.world_size * self.args.gradient_accumulation_steps,
-    #                                                             num_iterations=1
-    #                                                             )
-
-    #     return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
+        if not isinstance(train_dataset, torch.utils.data.IterableDataset):
+            # dataloader_params["sampler"] = self._get_train_sampler()
+            dataloader_params["drop_last"] = self.args.dataloader_drop_last
+            dataloader_params["worker_init_fn"] = seed_worker
+            dataloader_params["prefetch_factor"] = self.args.dataloader_prefetch_factor
+        
+        dataloader_params['shuffle'] = False
+        return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
 
     def create_optimizer(self):
         """

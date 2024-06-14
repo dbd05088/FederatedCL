@@ -20,7 +20,8 @@ from transformers import BitsAndBytesConfig
 from models.llava.llava_trainer import LLaVATrainer
 from collections import OrderedDict
 from deepspeed import zero
-import shutil
+import time
+import datetime
 # import warnings
 # warnings.filterwarnings('ignore')
 
@@ -100,10 +101,22 @@ def main():
     )
     global_state_dict.update(non_lora_state_dict)
     local_state_dict_list = [copy.deepcopy(global_state_dict) for i in range(training_args.num_clients)]
+    
+    # fedper
+    # choice1: not distribute mm_projector
+    
+    # choice2: not distribute last 3 lora layers
+    
+    
     training_loss = [[] for i in range(training_args.num_clients)]
     
     # start federated learning
+    start_time = time.time()
     frac_clients = 1
+    memory = [[]]*training_args.num_clients
+    memory_size = 50000
+    num_iterations = 100
+    total_batchsize = training_args.per_gpu_train_batch_size*training_args.world_size*training_args.gradient_accumulation_steps
     for curr_round in range(training_args.num_rounds):
         # clients turn
         cids = np.arange(training_args.num_clients).tolist()
@@ -113,24 +126,63 @@ def main():
             logger.info(f"Round {curr_round} | selected_ids: {selected_ids}\n")
         # print(f"Round {curr_round} | selected_ids: {selected_ids}\n")
         # selected_ids = cids
+        training_args.learning_rate = 5e-5 - 4.9e-6*curr_round
+        training_args.mm_projector_lr = 5e-5 - 4.9e-6*curr_round
         for idx in range(num_selection):
             model.config.use_cache = False
             torch.cuda.empty_cache()
             client_id = selected_ids[idx]
             
-            # FIXME: fedavg
+            # FIXME: 
+            # fedavg
+            # model_to_load = global_state_dict
+            
+            # SFT (no distribution)
+            model_to_load = local_state_dict_list[client_id]
+
+            
             with torch.no_grad():
                 if 'zero3' in training_args.deepspeed:
-                    load_deepspeed(global_state_dict, model, strict=False)
+                    load_deepspeed(model_to_load, model, strict=False)
                 else:
-                    model.load_state_dict(global_state_dict, strict=False)    
+                    model.load_state_dict(model_to_load, strict=False)    
                 
                 print('model loading done')
+                
+            # fedper
+            # first load loca model and then load global model
+            # with torch.no_grad():
+            #     if 'zero3' in training_args.deepspeed:
+            #         load_deepspeed(local_state_dict_list[client_id], model, strict=False)
+            #     else:
+            #         model.load_state_dict(local_state_dict_list[client_id], strict=False)    
+            #     if 'zero3' in training_args.deepspeed:
+            #         load_deepspeed(global_state_dict, model, strict=False)
+            #     else:
+            #         model.load_state_dict(global_state_dict, strict=False)    
+                
+            #     print('model loading done')
             
 
             sub_dataset = get_dataset_this_round(train_datalists[client_id], curr_round, training_args)
             
-            data_module = make_supervised_data_module(client_data=sub_dataset,
+            iteration = 0
+            datalist = []
+            iter_ratio = num_iterations / len(sub_dataset)
+            for i, sample in enumerate(sub_dataset):
+                if len(memory[client_id]) == memory_size:
+                    memory[client_id].pop(random.randrange(memory_size))
+                memory[client_id].append(sample)
+                iteration += iter_ratio
+                if iteration >= 1:
+                    for _ in range(int(iteration)):
+                        batch = random.sample(memory[client_id], k=min(len(memory[client_id]), total_batchsize))
+                        mul = (total_batchsize//len(batch)) + 1
+                        batch = (batch*mul)[:total_batchsize]
+                        datalist.extend(batch[:])
+                        iteration -= 1
+            
+            data_module = make_supervised_data_module(client_data=datalist, # sub_dataset
                                                 tokenizer=tokenizer,
                                                 data_args=copy.deepcopy(data_args))
             
@@ -183,6 +235,7 @@ def main():
             
             trainer.deepspeed.empty_partition_cache()
             del trainer
+            logger.info(f"done Round {curr_round} client {client_id} | elapsed time {datetime.timedelta(seconds=int(time.time() - start_time))} | ")
         #self.do_server_work(curr_round)
         # FIXME: fedavg
         for key in global_state_dict.keys():

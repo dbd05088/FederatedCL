@@ -1,28 +1,28 @@
 #/bin/bash
 # CIL CONFIG
-NOTE="fedavg_demon_lr1e-6_test" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="fedavg_llava_sc12_lr5e-5_bs16_itr100_constant_nodist" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="fedavg"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 RND_SEED=1
 
 # fed args
-SCENARIO=4
+SCENARIO=12
 NUM_ROUNDS=10
 NUM_CLIENTS=10
-MODEL_MAX_LEN=6000
+MODEL_MAX_LEN=7000
 
-BATCHSIZE=8
+BATCHSIZE=4
 
-LR=2e-4
-MM_PROJECTOR_LR=2e-5
+LR=5e-5
+MM_PROJECTOR_LR=5e-5
 OPT_NAME="adamw_torch" # adam8bit_bnb adamw_torch
-SCHED_NAME="cosine" #cosine
-WARMUP_RATIO=0.003 # SHOULD BE 0.03 / NUM_ROUNDS
+SCHED_NAME="constant" #cosine
+WARMUP_RATIO=0.03 # SHOULD BE 0.03 / NUM_ROUNDS
 
 if [ "$MODEL_ARCH" == "llava" ]; then
-    MODEL_NAME="liuhaotian/llava-v1.5-7b"
+    MODEL_NAME="./llava-v1.5-7b"
     VERSION="v1"
-    VISION_TOWER="openai/clip-vit-large-patch14-336"
+    VISION_TOWER="./clip-vit-large-patch14-336"
     MODEL_TYPE="llama"
     BITS=16
 
@@ -42,8 +42,9 @@ else
     echo "Undefined setting"
     exit 1
 fi
-
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 deepspeed train_VLM.py \
+# --master_port 29500
+CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port 29600 \
+    train_VLM.py \
     --deepspeed ./deepspeed_script/zero2.json \
     --model_name_or_path $MODEL_NAME \
     --model_name_for_dataarg $MODEL_NAME \
@@ -56,11 +57,11 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 deepspeed train_VLM.py \
     --vision_tower $VISION_TOWER \
     --gradient_checkpointing True \
     --num_train_epochs 1 \
-    --gradient_accumulation_steps 2 \
+    --gradient_accumulation_steps 1 \
     --bits $BITS \
     --bf16 True \
     --tf32 True \
-    --mode $MODE --dataloader_num_workers 4 \
+    --mode $MODE --dataloader_num_workers 2 \
     --seed $RND_SEED \
     --optim $OPT_NAME --lr_scheduler_type $SCHED_NAME \
     --weight_decay 0. \
@@ -69,8 +70,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 deepspeed train_VLM.py \
     --mm_projector_lr $MM_PROJECTOR_LR \
     --evaluation_strategy "no" \
     --save_strategy "no" \
-    --logging_steps 1 \
+    --logging_steps 2 \
     --note $NOTE \
-    --output_dir "./results/test/" > ./nohup/fedavg_demon_lr1e-6_test.log 2>&1 &
+    --output_dir "./results/test/" > ./nohup/fedavg_llava_sc12_lr5e-5_bs16_itr100_constant_nodist.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD
+#
