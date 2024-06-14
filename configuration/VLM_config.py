@@ -42,7 +42,9 @@ class TrainingArguments(transformers.TrainingArguments):
     
     is_eval: bool = False
     round_to_eval: int = None
-
+    eval_temp: float = 0.2
+    eval_server: bool = True
+    
     # cl config
     mode: str = field(default="er")
     # dataset: str = field(default="cifar10")

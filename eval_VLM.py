@@ -51,7 +51,7 @@ class CustomStoppingCriteria(StoppingCriteria):
         return should_stop
 
 def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None):
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=False, pin_memory=True, num_workers=0, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
+    dataloader = DataLoader(dataset, batch_size=8, shuffle=False, pin_memory=True, num_workers=2, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
     # dataloader = DataLoader(dataset, batch_size=1, shuffle=False, pin_memory=True, num_workers=4, drop_last=False)
     
     if 'llava' in model_args.model_name_or_path.lower():
@@ -91,7 +91,7 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
                     images=imgs,
                     # image_sizes=image_sizes,
                     do_sample=True,# if args.temperature > 0 else False,
-                    temperature=0.2,#args.temperature,
+                    temperature=training_args.eval_temp,#args.temperature,
                     top_p=None,#args.top_p,
                     num_beams=1,#args.num_beams,
                     max_new_tokens=model_args.max_new_tokens,#args.max_new_tokens,
@@ -274,18 +274,18 @@ def main():
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     
     server_eval_key = []
-    # logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
-    # server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
+    logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
+    server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
         # load client weight
-        # logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
-        # client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
+        logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
+        client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
         
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
             if samples_per_round_per_client[client_id]*training_args.round_to_eval > data_info['eval_cnt']:
                 # breakpoint()
-                # model.load_state_dict(client_state_dict, strict=False)
+                model.load_state_dict(client_state_dict, strict=False)
                 # model.load_state_dict(server_state_dict, strict=False)
                 
                 dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
@@ -294,13 +294,13 @@ def main():
                 # if data_info['data_name'] in CHOICE_DATA: 
                 #     evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
                 # else:
-                #     evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
-                if data_info['data_name'] not in server_eval_key:
-                    # model.load_state_dict(server_state_dict, strict=False)
-                    if data_info['data_name'] in CHOICE_DATA: 
-                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
-                    else:
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
+                if training_args.eval_server and data_info['data_name'] not in server_eval_key:
+                    model.load_state_dict(server_state_dict, strict=False)
+                # #     if data_info['data_name'] in CHOICE_DATA: 
+                # #         evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                # #     else:
+                    evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
                     server_eval_key.append(data_info['data_name'])
 
 def get_datalists(args, scenario_num):
