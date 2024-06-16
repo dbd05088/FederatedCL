@@ -103,9 +103,23 @@ def main():
     local_state_dict_list = [copy.deepcopy(global_state_dict) for i in range(training_args.num_clients)]
     
     # fedper
+    if training_args.mode == 'fedper':
     # choice1: not distribute mm_projector
     
     # choice2: not distribute last 3 lora layers
+        layer_num = []
+        for k in global_state_dict.keys():
+            layer_num.append(int(k.split('.')[4]))
+        layer_num = sorted(list(set(layer_num)))
+        
+        layers_to_del = layer_num[-3:]
+        # layers_to_del = layer_num[-len(layer_num)//2:]
+        keys_to_del = []
+        for k in global_state_dict.keys():
+            if int(k.split('.')[4]) in layers_to_del:
+                keys_to_del.append(k)
+        for k in keys_to_del:
+            del global_state_dict[k]
     
     
     training_loss = [[] for i in range(training_args.num_clients)]
@@ -115,8 +129,12 @@ def main():
     frac_clients = 1
     memory = [[]]*training_args.num_clients
     memory_size = 50000
-    num_iterations = 100
+    num_iterations = training_args.num_iter
     total_batchsize = training_args.per_gpu_train_batch_size*training_args.world_size*training_args.gradient_accumulation_steps
+    init_lr = training_args.learning_rate
+    final_lr = 1e-6
+    lr_step = (init_lr - final_lr)/training_args.num_rounds
+    
     for curr_round in range(training_args.num_rounds):
         # clients turn
         cids = np.arange(training_args.num_clients).tolist()
@@ -126,8 +144,8 @@ def main():
             logger.info(f"Round {curr_round} | selected_ids: {selected_ids}\n")
         # print(f"Round {curr_round} | selected_ids: {selected_ids}\n")
         # selected_ids = cids
-        training_args.learning_rate = 5e-5 - 4.9e-6*curr_round
-        training_args.mm_projector_lr = 5e-5 - 4.9e-6*curr_round
+        training_args.learning_rate = init_lr - lr_step*curr_round
+        training_args.mm_projector_lr = init_lr - lr_step*curr_round
         for idx in range(num_selection):
             model.config.use_cache = False
             torch.cuda.empty_cache()
@@ -135,33 +153,38 @@ def main():
             
             # FIXME: 
             # fedavg
-            # model_to_load = global_state_dict
+            if training_args.mode == 'fedavg':
+                model_to_load = global_state_dict
+                with torch.no_grad():
+                    if 'zero3' in training_args.deepspeed:
+                        load_deepspeed(model_to_load, model, strict=False)
+                    else:
+                        model.load_state_dict(model_to_load, strict=False)    
             
             # SFT (no distribution)
-            model_to_load = local_state_dict_list[client_id]
+            elif training_args.mode == 'sft':
+                model_to_load = local_state_dict_list[client_id]
+                with torch.no_grad():
+                    if 'zero3' in training_args.deepspeed:
+                        load_deepspeed(model_to_load, model, strict=False)
+                    else:
+                        model.load_state_dict(model_to_load, strict=False)    
+                    
+    
+            elif training_args.mode == 'fedper':
+                 # fedper
+                # first load loca model and then load global model
+                with torch.no_grad():
+                    if 'zero3' in training_args.deepspeed:
+                        load_deepspeed(local_state_dict_list[client_id], model, strict=False)
+                    else:
+                        model.load_state_dict(local_state_dict_list[client_id], strict=False)    
+                    if 'zero3' in training_args.deepspeed:
+                        load_deepspeed(global_state_dict, model, strict=False)
+                    else:
+                        model.load_state_dict(global_state_dict, strict=False) 
 
-            
-            with torch.no_grad():
-                if 'zero3' in training_args.deepspeed:
-                    load_deepspeed(model_to_load, model, strict=False)
-                else:
-                    model.load_state_dict(model_to_load, strict=False)    
-                
-                print('model loading done')
-                
-            # fedper
-            # first load loca model and then load global model
-            # with torch.no_grad():
-            #     if 'zero3' in training_args.deepspeed:
-            #         load_deepspeed(local_state_dict_list[client_id], model, strict=False)
-            #     else:
-            #         model.load_state_dict(local_state_dict_list[client_id], strict=False)    
-            #     if 'zero3' in training_args.deepspeed:
-            #         load_deepspeed(global_state_dict, model, strict=False)
-            #     else:
-            #         model.load_state_dict(global_state_dict, strict=False)    
-                
-            #     print('model loading done')
+            print('model loading done')
             
 
             sub_dataset = get_dataset_this_round(train_datalists[client_id], curr_round, training_args)

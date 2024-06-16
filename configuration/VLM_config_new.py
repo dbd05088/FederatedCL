@@ -38,6 +38,8 @@ import os
 class TrainingArguments(transformers.TrainingArguments):
     is_eval: bool = False
     round_to_eval: int = None
+    
+    num_iter:int = field(default=100)
 
     # cl config
     mode: str = field(default="er")
