@@ -8,7 +8,8 @@ from configuration.VLM_config_new import ModelArguments, DataArguments, Training
 import transformers
 from utils.train_utils import get_VLMmodel, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, safe_save_model_for_hf_trainer, load_deepspeed
 
-from utils.method_manager_VLM import select_method
+# from utils.method_manager_VLM import select_method
+from federated_methods.method_manager import select_method
 from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
 from typing import Dict, Optional, Sequence, List
 
@@ -63,12 +64,6 @@ def main():
     if training_args.local_rank == 0 or training_args.local_rank == -1: 
         logger.info(training_args)
 
-    # if torch.cuda.is_available():
-    #     device = torch.device("cuda:0")
-    # else:
-    #     device = torch.device("cpu")
-    # logger.info(f"Set the device ({device})")
-
     # Fix the random seeds
     torch.manual_seed(training_args.seed)
     torch.backends.cudnn.deterministic = True
@@ -80,6 +75,9 @@ def main():
 
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     
+    # select functions
+    set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules = select_method(training_args.mode)
+    
     # create folder
     training_args.state_dir = training_args.state_dir + '_' + training_args.note
     if not os.path.exists(training_args.state_dir):
@@ -88,11 +86,6 @@ def main():
     if training_args.gradient_checkpointing:
         training_args.gradient_checkpointing_kwargs = {'use_reentrant':False}
 
-    # if training_args.local_rank == 0 or training_args.local_rank == -1:
-    # global_state_dict = OrderedDict()
-    # for name, parameters in model.named_parameters():
-    #     if parameters.requires_grad:
-    #         global_state_dict[name] = parameters.cpu()
     global_state_dict = get_peft_state_maybe_zero_3(
                 model.named_parameters(), training_args.lora_bias
             )
@@ -102,26 +95,7 @@ def main():
     global_state_dict.update(non_lora_state_dict)
     local_state_dict_list = [copy.deepcopy(global_state_dict) for i in range(training_args.num_clients)]
     
-    # fedper
-    if training_args.mode == 'fedper':
-    # choice1: not distribute mm_projector
-    
-    # choice2: not distribute last 3 lora layers
-        layer_num = []
-        for k in global_state_dict.keys():
-            layer_num.append(int(k.split('.')[4]))
-        layer_num = sorted(list(set(layer_num)))
-        
-        layers_to_del = layer_num[-3:]
-        # layers_to_del = layer_num[-len(layer_num)//2:]
-        keys_to_del = []
-        for k in global_state_dict.keys():
-            if int(k.split('.')[4]) in layers_to_del:
-                keys_to_del.append(k)
-        for k in keys_to_del:
-            del global_state_dict[k]
-    
-    
+    extra_state_dict_dict = set_state_dict(model, global_state_dict, local_state_dict_list, training_args)
     training_loss = [[] for i in range(training_args.num_clients)]
     
     # start federated learning
@@ -151,42 +125,10 @@ def main():
             torch.cuda.empty_cache()
             client_id = selected_ids[idx]
             
-            # FIXME: 
-            # fedavg
-            if training_args.mode == 'fedavg':
-                model_to_load = global_state_dict
-                with torch.no_grad():
-                    if 'zero3' in training_args.deepspeed:
-                        load_deepspeed(model_to_load, model, strict=False)
-                    else:
-                        model.load_state_dict(model_to_load, strict=False)    
-            
-            # SFT (no distribution)
-            elif training_args.mode == 'sft':
-                model_to_load = local_state_dict_list[client_id]
-                with torch.no_grad():
-                    if 'zero3' in training_args.deepspeed:
-                        load_deepspeed(model_to_load, model, strict=False)
-                    else:
-                        model.load_state_dict(model_to_load, strict=False)    
-                    
-    
-            elif training_args.mode == 'fedper':
-                 # fedper
-                # first load loca model and then load global model
-                with torch.no_grad():
-                    if 'zero3' in training_args.deepspeed:
-                        load_deepspeed(local_state_dict_list[client_id], model, strict=False)
-                    else:
-                        model.load_state_dict(local_state_dict_list[client_id], strict=False)    
-                    if 'zero3' in training_args.deepspeed:
-                        load_deepspeed(global_state_dict, model, strict=False)
-                    else:
-                        model.load_state_dict(global_state_dict, strict=False) 
-
+            load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args)
             print('model loading done')
             
-
+            ##### simulate online memory insertion & get_batch ####
             sub_dataset = get_dataset_this_round(train_datalists[client_id], curr_round, training_args)
             
             iteration = 0
@@ -212,13 +154,10 @@ def main():
             if training_args.local_rank == 0 or training_args.local_rank == -1: 
                 logger.info(f'Round {curr_round} | train client {client_id} | num samples {len(sub_dataset)}')
 
-             # ===== Train local model on the client side =====
-            trainer = LLaVATrainer(model=model,
-                tokenizer=tokenizer,
-                args=training_args,
-                packing=True,
-                max_seq_length=training_args.model_max_length,
-                **data_module)
+            # ===== Train local model on the client side =====
+            extra_state_dict_dict['client_id'] = client_id
+            extra_state_dict_dict['curr_round'] = curr_round
+            trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
 
             # if curr_round > 0:
             #     path = os.path.join(training_args.state_dir, f"{client_id}_trainer_state.json")
@@ -246,27 +185,29 @@ def main():
                     model.named_parameters()
                 )
                 state_dict.update(non_lora_state_dict)
-                if training_args.local_rank == 0 or training_args.local_rank == -1: 
-                    torch.save(state_dict, output_dir)
                     # model.config.save_pretrained(training_args.output_dir)
                     # model.save_pretrained(training_args.output_dir, state_dict=state_dict)
                     # torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
             else:
-                safe_save_model_for_hf_trainer(trainer=trainer,
-                                            output_dir=output_dir)
+                state_dict = {k: t.detach().cpu().clone() for k, t in model.named_parameters() if t.requires_grad}
+            if (training_args.local_rank == 0 or training_args.local_rank == -1) and training_args.mode != 'pfedpg': 
+                torch.save(state_dict, output_dir)
             local_state_dict_list[client_id] = copy.deepcopy(state_dict)
+            
+            if training_args.mode == 'scaffold':
+                local_auxiliary, auxiliary_delta = trainer.get_auxiliary_param()
+                extra_state_dict_dict['auxiliary_model_list'][client_id] = local_auxiliary
+                extra_state_dict_dict['auxiliary_delta_dict'][client_id] = auxiliary_delta
             
             trainer.deepspeed.empty_partition_cache()
             del trainer
             logger.info(f"done Round {curr_round} client {client_id} | elapsed time {datetime.timedelta(seconds=int(time.time() - start_time))} | ")
         #self.do_server_work(curr_round)
-        # FIXME: fedavg
-        for key in global_state_dict.keys():
-            # global_state_dict[key] = sum([local_state_dict_list[client][key] * sample_num_list[client] / sample_this_round for client in selected_ids])
-            global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
-    
+        
+        aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **extra_state_dict_dict)
+        
         # TODO: Save server model
-        if training_args.local_rank == 0 or training_args.local_rank == -1: 
+        if (training_args.local_rank == 0 or training_args.local_rank == -1) and training_args.mode != 'pfedpg': 
             torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
         
     logger.info("total done\n")

@@ -10,6 +10,8 @@ pip install flash-attn --no-build-isolation
 pip install peft
 pip install bitsandbytes
 pip install pandas kornia opencv-python timm torch_optimizer easydict pycocoevalcap sentencepiece protobuf
+pip install trl==0.8.6
+pip install deepspeed=0.14.0
 ```
 
 # How to run
@@ -21,7 +23,12 @@ Arguments:
 - Note: experiment name **All the models are saved in client_states_$NOTE folder**
 - scenario
 
-- Client for-loop running: `bash train_VLM.sh` (NOT COMPLETE YET)
+- Client for-loop running: `bash train_VLM.sh` --> **Recommand**
+Arguments:
+- Note: experiment name **All the models are saved in client_states_$NOTE folder**
+- Mode: name of method (method in `federated_methods/method_manager.py`)
+- NUM_ITER: number of updates per round in each client
+
 
 2. Eval
 `bash eval.sh`

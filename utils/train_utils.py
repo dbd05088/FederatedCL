@@ -93,7 +93,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load pfedpg')
-        if 'mpt' == model_args.model_type:
+        elif 'mpt' == model_args.model_type:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
             config.attn_config['attn_impl'] = training_args.mpt_attn_impl
             model = LlavaMptForCausalLM.from_pretrained(
@@ -238,8 +238,14 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
-    for p in model.get_model().mm_projector.parameters():
-        p.requires_grad = True
+    if training_args.mode == 'pfedpg':
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = False
+        model.lm_head.requires_grad_(False)
+    else:
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = True
+    
     
     if training_args.bits in [4, 8]:
         model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
@@ -265,7 +271,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
-    
     return model, tokenizer, data_args
 
 def find_all_linear_names(model):
