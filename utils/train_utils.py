@@ -12,6 +12,7 @@ from transformers import Trainer
 from peft.tuners.lora import LoraLayer
 from models.bunny.prompt_tuning_model import Bunny_PT
 from models.llava.prompt_tuning_model import Llava_PT
+from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
 
 ACCESS_TOKEN = "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"
 
@@ -20,8 +21,10 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     attn_implementation = "flash_attention_2"
     assert model_args.vision_tower is not None
     
-    if training_args.mode == 'pfedpg':
-        assert training_args.lora_enable == False, "no lora in pFedPG"
+    if training_args.mode == 'pfedpg' or training_args.mode == 'feddat':
+        assert training_args.lora_enable == False, "no lora in pFedPG and feddat"
+    if training_args.mode == 'fedat':
+        assert training_args.gradient_accumulation_steps == 1
     
     # load tokenizer
     # for llava
@@ -93,6 +96,16 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load pfedpg')
+        elif training_args.mode == 'feddat':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaAdapterForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load feddat')
         elif 'mpt' == model_args.model_type:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
             config.attn_config['attn_impl'] = training_args.mpt_attn_impl
@@ -238,10 +251,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
+    # FIXME: freeze mm_projector for feddat or not?
     if training_args.mode == 'pfedpg':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         model.lm_head.requires_grad_(False)
+    elif training_args.mode == 'feddat':
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = True
+        for n, p in model.named_parameters():
+            if 'adapter_' in n:
+                p.requires_grad = True
     else:
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
@@ -270,7 +290,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             if 'lm_head' in name or 'embed_tokens' in name:
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
-                        module = module.to(torch.bfloat16)
+                        module = module.to(torch.bfloat16)                        
     return model, tokenizer, data_args
 
 def find_all_linear_names(model):
