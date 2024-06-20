@@ -259,6 +259,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     elif training_args.mode == 'feddat':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
+        model.lm_head.requires_grad_(False)
         for n, p in model.named_parameters():
             if 'adapter_' in n:
                 p.requires_grad = True
@@ -290,7 +291,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             if 'lm_head' in name or 'embed_tokens' in name:
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
-                        module = module.to(torch.bfloat16)                        
+                        module = module.to(torch.bfloat16)
     return model, tokenizer, data_args
 
 def find_all_linear_names(model):

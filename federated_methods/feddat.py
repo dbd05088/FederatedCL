@@ -83,11 +83,10 @@ def feddat_aggregate_state_dict(global_state_dict, local_state_dict_list, select
         # global_state_dict[key] = sum([local_state_dict_list[client][key] * sample_num_list[client] / sample_this_round for client in selected_ids])
         if 'adapter_1' in key:
             global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
-    
-    for key in global_state_dict.keys():
-        if 'adapter_2' in key:
-            target_key = key.replace('adapter_2', 'adatper_1')
-            global_state_dict[key].data.copy_(global_state_dict[target_key])
+            target_key = key.replace('adapter_1', 'adapter_2')
+            global_state_dict[target_key] = global_state_dict[key].clone()
+        elif 'mm_projector' in key:
+            global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
         
 def feddat_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
     trainer = LLaVATrainerFEDDAT(model=model,
