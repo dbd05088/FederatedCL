@@ -23,7 +23,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     
     if training_args.mode == 'pfedpg' or training_args.mode == 'feddat':
         assert training_args.lora_enable == False, "no lora in pFedPG and feddat"
-    if training_args.mode == 'fedat':
+    if training_args.mode == 'feddat':
         assert training_args.gradient_accumulation_steps == 1
     
     # load tokenizer
@@ -257,12 +257,16 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             p.requires_grad = False
         model.lm_head.requires_grad_(False)
     elif training_args.mode == 'feddat':
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = True
-        model.lm_head.requires_grad_(False)
-        for n, p in model.named_parameters():
-            if 'adapter_' in n:
+        if training_args.is_eval:
+            model.activate_gating()
+        else:
+            for p in model.get_model().mm_projector.parameters():
                 p.requires_grad = True
+            model.lm_head.requires_grad_(False)
+            for n, p in model.named_parameters():
+                if 'adapter_' in n:
+                    p.requires_grad = True
+        
     else:
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
