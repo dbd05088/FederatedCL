@@ -21,9 +21,9 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     attn_implementation = "flash_attention_2"
     assert model_args.vision_tower is not None
     
-    if training_args.mode == 'pfedpg' or training_args.mode == 'feddat':
-        assert training_args.lora_enable == False, "no lora in pFedPG and feddat"
-    if training_args.mode == 'feddat':
+    if training_args.mode == 'pfedpg' or training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
+        assert training_args.lora_enable == False, "no lora in pFedPG and feddat  and fedadapter"
+    if training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
         assert training_args.gradient_accumulation_steps == 1
     
     # load tokenizer
@@ -96,7 +96,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load pfedpg')
-        elif training_args.mode == 'feddat':
+        elif training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaAdapterForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
@@ -259,6 +259,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     elif training_args.mode == 'feddat':
         if training_args.is_eval:
             model.activate_gating()
+            model.set_active_adapter('adapter_0')
         else:
             for p in model.get_model().mm_projector.parameters():
                 p.requires_grad = True
@@ -266,6 +267,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             for n, p in model.named_parameters():
                 if 'adapter_' in n:
                     p.requires_grad = True
+    elif training_args.mode == 'fedadapter':
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = True
+        model.lm_head.requires_grad_(False)
+        for n, p in model.named_parameters():
+            if 'adapter_1' in n:
+                p.requires_grad = True
+            elif 'adapter_0' in n or 'adapter_2' in n:
+                p.requires_grad = False
+        model.deactivate_gating()
+        model.set_active_adapter('adapter_1')
         
     else:
         for p in model.get_model().mm_projector.parameters():
