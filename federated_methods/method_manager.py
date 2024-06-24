@@ -2,12 +2,13 @@ from typing import Callable, Tuple, Type, Dict
 
 from federated_methods.fedavg import fedavg_load_state_dict, fedavg_aggregate_state_dict, fedavg_create_trainer
 from federated_methods.sft import sft_load_state_dict
-from federated_methods.fedper import fedper_set_state_dict, fedper_load_state_dict
+from federated_methods.fedper import fedper_set_state_dict, fedper_load_state_dict, fedper_half_set_state_dict, fedper_8_set_state_dict
 from federated_methods.scaffold import scaffold_set_state_dict, scaffold_aggregate_state_dict, scaffold_create_trainer
 from federated_methods.feddyn import feddyn_set_state_dict, feddyn_aggregate_state_dict, feddyn_create_trainer
 from federated_methods.pfedpg import pfedpg_set_state_dict, pfedpg_aggregate_state_dict, pfedpg_create_trainer
 from federated_methods.fedyogi import fedyogi_set_state_dict, fedyogi_aggregate_state_dict
 from federated_methods.feddat import feddat_set_state_dict, feddat_load_state_dict, feddat_create_trainer, feddat_aggregate_state_dict
+from federated_methods.fedadapter import fedadapter_create_trainer
 
 def dummy_function(*args):
     return {}
@@ -20,6 +21,10 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
     elif mode == 'fedper':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedper_set_state_dict, fedper_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
+    elif mode == 'fedper_half':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedper_half_set_state_dict, fedper_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
+    elif mode == 'fedper_8':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedper_8_set_state_dict, fedper_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
     elif mode == 'scaffold':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = scaffold_set_state_dict, fedavg_load_state_dict, scaffold_create_trainer, scaffold_aggregate_state_dict
     elif mode == 'feddyn':
@@ -30,6 +35,8 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedyogi_set_state_dict, fedavg_load_state_dict, fedavg_create_trainer, fedyogi_aggregate_state_dict
     elif mode == 'feddat':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = feddat_set_state_dict, feddat_load_state_dict, feddat_create_trainer, feddat_aggregate_state_dict
+    elif mode == 'fedadapter':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, fedadapter_create_trainer, fedavg_aggregate_state_dict
     else:
         raise NotImplementedError(mode)
     return set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules
