@@ -9,6 +9,7 @@ from federated_methods.pfedpg import pfedpg_set_state_dict, pfedpg_aggregate_sta
 from federated_methods.fedyogi import fedyogi_set_state_dict, fedyogi_aggregate_state_dict
 from federated_methods.feddat import feddat_set_state_dict, feddat_load_state_dict, feddat_create_trainer, feddat_aggregate_state_dict
 from federated_methods.fedadapter import fedadapter_create_trainer
+from federated_methods.fedprox import fedprox_set_state_dict, fedprox_create_trainer
 
 def dummy_function(*args):
     return {}
@@ -37,6 +38,8 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = feddat_set_state_dict, feddat_load_state_dict, feddat_create_trainer, feddat_aggregate_state_dict
     elif mode == 'fedadapter':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, fedadapter_create_trainer, fedavg_aggregate_state_dict
+    elif mode == 'fedprox':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedprox_set_state_dict, fedavg_load_state_dict, fedprox_create_trainer, fedavg_aggregate_state_dict
     else:
         raise NotImplementedError(mode)
     return set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules
