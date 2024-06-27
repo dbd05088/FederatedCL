@@ -89,9 +89,9 @@ class LlamaDecoderAdapterLayer(LlamaDecoderLayer):
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
-        # hidden_states = residual + hidden_states
+        hidden_states = residual + hidden_states
         # feddat
-        hidden_states = self.adapter(hidden_states, residual)
+        hidden_states = self.adapter(hidden_states, hidden_states)
 
         outputs = (hidden_states,)
 

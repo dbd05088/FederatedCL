@@ -106,7 +106,7 @@ def kl_loss(output, target, temp=3):
         p = F.log_softmax(output / temp, dim=1)
         q = F.softmax(target / temp, dim=1)
 
-    l_kl = F.kl_div(p, q, reduction="batchmean") #FIXME
+    l_kl = F.kl_div(p, q, reduction="mean") #FIXME
     l_kl = l_kl * temp**2
     return l_kl
 
