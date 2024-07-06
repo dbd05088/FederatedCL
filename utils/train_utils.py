@@ -14,6 +14,7 @@ from models.bunny.prompt_tuning_model import Bunny_PT
 from models.llava.prompt_tuning_model import Llava_PT
 from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
 from models.duallora.dualloralayer import DualLoraLayer
+from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
 import copy
 ACCESS_TOKEN = "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"
 
@@ -108,6 +109,15 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load feddat')
+        elif training_args.mode == 'fedsim' and training_args.is_eval:
+            assert model_args.model_type != 'mpt'
+            model = FEDSIMLlavaLlamaForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
         elif 'mpt' == model_args.model_type:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
             config.attn_config['attn_impl'] = training_args.mpt_attn_impl
