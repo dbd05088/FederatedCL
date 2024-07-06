@@ -38,6 +38,8 @@ import os
 class TrainingArguments(transformers.TrainingArguments):
     is_eval: bool = False
     round_to_eval: int = None
+    eval_temp: float = 0.2
+    eval_server: bool = True
     
     num_iter:int = field(default=100)
 
@@ -60,7 +62,10 @@ class TrainingArguments(transformers.TrainingArguments):
     num_rounds: int = 20
     iter_per_round: int = 1
     state_dir: str = field(default="./client_states")
-    
+    final_lr: float = field(default=1e-6)
+    mm_final_lr: float = field(default=1e-6)
+    # prompt tuning args
+    prompt_num: int = field(default=100)
     # dataloader_num_workers
     optim: str = field(default="adamw_torch")
     #lr_scheduler_type
