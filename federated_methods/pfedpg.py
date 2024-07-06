@@ -14,17 +14,27 @@ from transformers import Trainer
 import bitsandbytes
 import os
 
-PROMPT_NUM = 100
+PROMPT_NUM = 200
 
 def pfedpg_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
     prompt_generator = Prompt_Generator(512, PROMPT_NUM, model.base_model.mm_projector[-1].out_features, training_args.num_clients).cuda()
-    pgen_optim = torch.optim.SGD(prompt_generator.parameters(), lr=0.005)
-    return {
-        'prompt_generator': prompt_generator,
-        'pgen_optim': pgen_optim,
-        'init_prompt':{},
-    }
-
+    # pgen_optim = torch.optim.SGD(prompt_generator.parameters(), lr=0.005)
+    # return {
+    #     'prompt_generator': prompt_generator,
+    #     'pgen_optim': pgen_optim,
+    #     'init_prompt':{client_id:prompt_generator(client_id) for client_id in range(training_args.num_clients)},
+    # }
+    with torch.no_grad():
+        for client_id in range(training_args.num_clients):
+            local_state_dict_list[client_id]['lang_prompt'] = prompt_generator(client_id).detach().cpu()
+    # local_state_dict_list.extend([prompt_generator(client_id) for client_id in range(training_args.num_clients)])
+    
+    # remove lang_prompt in globalstatedict
+    # keys_to_del = ['lang_prompt']
+    # for k in keys_to_del:
+    #     del global_state_dict[k]
+    
+    return {}
 
 def pfedpg_aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **kwargs):
     init_prompt = kwargs.get('init_prompt')
@@ -50,25 +60,25 @@ def pfedpg_aggregate_state_dict(global_state_dict, local_state_dict_list, select
             torch.save(local_state_dict_list[client_id], output_dir)
     
 def pfedpg_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
-    client_id = extra_state_dict_dict['client_id']
-    init_prompt = extra_state_dict_dict['prompt_generator'](client_id)
-    extra_state_dict_dict['init_prompt'][client_id] = init_prompt.clone()
+    # client_id = extra_state_dict_dict['client_id']
+    # init_prompt = extra_state_dict_dict['prompt_generator'](client_id)
+    # extra_state_dict_dict['init_prompt'][client_id] = init_prompt.clone()
     trainer = LLaVATrainerPFEDPG(model=model,
         tokenizer=tokenizer,
         args=training_args,
         packing=True,
         max_seq_length=training_args.model_max_length,
         **data_module,
-        init_prompt=init_prompt
+        # init_prompt=init_prompt
         )
     return trainer
 
 
 class LLaVATrainerPFEDPG(LLaVATrainer):
-    def __init__(self, init_prompt, **kwargs):
-        super(LLaVATrainerPFEDPG, self).__init__(**kwargs)
+    # def __init__(self, init_prompt, **kwargs):
+    #     super(LLaVATrainerPFEDPG, self).__init__(**kwargs)
         
-        self.model.set_prompt(init_prompt)
+    #     self.model.set_prompt(init_prompt)
 
     def create_optimizer(self):
         """
