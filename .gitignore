@@ -1,7 +1,9 @@
+$SCRATCH/
+
 dataset/
 tensorboard/
 client_states_*/
-eval_results/
+eval_results*/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
