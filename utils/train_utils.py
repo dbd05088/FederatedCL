@@ -13,7 +13,8 @@ from peft.tuners.lora import LoraLayer
 from models.bunny.prompt_tuning_model import Bunny_PT
 from models.llava.prompt_tuning_model import Llava_PT
 from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
-
+from models.duallora.dualloralayer import DualLoraLayer
+import copy
 ACCESS_TOKEN = "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"
 
 def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args):
@@ -92,6 +93,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
@@ -211,9 +213,14 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             task_type="CAUSAL_LM",
         )
         
+        if training_args.mode in ['fedsim', 'apfl', 'ditto']:
+            from models.duallora.dualloramodel import DualLoraModel
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['DUALLORA'] = DualLoraModel
+            lora_config.peft_type = 'DUALLORA'
+        
         # rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
-
 
     if 'llava' in model_args.model_name_or_path.lower():
         if model_args.version in conversation_lib_llava.conv_templates:
@@ -278,10 +285,26 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 p.requires_grad = False
         model.deactivate_gating()
         model.set_active_adapter('adapter_1')
+    
+    elif training_args.mode in [ 'fedsim', 'ditto', 'apfl']:
+        model.get_model().global_mm_projector = model.get_model().mm_projector
+        model.get_model().local_mm_projector = copy.deepcopy(model.get_model().mm_projector)
+        model.get_model().mm_projector = None
         
+        if training_args.is_eval:
+            for name, module in model.named_modules():
+                if isinstance(module, DualLoraLayer):
+                    module.set_state('lora2')
+        else:
+            for name, module in model.named_modules():
+                if isinstance(module, DualLoraLayer):
+                    module.set_state('lora1')
+                    module.activate_all()
+            model.lm_head.requires_grad_(False)
     else:
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
+        model.lm_head.requires_grad_(False)
     
     
     if training_args.bits in [4, 8]:

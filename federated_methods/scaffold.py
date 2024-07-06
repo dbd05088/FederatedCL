@@ -3,6 +3,10 @@ from utils.train_utils import load_deepspeed, get_peft_state_maybe_zero_3, get_p
 from transformers import TrainerCallback
 from models.llava.llava_trainer import LLaVATrainer
 import copy
+from typing import Optional, Dict, Union, Any
+from torch import nn
+from transformers.trainer import is_sagemaker_mp_enabled
+from collections import OrderedDict
 
 def scaffold_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
     global_auxiliary = {}               # c in SCAFFOLD
@@ -18,6 +22,8 @@ def scaffold_set_state_dict(model, global_state_dict, local_state_dict_list, tra
     }
 
 def scaffold_aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **kwargs):
+    # num_selection -= 1
+    # selected_ids.remove(6)
     for key in global_state_dict.keys():
         # global_state_dict[key] = sum([local_state_dict_list[client][key] * sample_num_list[client] / sample_this_round for client in selected_ids])
         global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
@@ -25,7 +31,7 @@ def scaffold_aggregate_state_dict(global_state_dict, local_state_dict_list, sele
     global_auxiliary, auxiliary_delta_dict = kwargs.get('global_auxiliary'), kwargs.get('auxiliary_delta_dict')
     for key in global_auxiliary.keys():
         delta_auxiliary = sum([auxiliary_delta_dict[client][key] for client in selected_ids]) 
-        global_auxiliary[key] += delta_auxiliary / training_args.num_clients
+        global_auxiliary[key] += delta_auxiliary / num_selection#training_args.num_clients
         
 def scaffold_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
     trainer = LLaVATrainerSCAFFOLD(model=model,
@@ -38,7 +44,7 @@ def scaffold_create_trainer(model, tokenizer, training_args, data_module, extra_
         global_auxiliary=extra_state_dict_dict['global_auxiliary'],
         local_auxiliary=extra_state_dict_dict['auxiliary_model_list'][extra_state_dict_dict['client_id']]
         )
-    trainer.add_callback(SCAFFOLD_Callback(trainer.correction, model))
+    # trainer.add_callback(SCAFFOLD_Callback(trainer.correction, model))
     return trainer
 
 class LLaVATrainerSCAFFOLD(LLaVATrainer):
@@ -64,6 +70,33 @@ class LLaVATrainerSCAFFOLD(LLaVATrainer):
                     auxiliary_new_para[name] = (self.global_state[name].cuda() - param) / (self.args.max_steps * self.args.learning_rate) - self.correction[name]
                     auxiliary_delta_para[name] = auxiliary_new_para[name] - self.local_auxiliary[name]
         return auxiliary_new_para, auxiliary_delta_para
+
+    def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+
+        if is_sagemaker_mp_enabled():
+            loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
+            return loss_mb.reduce_mean().detach().to(self.args.device)
+
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, inputs)
+
+        if self.args.n_gpu > 1:
+            loss = loss.mean()  # mean() to average on multi-gpu parallel training
+
+        if self.use_apex:
+            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            self.accelerator.backward(loss)
+
+        model_params = OrderedDict(self.model.named_parameters())
+        for name, param in model_params.items():
+            if param.grad is not None:
+                model_params[name].grad.data += (self.correction[name])
+
+        return loss.detach() / self.args.gradient_accumulation_steps
 
 class SCAFFOLD_Callback(TrainerCallback):
     def __init__(self, correction, model):

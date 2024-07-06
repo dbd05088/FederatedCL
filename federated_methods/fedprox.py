@@ -34,7 +34,7 @@ class LLaVATrainerFEDPROX(LLaVATrainer):
             loss = return_values
 
         # Apply FedProx Loss
-        for name, param in model.named_parameters():
+        for name, param in model.module.named_parameters():
             # only trainable parameters
             if not param.requires_grad:
                 continue

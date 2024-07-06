@@ -94,10 +94,9 @@ def main():
     )
     global_state_dict.update(non_lora_state_dict)
     local_state_dict_list = [copy.deepcopy(global_state_dict) for i in range(training_args.num_clients)]
-    
+    local_state_dict_keys = local_state_dict_list[0].keys()
     extra_state_dict_dict = set_state_dict(model, global_state_dict, local_state_dict_list, training_args)
     training_loss = [[] for i in range(training_args.num_clients)]
-    
     # start federated learning
     start_time = time.time()
     frac_clients = 1
@@ -106,9 +105,11 @@ def main():
     num_iterations = training_args.num_iter
     total_batchsize = training_args.per_gpu_train_batch_size*training_args.world_size*training_args.gradient_accumulation_steps
     init_lr = training_args.learning_rate
-    final_lr = 1e-6
+    mm_init_lr = training_args.mm_projector_lr
+    final_lr = training_args.final_lr
+    mm_final_lr = training_args.mm_final_lr
     lr_step = (init_lr - final_lr)/training_args.num_rounds
-    
+    mm_lr_step = (mm_init_lr - mm_final_lr)/training_args.num_rounds
     for curr_round in range(training_args.num_rounds):
         # clients turn
         cids = np.arange(training_args.num_clients).tolist()
@@ -119,7 +120,7 @@ def main():
         # print(f"Round {curr_round} | selected_ids: {selected_ids}\n")
         # selected_ids = cids
         training_args.learning_rate = init_lr - lr_step*curr_round
-        training_args.mm_projector_lr = init_lr - lr_step*curr_round
+        training_args.mm_projector_lr = mm_init_lr - mm_lr_step*curr_round
         for idx in range(num_selection):
             model.config.use_cache = False
             torch.cuda.empty_cache()
@@ -190,9 +191,17 @@ def main():
                     # torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
             else:
                 state_dict = {k: t.detach().cpu().clone() for k, t in model.named_parameters() if t.requires_grad}
-            if (training_args.local_rank == 0 or training_args.local_rank == -1) and training_args.mode != 'pfedpg': 
-                torch.save(state_dict, output_dir)
+            # if (training_args.local_rank == 0 or training_args.local_rank == -1) and training_args.mode != 'pfedpg':
             local_state_dict_list[client_id] = copy.deepcopy(state_dict)
+            
+            k_to_del = []
+            for k in state_dict.keys():
+                if k not in local_state_dict_keys:
+                    k_to_del.append(k)
+            for k in k_to_del:
+                del state_dict[k]
+            if (training_args.local_rank == 0 or training_args.local_rank == -1):
+                torch.save(state_dict, output_dir)
             
             if training_args.mode == 'scaffold':
                 local_auxiliary, auxiliary_delta = trainer.get_auxiliary_param()
@@ -207,9 +216,14 @@ def main():
         aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **extra_state_dict_dict)
         
         # TODO: Save server model
-        if (training_args.local_rank == 0 or training_args.local_rank == -1) and training_args.mode != 'pfedpg': 
+        # if (training_args.local_rank == 0 or training_args.local_rank == -1) and training_args.mode != 'pfedpg': 
+        if (training_args.local_rank == 0 or training_args.local_rank == -1): 
+            # torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
+            # if training_args.mode == 'scaffold':
+            #     if (curr_round+1) % 10 == 0:
+            #         torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
+            # else:
             torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
-        
     logger.info("total done\n")
 
 
