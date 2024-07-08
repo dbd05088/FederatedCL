@@ -67,3 +67,23 @@ with open(f'{dir}/train/dataset-{task_idx}.json', 'w') as json_file:
     json.dump(train_json_data, json_file, indent=4)
 with open(f'{dir}/test/dataset-{task_idx}.json', 'w') as json_file:
     json.dump(test_json_data, json_file, indent=4)
+    
+    
+from glob import glob
+import cv2
+
+img_files = glob('./dataset/DiDeMoSV/full/images/*.jpg')
+for img_file in img_files:
+    file_name = img_file.split('/')[-1]
+    srcBGR = cv2.imread(img_file)
+    destRGB = cv2.cvtColor(srcBGR, cv2.COLOR_BGR2RGB)
+    cv2.imwrite(f'./dataset/DiDeMoSV/full/images_rgb/{file_name}', destRGB)
+
+# Renaming folders
+base_path = './dataset/DiDeMoSV/full'
+
+# Rename 'images' to 'images_bgr'
+os.rename(os.path.join(base_path, 'images'), os.path.join(base_path, 'images_bgr'))
+
+# Rename 'images_rgb' to 'images'
+os.rename(os.path.join(base_path, 'images_rgb'), os.path.join(base_path, 'images'))
