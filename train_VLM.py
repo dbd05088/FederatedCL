@@ -96,11 +96,13 @@ def main():
     local_state_dict_list = [copy.deepcopy(global_state_dict) for i in range(training_args.num_clients)]
     local_state_dict_keys = local_state_dict_list[0].keys()
     extra_state_dict_dict = set_state_dict(model, global_state_dict, local_state_dict_list, training_args)
+
     training_loss = [[] for i in range(training_args.num_clients)]
     # start federated learning
     start_time = time.time()
     frac_clients = 1
-    memory = [[]]*training_args.num_clients
+    # memory = [[]]*training_args.num_clients
+    memory = [[] for id in range(training_args.num_clients)]
     memory_size = 50000
     num_iterations = training_args.num_iter
     total_batchsize = training_args.per_gpu_train_batch_size*training_args.world_size*training_args.gradient_accumulation_steps
@@ -148,6 +150,11 @@ def main():
                         datalist.extend(batch[:])
                         iteration -= 1
             
+            if len(datalist) < num_iterations*total_batchsize:
+                batch = random.sample(memory[client_id], k=min(len(memory[client_id]), total_batchsize))
+                mul = (total_batchsize//len(batch)) + 1
+                batch = (batch*mul)[:total_batchsize]
+                datalist.extend(batch[:])
             data_module = make_supervised_data_module(client_data=datalist, # sub_dataset
                                                 tokenizer=tokenizer,
                                                 data_args=copy.deepcopy(data_args))
