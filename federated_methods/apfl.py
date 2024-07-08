@@ -65,7 +65,7 @@ def apfl_create_trainer(model, tokenizer, training_args, data_module, extra_stat
     return trainer
 
 class LLaVATrainerAPFL(LLaVATrainer):
-    def __init__(self, global_state, **kwargs):
+    def __init__(self, **kwargs):
         super(LLaVATrainerAPFL, self).__init__(**kwargs)
         self.alpha=0.5
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -84,7 +84,7 @@ class LLaVATrainerAPFL(LLaVATrainer):
         loss_local, local_outputs = super(LLaVATrainerAPFL, self).compute_loss(model, inputs, return_outputs=True) 
         
         loss = loss_global + loss_local
-        model.module.base_model.model.model.mm_projector = model.module.base_model.model.model.global_mm_projector
+        model.module.base_model.model.model.mm_projector = None
         return (loss, outputs) if return_outputs else loss
 
     def _inner_training_loop(
@@ -423,9 +423,8 @@ class LLaVATrainerAPFL(LLaVATrainer):
                 if step % args.gradient_accumulation_steps == 0:
                     self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
 
-                # feddat: first update 'adapter_1
                 with self.accelerator.accumulate(model):
-                    tr_loss_step = self.training_step(model, inputs, 'adapter_1')
+                    tr_loss_step = self.training_step(model, inputs)
 
                 if (
                     args.logging_nan_inf_filter
@@ -513,7 +512,7 @@ class LLaVATrainerAPFL(LLaVATrainer):
                         grad_alpha += dif.view(-1).T.dot(grad.view(-1))
                     grad_alpha += 0.02 * self.alpha
                     self.alpha = self.alpha - self.args.learning_rate * grad_alpha
-                    self.alpha = np.clip(self.alpha.item(), 0.0, 1.0)
+                    self.alpha = np.clip(self.alpha, 0.0, 1.0)
 
                     
                     self.state.global_step += 1
