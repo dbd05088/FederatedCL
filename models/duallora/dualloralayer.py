@@ -146,23 +146,41 @@ class DualLoraLayer(BaseTunerLayer):
 
         if adapter_name in self.lora1_A.keys():
             if init_lora_weights is True:
-                # initialize A the same way as the default for nn.Linear and B to zero
-                # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
-                nn.init.kaiming_uniform_(self.lora1_A[adapter_name].weight, a=math.sqrt(5))
-                nn.init.kaiming_uniform_(self.lora2_A[adapter_name].weight, a=math.sqrt(5))
+                # Generate initialization values once
+                init_A = torch.empty_like(self.lora1_A[adapter_name].weight)
+                nn.init.kaiming_uniform_(init_A, a=math.sqrt(5))
+                
+                # Assign the same values to both lora1 and lora2
+                self.lora1_A[adapter_name].weight.data.copy_(init_A)
+                self.lora2_A[adapter_name].weight.data.copy_(init_A)
+
             elif init_lora_weights.lower() == "gaussian":
-                nn.init.normal_(self.lora1_A[adapter_name].weight, std=1 / self.r[adapter_name])
-                nn.init.normal_(self.lora2_A[adapter_name].weight, std=1 / self.r[adapter_name])
+                std = 1 / self.r[adapter_name]
+                init_A = torch.empty_like(self.lora1_A[adapter_name].weight)
+                nn.init.normal_(init_A, std=std)
+                
+                self.lora1_A[adapter_name].weight.data.copy_(init_A)
+                self.lora2_A[adapter_name].weight.data.copy_(init_A)
+
             else:
                 raise ValueError(f"Unknown initialization {init_lora_weights=}")
+            
+            # Initialize B weights to zero for both lora1 and lora2
             nn.init.zeros_(self.lora1_B[adapter_name].weight)
             nn.init.zeros_(self.lora2_B[adapter_name].weight)
+
         if adapter_name in self.lora1_embedding_A.keys():
-            # initialize a the same way as the default for nn.linear and b to zero
+            # Initialize embedding A to zero for both lora1 and lora2
             nn.init.zeros_(self.lora1_embedding_A[adapter_name])
-            nn.init.normal_(self.lora1_embedding_B[adapter_name])
             nn.init.zeros_(self.lora2_embedding_A[adapter_name])
-            nn.init.normal_(self.lora2_embedding_B[adapter_name])
+
+            # Generate initialization values once for embedding B
+            init_B = torch.empty_like(self.lora1_embedding_B[adapter_name])
+            nn.init.normal_(init_B)
+
+            # Assign the same values to both lora1 and lora2 embedding B
+            self.lora1_embedding_B[adapter_name].data.copy_(init_B)
+            self.lora2_embedding_B[adapter_name].data.copy_(init_B)
     
     def reset_lora1_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is False:

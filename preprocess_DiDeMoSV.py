@@ -72,6 +72,8 @@ with open(f'{dir}/test/dataset-{task_idx}.json', 'w') as json_file:
 from glob import glob
 import cv2
 
+os.makedirs('./dataset/DiDeMoSV/full/images_rgb', exist_ok=True)
+
 img_files = glob('./dataset/DiDeMoSV/full/images/*.jpg')
 for img_file in img_files:
     file_name = img_file.split('/')[-1]
