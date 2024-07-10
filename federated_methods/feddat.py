@@ -35,6 +35,8 @@ from transformers.integrations import hp_params
 from transformers.trainer_callback import TrainerState
 from transformers.training_args import ParallelMode
 
+from models.feddat_lora.tripleloralayer import TripleLoraLayer
+
 if is_accelerate_available():
     from accelerate import skip_first_batches
     from accelerate import __version__ as accelerate_version
@@ -52,38 +54,34 @@ logger = logging.get_logger(__name__)
 
 
 def feddat_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
-    # personalized layer = 'adapter_0'
-    # shard layer = 'adapter_1', 'adapter_2'
-    layers_to_del = 'adapter_0'
-    # layers_to_del = layer_num[-len(layer_num)//2:]
+    # personalized layer = 'lora2'
+    # shard layer = 'lora1', 'lora3'
     keys_to_del = []
     for k in global_state_dict.keys():
-        if layers_to_del in k:
+        if 'lora2' in k:
             keys_to_del.append(k)
     for k in keys_to_del:
         del global_state_dict[k]
+    
+    local_keys_to_del = []
+    for k in local_state_dict_list[0].keys():
+        if 'lora1' in k or 'lora3' in k:
+            local_keys_to_del.append(k)
+    for client_id in range(training_args.num_clients):
+        for k in local_keys_to_del:
+            del local_state_dict_list[client_id][k]
+    for name, module in model.named_modules():
+        if isinstance(module, TripleLoraLayer):
+            module.deactivate_lora3()
     return {}
-
-def feddat_load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args):
-    # first load loca model and then load global model
-    with torch.no_grad():
-        if 'zero3' in training_args.deepspeed:
-            load_deepspeed(local_state_dict_list[client_id], model, strict=False)
-        else:
-            model.load_state_dict(local_state_dict_list[client_id], strict=False)    
-        if 'zero3' in training_args.deepspeed:
-            load_deepspeed(global_state_dict, model, strict=False)
-        else:
-            model.load_state_dict(global_state_dict, strict=False) 
-            
 
 @torch.no_grad()
 def feddat_aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **kwargs):
     for key in global_state_dict.keys():
         # global_state_dict[key] = sum([local_state_dict_list[client][key] * sample_num_list[client] / sample_this_round for client in selected_ids])
-        if 'adapter_1' in key:
+        if 'lora1' in key:
             global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
-            target_key = key.replace('adapter_1', 'adapter_2')
+            target_key = key.replace('lora1', 'lora3')
             global_state_dict[target_key] = global_state_dict[key].clone()
         elif 'mm_projector' in key:
             global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
@@ -111,64 +109,6 @@ def kl_loss(output, target, temp=3):
     return l_kl
 
 class LLaVATrainerFEDDAT(LLaVATrainer):
-    def create_optimizer(self):
-        opt_model = self.model
-
-        if self.optimizer is None:
-            decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
-            decay_parameters = [name for name in decay_parameters if "bias" not in name]
-            if self.args.mm_projector_lr is not None:
-                projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name or "vision_tower" in name]
-                optimizer_grouped_parameters = [
-                    {
-                        "params": [
-                            p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in projector_parameters and p.requires_grad)
-                        ],
-                        "weight_decay": self.args.weight_decay,
-                        "lr": self.args.mm_projector_lr,
-                    },
-                    {
-                        "params": [
-                            p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n in projector_parameters and p.requires_grad)
-                        ],
-                        "weight_decay": 0.0,
-                        "lr": self.args.mm_projector_lr,
-                    },
-                    {
-                        "params": [
-                            p for n, p in opt_model.named_parameters() if ('adpater_' in n)
-                        ],
-                        "weight_decay": self.args.weight_decay,
-                        
-                    },
-                ]
-            else:
-                optimizer_grouped_parameters = [
-                    {
-                        "params": [
-                            p for n, p in opt_model.named_parameters() if ('adapter_' in n)
-                        ],
-                        "weight_decay": self.args.weight_decay,
-                    },
-                ]
-
-            optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
-
-            self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
-            if optimizer_cls.__name__ == "Adam8bit":
-                manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
-
-                skipped = 0
-                for module in opt_model.modules():
-                    if isinstance(module, nn.Embedding):
-                        skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
-                        print(f"skipped {module}: {skipped/2**20}M params")
-                        manager.register_module_override(module, "weight", {"optim_bits": 32})
-                        self.logger.debug(f"bitsandbytes: will optimize {module} in fp32")
-                print(f"skipped: {skipped/2**20}M params")
-
-        return self.optimizer
-    
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], update_adapter) -> torch.Tensor:
         model.train()
         inputs = self._prepare_inputs(inputs)
@@ -191,24 +131,30 @@ class LLaVATrainerFEDDAT(LLaVATrainer):
 
         return loss.detach() / self.args.gradient_accumulation_steps
 
-    def compute_loss(self, model, inputs, return_outputs=False, update_adapter='adapter_1'):
+    def compute_loss(self, model, inputs, return_outputs=False, update_adapter='lora1'):
         # feddat
-        if update_adapter == 'adapter_1':
+        if update_adapter == 'lora1':
             # get logits of all adapters
             with torch.no_grad():
-                model.module.activate_gating()
+                for name, module in model.module.named_modules():
+                    if isinstance(module, TripleLoraLayer):
+                        module.set_state('gate')
                 _, outputs = super(LLaVATrainerFEDDAT, self).compute_loss(
                         model, inputs, return_outputs=True
                     )
                 outputs_target = outputs['logits']
             #update only server adapter
-            model.module.deactivate_gating()
-            model.module.set_active_adapter('adapter_1')
+            for name, module in model.module.named_modules():
+                if isinstance(module, TripleLoraLayer):
+                    module.set_state('lora1')
+                    module.activate_lora1()
             
-        elif update_adapter == 'adapter_0':
+        elif update_adapter == 'lora2':
             outputs_target = self.outputs_1
-            model.module.activate_gating()
-            model.module.set_active_adapter('adapter_0')
+            for name, module in model.module.named_modules():
+                if isinstance(module, TripleLoraLayer):
+                    module.set_state('gate')
+                    module.activate_lora2()
         
         loss, outputs = super(LLaVATrainerFEDDAT, self).compute_loss(model, inputs, return_outputs=True)
         
@@ -304,10 +250,10 @@ class LLaVATrainerFEDDAT(LLaVATrainer):
                 debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
                 
     
-        # feddat: make adapter_2 frozen
-        for n, p in self.model.named_parameters():
-            if 'adapter_2' in n:
-                p.requires_grad = False
+        # feddat: make lora3 frozen
+        for name, module in self.model.named_modules():
+            if isinstance(module, TripleLoraLayer):
+                module.deactivate_lora3()
 
         delay_optimizer_creation = is_sagemaker_mp_enabled() or self.is_fsdp_xla_enabled or self.is_fsdp_enabled
 
@@ -562,9 +508,9 @@ class LLaVATrainerFEDDAT(LLaVATrainer):
                 if step % args.gradient_accumulation_steps == 0:
                     self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
 
-                # feddat: first update 'adapter_1
+                # feddat: first update 'lora1'
                 with self.accelerator.accumulate(model):
-                    tr_loss_step = self.training_step(model, inputs, 'adapter_1')
+                    tr_loss_step = self.training_step(model, inputs, 'lora1')
 
                 if (
                     args.logging_nan_inf_filter
@@ -636,9 +582,9 @@ class LLaVATrainerFEDDAT(LLaVATrainer):
 
                     model.zero_grad()
                     
-                    # feddat:update 'adapter_0'
+                    # feddat:update 'lora2'
                 with self.accelerator.accumulate(model):
-                    tr_loss_step = self.training_step(model, inputs, 'adapter_0')
+                    tr_loss_step = self.training_step(model, inputs, 'lora2')
 
                 if (
                     args.logging_nan_inf_filter
@@ -808,8 +754,9 @@ class LLaVATrainerFEDDAT(LLaVATrainer):
             self._deactivate_neftune(self.model)
             
         # feddat: make adapter_2 frozen
-        for n, p in self.model.named_parameters():
-            if 'adapter_' in n:
-                p.requires_grad = True
+        for name, module in self.model.named_modules():
+            if isinstance(module, TripleLoraLayer):
+                module.activate_all()
+                module.deactivate_lora3()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)

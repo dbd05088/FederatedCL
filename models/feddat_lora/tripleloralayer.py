@@ -29,10 +29,11 @@ from peft.utils.other import transpose
 from peft.tuners.lora.config import LoraConfig
 import copy
 
-class DualLoraLayer(BaseTunerLayer):
+class TripleLoraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("lora1_A", "lora1_B", "lora1_embedding_A", "lora1_embedding_B",
-                           "lora2_A", "lora2_B", "lora2_embedding_A", "lora2_embedding_B")
+                           "lora2_A", "lora2_B", "lora2_embedding_A", "lora2_embedding_B",
+                           "lora3_A", "lora3_B", "lora3_embedding_A", "lora3_embedding_B")
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout")
 
@@ -46,11 +47,15 @@ class DualLoraLayer(BaseTunerLayer):
         self.lora1_B = nn.ModuleDict({})
         self.lora2_A = nn.ModuleDict({})
         self.lora2_B = nn.ModuleDict({})
+        self.lora3_A = nn.ModuleDict({})
+        self.lora3_B = nn.ModuleDict({})
         # For Embedding layer
         self.lora1_embedding_A = nn.ParameterDict({})
         self.lora1_embedding_B = nn.ParameterDict({})
         self.lora2_embedding_A = nn.ParameterDict({})
         self.lora2_embedding_B = nn.ParameterDict({})
+        self.lora3_embedding_A = nn.ParameterDict({})
+        self.lora3_embedding_B = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -111,6 +116,8 @@ class DualLoraLayer(BaseTunerLayer):
         
         self.lora2_A[adapter_name] = copy.deepcopy(self.lora1_A[adapter_name])#nn.Linear(self.in_features, r, bias=False)
         self.lora2_B[adapter_name] = copy.deepcopy(self.lora1_B[adapter_name])#nn.Linear(r, self.out_features, bias=False)
+        self.lora3_A[adapter_name] = copy.deepcopy(self.lora1_A[adapter_name])#nn.Linear(self.in_features, r, bias=False)
+        self.lora3_B[adapter_name] = copy.deepcopy(self.lora1_B[adapter_name])
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -153,6 +160,7 @@ class DualLoraLayer(BaseTunerLayer):
                 # Assign the same values to both lora1 and lora2
                 self.lora1_A[adapter_name].weight.data.copy_(init_A)
                 self.lora2_A[adapter_name].weight.data.copy_(init_A)
+                self.lora3_A[adapter_name].weight.data.copy_(init_A)
 
             elif init_lora_weights.lower() == "gaussian":
                 std = 1 / self.r[adapter_name]
@@ -161,6 +169,7 @@ class DualLoraLayer(BaseTunerLayer):
                 
                 self.lora1_A[adapter_name].weight.data.copy_(init_A)
                 self.lora2_A[adapter_name].weight.data.copy_(init_A)
+                self.lora3_A[adapter_name].weight.data.copy_(init_A)
 
             else:
                 raise ValueError(f"Unknown initialization {init_lora_weights=}")
@@ -168,11 +177,13 @@ class DualLoraLayer(BaseTunerLayer):
             # Initialize B weights to zero for both lora1 and lora2
             nn.init.zeros_(self.lora1_B[adapter_name].weight)
             nn.init.zeros_(self.lora2_B[adapter_name].weight)
+            nn.init.zeros_(self.lora3_B[adapter_name].weight)
 
         if adapter_name in self.lora1_embedding_A.keys():
             # Initialize embedding A to zero for both lora1 and lora2
             nn.init.zeros_(self.lora1_embedding_A[adapter_name])
             nn.init.zeros_(self.lora2_embedding_A[adapter_name])
+            nn.init.zeros_(self.lora3_embedding_A[adapter_name])
 
             # Generate initialization values once for embedding B
             init_B = torch.empty_like(self.lora1_embedding_B[adapter_name])
@@ -181,6 +192,7 @@ class DualLoraLayer(BaseTunerLayer):
             # Assign the same values to both lora1 and lora2 embedding B
             self.lora1_embedding_B[adapter_name].data.copy_(init_B)
             self.lora2_embedding_B[adapter_name].data.copy_(init_B)
+            self.lora3_embedding_B[adapter_name].data.copy_(init_B)
     
     def reset_lora1_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is False:
@@ -219,6 +231,24 @@ class DualLoraLayer(BaseTunerLayer):
             # initialize a the same way as the default for nn.linear and b to zero
             nn.init.zeros_(self.lora2_embedding_A[adapter_name])
             nn.init.normal_(self.lora2_embedding_B[adapter_name])
+    def reset_lora3_parameters(self, adapter_name, init_lora_weights):
+        if init_lora_weights is False:
+            return
+
+        if adapter_name in self.lora3_A.keys():
+            if init_lora_weights is True:
+                # initialize A the same way as the default for nn.Linear and B to zero
+                # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
+                nn.init.kaiming_uniform_(self.lora3_A[adapter_name].weight, a=math.sqrt(5))
+            elif init_lora_weights.lower() == "gaussian":
+                nn.init.normal_(self.lora3_A[adapter_name].weight, std=1 / self.r[adapter_name])
+            else:
+                raise ValueError(f"Unknown initialization {init_lora_weights=}")
+            nn.init.zeros_(self.lora3_B[adapter_name].weight)
+        if adapter_name in self.lora3_embedding_A.keys():
+            # initialize a the same way as the default for nn.linear and b to zero
+            nn.init.zeros_(self.lora3_embedding_A[adapter_name])
+            nn.init.normal_(self.lora3_embedding_B[adapter_name])
 
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
@@ -237,12 +267,16 @@ class DualLoraLayer(BaseTunerLayer):
             self.lora1_B[adapter_name].weight.data = lora_B
             self.lora2_A[adapter_name].weight.data = lora_A
             self.lora2_B[adapter_name].weight.data = lora_B
+            self.lora3_A[adapter_name].weight.data = lora_A
+            self.lora3_B[adapter_name].weight.data = lora_B
         if adapter_name in self.lora1_embedding_A.keys():
             # initialize a the same way as the default for nn.linear and b to zero
             self.lora1_embedding_A[adapter_name].weight.data = lora_A
             self.lora1_embedding_B[adapter_name].weight.data = lora_B
             self.lora2_embedding_A[adapter_name].weight.data = lora_A
             self.lora2_embedding_B[adapter_name].weight.data = lora_B
+            self.lora3_embedding_A[adapter_name].weight.data = lora_A
+            self.lora3_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
 
     def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
@@ -256,6 +290,8 @@ class DualLoraLayer(BaseTunerLayer):
         lora1_B = self.lora1_B[adapter_name]
         lora2_A = self.lora2_A[adapter_name]
         lora2_B = self.lora2_B[adapter_name]
+        lora3_A = self.lora3_A[adapter_name]
+        lora3_B = self.lora3_B[adapter_name]
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer()):
             weight = self.get_base_layer().weight
@@ -266,17 +302,24 @@ class DualLoraLayer(BaseTunerLayer):
                 lora1_weight = lora1_weight.reshape(weight.shape)
                 lora2_weight = torch.mm(lora2_B.weight.flatten(start_dim=1), lora2_A.weight.flatten(start_dim=1))
                 lora2_weight = lora2_weight.reshape(weight.shape)
+                lora3_weight = torch.mm(lora3_B.weight.flatten(start_dim=1), lora3_A.weight.flatten(start_dim=1))
+                lora3_weight = lora3_weight.reshape(weight.shape)
             else:
                 lora1_weight = lora1_B.weight @ lora1_A.weight
                 lora2_weight = lora2_B.weight @ lora2_A.weight
+                lora3_weight = lora3_B.weight @ lora3_A.weight
             weight1_norm = self._get_weight_norm(weight, lora1_weight, scaling)
-            weight2_norm = self._get_weight_norm(weight, lora2_weight, scaling)
+            weight2_norm = self._get_weight_norm(weight, lora3_weight, scaling)
         self.lora1_magnitude_vector = nn.ParameterDict()
         self.lora1_magnitude_vector[adapter_name] = nn.Parameter(weight1_norm, requires_grad=True)
         self.lora2_magnitude_vector = nn.ParameterDict()
         self.lora2_magnitude_vector[adapter_name] = nn.Parameter(weight2_norm, requires_grad=True)
+        self.lora2_magnitude_vector = nn.ParameterDict()
+        self.lora2_magnitude_vector[adapter_name] = nn.Parameter(weight2_norm, requires_grad=True)
+        self.lora3_magnitude_vector = nn.ParameterDict()
+        self.lora3_magnitude_vector[adapter_name] = nn.Parameter(weight2_norm, requires_grad=True)
         # add lora_magnitude_vector to the list of learnable parameters
-        self.adapter_layer_names = self.adapter_layer_names[:] + ("lora1_magnitude_vector","lora2_magnitude_vector",)
+        self.adapter_layer_names = self.adapter_layer_names[:] + ("lora1_magnitude_vector","lora2_magnitude_vector","lora3_magnitude_vector",)
 
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
@@ -395,6 +438,8 @@ class DualLoraLayer(BaseTunerLayer):
             lora1_B = self.lora1_B[active_adapter]
             lora2_A = self.lora2_A[active_adapter]
             lora2_B = self.lora2_B[active_adapter]
+            lora3_A = self.lora3_A[active_adapter]
+            lora3_B = self.lora3_B[active_adapter]
             dropout = self.lora_dropout[active_adapter]
             scaling = self.scaling[active_adapter]
 
@@ -406,7 +451,7 @@ class DualLoraLayer(BaseTunerLayer):
             elif self.active_state =='lora2':
                 lora_output = lora2_B(lora2_A(dropout(sub_batch))) * scaling
             elif self.active_state =='gate':
-                lora_output = (lora1_B(lora1_A(dropout(sub_batch))) + lora2_B(lora2_A(dropout(sub_batch)))) * scaling / 2
+                lora_output = (lora3_B(lora3_A(dropout(sub_batch))) + lora2_B(lora2_A(dropout(sub_batch)))) * scaling / 2
             result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
 
         return result
@@ -424,6 +469,10 @@ class DualLoraLayer(BaseTunerLayer):
             p.requires_grad = True
         for p in self.lora2_B.parameters():
             p.requires_grad = True
+        for p in self.lora3_A.parameters():
+            p.requires_grad = True
+        for p in self.lora3_B.parameters():
+            p.requires_grad = True
         for p in self.lora1_embedding_A.parameters():
             p.requires_grad = True
         for p in self.lora1_embedding_B.parameters():
@@ -431,6 +480,10 @@ class DualLoraLayer(BaseTunerLayer):
         for p in self.lora2_embedding_A.parameters():
             p.requires_grad = True
         for p in self.lora2_embedding_B.parameters():
+            p.requires_grad = True
+        for p in self.lora3_embedding_A.parameters():
+            p.requires_grad = True
+        for p in self.lora3_embedding_B.parameters():
             p.requires_grad = True
     
     def activate_lora1(self):
@@ -468,6 +521,26 @@ class DualLoraLayer(BaseTunerLayer):
             p.requires_grad = True
         for p in self.lora2_embedding_B.parameters():
             p.requires_grad = True
+    
+    def activate_lora3(self):
+        for p in self.lora3_A.parameters():
+            p.requires_grad = True
+        for p in self.lora3_B.parameters():
+            p.requires_grad = True
+        for p in self.lora3_embedding_A.parameters():
+            p.requires_grad = True
+        for p in self.lora3_embedding_B.parameters():
+            p.requires_grad = True
+    
+    def deactivate_lora3(self):
+        for p in self.lora3_A.parameters():
+            p.requires_grad = False
+        for p in self.lora3_B.parameters():
+            p.requires_grad = False
+        for p in self.lora3_embedding_A.parameters():
+            p.requires_grad = False
+        for p in self.lora3_embedding_B.parameters():
+            p.requires_grad = False
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
 
@@ -478,7 +551,7 @@ class DualLoraLayer(BaseTunerLayer):
 #  ------------------------------------------------------------------------------------------
 
 
-class Linear(nn.Module, DualLoraLayer):
+class Linear(nn.Module, TripleLoraLayer):
     # Lora implemented in a dense layer
     def __init__(
         self,
@@ -495,7 +568,7 @@ class Linear(nn.Module, DualLoraLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        DualLoraLayer.__init__(self, base_layer, **kwargs)
+        TripleLoraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
@@ -613,6 +686,8 @@ class Linear(nn.Module, DualLoraLayer):
         weight1_B = self.lora1_B[adapter].weight
         weight2_A = self.lora2_A[adapter].weight
         weight2_B = self.lora2_B[adapter].weight
+        weight2_A = self.lora3_A[adapter].weight
+        weight2_B = self.lora3_B[adapter].weight
 
         if self.active_state == 'lora1':
             if cast_to_fp32:
@@ -642,19 +717,19 @@ class Linear(nn.Module, DualLoraLayer):
                 self.lora2_B[adapter].weight.data = weight2_B.to(dtype)
         if self.active_state == 'gate':
             if cast_to_fp32:
-                weight1_A = weight1_A.float()
-                weight1_B = weight1_B.float()
+                weight3_A = weight3_A.float()
+                weight3_B = weight3_B.float()
                 weight2_A = weight2_A.float()
                 weight2_B = weight2_B.float()
 
-            output_tensor = (transpose(weight1_B @ weight1_A, self.fan_in_fan_out)+transpose(weight2_B @ weight2_A, self.fan_in_fan_out)) * self.scaling[adapter] / 2
+            output_tensor = (transpose(weight3_B @ weight3_A, self.fan_in_fan_out)+transpose(weight2_B @ weight2_A, self.fan_in_fan_out)) * self.scaling[adapter] / 2
 
             if cast_to_fp32:
                 output_tensor = output_tensor.to(dtype=dtype)
 
                 # cast back the weights
-                self.lora1_A[adapter].weight.data = weight1_A.to(dtype)
-                self.lora1_B[adapter].weight.data = weight1_B.to(dtype)
+                self.lora3_A[adapter].weight.data = weight3_A.to(dtype)
+                self.lora3_B[adapter].weight.data = weight3_B.to(dtype)
                 self.lora2_A[adapter].weight.data = weight2_A.to(dtype)
                 self.lora2_B[adapter].weight.data = weight2_B.to(dtype)
 
@@ -683,6 +758,8 @@ class Linear(nn.Module, DualLoraLayer):
                 lora1_B = self.lora1_B[active_adapter]
                 lora2_A = self.lora2_A[active_adapter]
                 lora2_B = self.lora2_B[active_adapter]
+                lora3_A = self.lora3_A[active_adapter]
+                lora3_B = self.lora3_B[active_adapter]
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora1_A.weight.dtype)
@@ -701,10 +778,10 @@ class Linear(nn.Module, DualLoraLayer):
                         result = result + self._apply_dora(x, lora2_A, lora2_B, scaling, active_adapter)
                 elif self.active_state == 'gate':
                     if not self.use_dora[active_adapter]:
-                        result = result + (lora1_B(lora1_A(dropout(x))) + lora2_B(lora2_A(dropout(x)))) * scaling / 2
+                        result = result + (lora3_B(lora3_A(dropout(x))) + lora2_B(lora2_A(dropout(x)))) * scaling / 2
                     else:
                         x = dropout(x)
-                        result = result + (self._apply_dora(x.clone(), lora2_A, lora2_B, scaling, active_adapter) + self._apply_dora(x.clone(), lora1_A, lora1_B, scaling, active_adapter))/2
+                        result = result + (self._apply_dora(x.clone(), lora2_A, lora2_B, scaling, active_adapter) + self._apply_dora(x.clone(), lora3_A, lora3_B, scaling, active_adapter))/2
             result = result.to(torch_result_dtype)
 
         return result
@@ -714,7 +791,7 @@ class Linear(nn.Module, DualLoraLayer):
         return "lora." + rep
 
 
-class Embedding(nn.Module, DualLoraLayer):
+class Embedding(nn.Module, TripleLoraLayer):
     # LoRA implemented in a Embedding layer
     def __init__(
         self,
@@ -729,7 +806,7 @@ class Embedding(nn.Module, DualLoraLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        DualLoraLayer.__init__(self, base_layer)
+        TripleLoraLayer.__init__(self, base_layer)
 
         if use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
@@ -764,6 +841,8 @@ class Embedding(nn.Module, DualLoraLayer):
         self.lora1_embedding_B[adapter_name] = nn.Parameter(weight_B)
         self.lora2_embedding_A[adapter_name] = nn.Parameter(weight_A)
         self.lora2_embedding_B[adapter_name] = nn.Parameter(weight_B)
+        self.lora3_embedding_A[adapter_name] = nn.Parameter(weight_A)
+        self.lora3_embedding_B[adapter_name] = nn.Parameter(weight_B)
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -851,6 +930,8 @@ class Embedding(nn.Module, DualLoraLayer):
         weight1_B = self.lora1_embedding_B[adapter]
         weight2_A = self.lora2_embedding_A[adapter]
         weight2_B = self.lora2_embedding_B[adapter]
+        weight3_A = self.lora3_embedding_A[adapter]
+        weight3_B = self.lora3_embedding_B[adapter]
 
         if self.active_state == 'lora1':
             if cast_to_fp32:
@@ -880,19 +961,19 @@ class Embedding(nn.Module, DualLoraLayer):
                 self.lora2_embedding_B[adapter] = weight2_B.to(dtype)
         elif self.active_state == 'gate':
             if cast_to_fp32:
-                weight1_A = weight1_A.float()
-                weight1_B = weight1_B.float()
+                weight3_A = weight3_A.float()
+                weight3_B = weight3_B.float()
                 weight2_A = weight2_A.float()
                 weight2_B = weight2_B.float()
 
-            output_tensor = (transpose(weight1_B @ weight1_A, True)+transpose(weight2_B @ weight2_A, True))* self.scaling[adapter]/2
+            output_tensor = (transpose(weight3_B @ weight3_A, True)+transpose(weight2_B @ weight2_A, True))* self.scaling[adapter]/2
 
             if cast_to_fp32:
                 output_tensor = output_tensor.to(dtype=dtype)
 
                 # cast back the weights
-                self.lora1_embedding_A[adapter] = weight1_A.to(dtype)
-                self.lora1_embedding_B[adapter] = weight1_B.to(dtype)
+                self.lora3_embedding_A[adapter] = weight3_A.to(dtype)
+                self.lora3_embedding_B[adapter] = weight3_B.to(dtype)
                 self.lora2_embedding_A[adapter] = weight2_A.to(dtype)
                 self.lora2_embedding_B[adapter] = weight2_B.to(dtype)
 
@@ -920,6 +1001,8 @@ class Embedding(nn.Module, DualLoraLayer):
             embedding1_B = self.lora1_embedding_B[active_adapter].T
             embedding2_A = self.lora2_embedding_A[active_adapter].T
             embedding2_B = self.lora2_embedding_B[active_adapter].T
+            embedding3_A = self.lora3_embedding_A[active_adapter].T
+            embedding3_B = self.lora3_embedding_B[active_adapter].T
             scaling = self.scaling[active_adapter]
 
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
@@ -933,9 +1016,9 @@ class Embedding(nn.Module, DualLoraLayer):
                 after_A = self._embed(sub_batch, embedding2_A)
                 result[sub_batch_indices_list[i]] += (after_A @ embedding2_B) * scaling
             elif self.active_state =='gate':
-                after1_A = self._embed(sub_batch, embedding1_A)
+                after3_A = self._embed(sub_batch, embedding3_A)
                 after2_A = self._embed(sub_batch, embedding2_A)
-                result[sub_batch_indices_list[i]] += ((after1_A @ embedding1_B)+(after2_A @ embedding2_B)) * scaling/2
+                result[sub_batch_indices_list[i]] += ((after3_A @ embedding3_B)+(after2_A @ embedding2_B)) * scaling/2
 
         return result
 
@@ -974,6 +1057,8 @@ class Embedding(nn.Module, DualLoraLayer):
                 embedding1_B = self.lora1_embedding_B[active_adapter].T
                 embedding2_A = self.lora2_embedding_A[active_adapter].T
                 embedding2_B = self.lora2_embedding_B[active_adapter].T
+                embedding3_A = self.lora3_embedding_A[active_adapter].T
+                embedding3_B = self.lora3_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
                 if self.active_state =='lora1':
                     after_A = self._embed(x, embedding1_A)
@@ -982,9 +1067,9 @@ class Embedding(nn.Module, DualLoraLayer):
                     after_A = self._embed(x, embedding2_A)
                     result = result + (after_A @ embedding2_B) * scaling
                 elif self.active_state =='gate':
-                    after1_A = self._embed(x, embedding1_A)
+                    after3_A = self._embed(x, embedding3_A)
                     after2_A = self._embed(x, embedding2_A)
-                    result = result +((after1_A @ embedding1_B)+(after2_A @ embedding2_B)) * scaling/2
+                    result = result +((after3_A @ embedding3_B)+(after2_A @ embedding2_B)) * scaling/2
                 result = result.to(torch_result_dtype)
 
         return result
@@ -994,7 +1079,7 @@ class Embedding(nn.Module, DualLoraLayer):
         return "lora." + rep
 
 
-class Conv2d(nn.Module, DualLoraLayer):
+class Conv2d(nn.Module, TripleLoraLayer):
     # Lora implemented in a conv2d layer
     def __init__(
         self,
@@ -1009,7 +1094,7 @@ class Conv2d(nn.Module, DualLoraLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        DualLoraLayer.__init__(self, base_layer)
+        TripleLoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
         self.update_layer(
@@ -1043,6 +1128,8 @@ class Conv2d(nn.Module, DualLoraLayer):
         self.lora1_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
         self.lora2_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
         self.lora2_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
+        self.lora3_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
+        self.lora3_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -1169,6 +1256,8 @@ class Conv2d(nn.Module, DualLoraLayer):
         weight1_B = self.lora1_B[adapter].weight
         weight2_A = self.lora2_A[adapter].weight
         weight2_B = self.lora2_B[adapter].weight
+        weight3_A = self.lora3_A[adapter].weight
+        weight3_B = self.lora3_B[adapter].weight
 
         if self.active_state == 'lora1':
             if cast_to_fp32:
@@ -1226,8 +1315,8 @@ class Conv2d(nn.Module, DualLoraLayer):
                 self.lora2_B[adapter].weight.data = weight2_B.to(dtype)
         if self.active_state == 'gate':
             if cast_to_fp32:
-                weight1_A = weight1_A.float()
-                weight1_B = weight1_B.float()
+                weight3_A = weight3_A.float()
+                weight3_B = weight3_B.float()
                 weight2_A = weight2_A.float()
                 weight2_B = weight2_B.float()
 
@@ -1235,7 +1324,7 @@ class Conv2d(nn.Module, DualLoraLayer):
             if self.get_base_layer().weight.size()[2:4] == (1, 1):
                 # conv2d 1x1
                 output_tensor = (
-                    (weight1_B.squeeze(3).squeeze(2) @ weight1_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
+                    (weight3_B.squeeze(3).squeeze(2) @ weight3_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
                     3
                 )
                     +(weight2_B.squeeze(3).squeeze(2) @ weight2_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
@@ -1246,8 +1335,8 @@ class Conv2d(nn.Module, DualLoraLayer):
                 output_tensor = (
                     (
                     F.conv2d(
-                        weight1_A.permute(1, 0, 2, 3),
-                        weight1_B,
+                        weight3_A.permute(1, 0, 2, 3),
+                        weight3_B,
                     ).permute(1, 0, 2, 3)
                     +F.conv2d(
                         weight2_A.permute(1, 0, 2, 3),
@@ -1260,8 +1349,8 @@ class Conv2d(nn.Module, DualLoraLayer):
                 output_tensor = output_tensor.to(dtype=dtype)
 
                 # cast back the weights
-                self.lora1_A[adapter].weight.data = weight1_A.to(dtype)
-                self.lora1_B[adapter].weight.data = weight1_B.to(dtype)
+                self.lora3_A[adapter].weight.data = weight3_A.to(dtype)
+                self.lora3_B[adapter].weight.data = weight3_B.to(dtype)
                 self.lora2_A[adapter].weight.data = weight2_A.to(dtype)
                 self.lora2_B[adapter].weight.data = weight2_B.to(dtype)
 
@@ -1330,6 +1419,8 @@ class Conv2d(nn.Module, DualLoraLayer):
                 lora1_B = self.lora1_B[active_adapter]
                 lora2_A = self.lora2_A[active_adapter]
                 lora2_B = self.lora2_B[active_adapter]
+                lora3_A = self.lora3_A[active_adapter]
+                lora3_B = self.lora3_B[active_adapter]
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora1_A.weight.dtype)
@@ -1349,10 +1440,10 @@ class Conv2d(nn.Module, DualLoraLayer):
                         
                 if self.active_state == 'gate':
                     if not self.use_dora[active_adapter]:
-                        result = result + (lora1_B(lora1_A(dropout(x)))+lora2_B(lora2_A(dropout(x)))) * scaling/2
+                        result = result + (lora3_B(lora3_A(dropout(x)))+lora2_B(lora2_A(dropout(x)))) * scaling/2
                     else:
                         x = dropout(x)
-                        result = result + (self._apply_dora(x, lora1_A, lora1_B, scaling, active_adapter) + self._apply_dora(x, lora2_A, lora2_B, scaling, active_adapter))/2
+                        result = result + (self._apply_dora(x, lora3_A, lora3_B, scaling, active_adapter) + self._apply_dora(x, lora2_A, lora2_B, scaling, active_adapter))/2
 
             result = result.to(torch_result_dtype)
         return result

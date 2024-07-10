@@ -299,7 +299,7 @@ def main():
                 # if data_info['data_name'] in CHOICE_DATA: 
                 #     evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
                 # else:
-                if training_args.mode != 'fedsim':
+                if training_args.mode not in ['fedsim', 'feddat']:
                     evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
                 if training_args.eval_server and data_info['data_name'] not in server_eval_key:
                     model.load_state_dict(server_state_dict, strict=False)
