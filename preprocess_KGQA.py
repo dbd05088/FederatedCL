@@ -11,7 +11,7 @@ np.random.seed(42)
 
 dir = 'dataset/KGQA'
 
-subdirs = ['MultiModalQA','WebQA'] #ManyModalQA
+subdirs = ['ManyModalQA','MultiModalQA','WebQA'] #ManyModalQA
 
 subset_folder = os.path.join(dir, 'train')
 if not os.path.exists(subset_folder):
@@ -50,6 +50,13 @@ for subdir in subdirs:
         new_item['image'] = [os.path.join(dir, f'{subdir}/full/images', img) for img in item['task_instance']['images_path']]
         if len(new_item['image']) > 4:
             continue
+        else:
+            try:
+                for img in new_item['image']:
+                    image = Image.open(img)
+            except:
+                print(img)
+                continue
         question = item['task_instance']['context']
         for i in range(len(new_item['image'])):
             rmv_i = '{image#%d}'% (i+1)
