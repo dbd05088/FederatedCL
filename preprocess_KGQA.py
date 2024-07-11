@@ -11,7 +11,7 @@ np.random.seed(42)
 
 dir = 'dataset/KGQA'
 
-subdirs = ['TQA', 'WebQA']
+subdirs = ['MultiModalQA','WebQA'] #ManyModalQA
 
 subset_folder = os.path.join(dir, 'train')
 if not os.path.exists(subset_folder):
@@ -30,6 +30,10 @@ for subdir in subdirs:
         full_data = json.load(fp)
 
     meta_data = full_data['metadata']
+    if subdir in ['MultiModalQA','WebQA']:
+        for i in range(len(meta_data['task_instruction'])):
+            meta_data['task_instruction'][i] = (meta_data['task_instruction'][i]).replace("You must choose your answer from the Choice List. ", "")
+    
     full_data = full_data['data']
 
     total_len = len(full_data)
@@ -44,6 +48,8 @@ for subdir in subdirs:
         new_item = {}
         new_item['id'] = item['sample_id']
         new_item['image'] = [os.path.join(dir, f'{subdir}/full/images', img) for img in item['task_instance']['images_path']]
+        if len(new_item['image']) > 4:
+            continue
         question = item['task_instance']['context']
         for i in range(len(new_item['image'])):
             rmv_i = '{image#%d}'% (i+1)
