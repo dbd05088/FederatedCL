@@ -123,6 +123,9 @@ def main():
         # selected_ids = cids
         training_args.learning_rate = init_lr - lr_step*curr_round
         training_args.mm_projector_lr = mm_init_lr - mm_lr_step*curr_round
+        if curr_round > 0 and (training_args.lr_scheduler_type == 'WSD' or training_args.lr_scheduler_type == 'HaPS'):
+            training_args.warmup_ratio = 0
+            training_args.warmup_steps = 0
         for idx in range(num_selection):
             model.config.use_cache = False
             torch.cuda.empty_cache()
@@ -209,6 +212,10 @@ def main():
                 del state_dict[k]
             if (training_args.local_rank == 0 or training_args.local_rank == -1):
                 torch.save(state_dict, output_dir)
+            
+            local_state_dict = getattr(trainer, 'global_weight')
+            if local_state_dict is not None:
+                local_state_dict_list[client_id] = copy.deepcopy(local_state_dict)
             
             if training_args.mode == 'scaffold':
                 local_auxiliary, auxiliary_delta = trainer.get_auxiliary_param()

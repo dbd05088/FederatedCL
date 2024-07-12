@@ -69,6 +69,7 @@ class TrainingArguments(transformers.TrainingArguments):
     # dataloader_num_workers
     optim: str = field(default="adamw_torch")
     #lr_scheduler_type
+    decay_ratio: float = field(default=1.0)
     # per_gpu_train_batch_size
     # per_device_eval_batch_size
     # per_device_eval_batch_size
