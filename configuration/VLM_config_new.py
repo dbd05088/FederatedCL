@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 import transformers
-from typing import Dict, Optional, Sequence, List
+from typing import Dict, Optional, Sequence, List, Union
 
 @dataclass
 class ModelArguments:
@@ -68,7 +68,7 @@ class TrainingArguments(transformers.TrainingArguments):
     prompt_num: int = field(default=100)
     # dataloader_num_workers
     optim: str = field(default="adamw_torch")
-    #lr_scheduler_type
+    is_wsd: str = field(default=None)
     decay_ratio: float = field(default=1.0)
     # per_gpu_train_batch_size
     # per_device_eval_batch_size

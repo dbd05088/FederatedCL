@@ -123,7 +123,7 @@ def main():
         # selected_ids = cids
         training_args.learning_rate = init_lr - lr_step*curr_round
         training_args.mm_projector_lr = mm_init_lr - mm_lr_step*curr_round
-        if curr_round > 0 and (training_args.lr_scheduler_type == 'WSD' or training_args.lr_scheduler_type == 'HaPS'):
+        if curr_round > 0 and training_args.is_wsd:
             training_args.warmup_ratio = 0
             training_args.warmup_steps = 0
         for idx in range(num_selection):
@@ -213,7 +213,7 @@ def main():
             if (training_args.local_rank == 0 or training_args.local_rank == -1):
                 torch.save(state_dict, output_dir)
             
-            local_state_dict = getattr(trainer, 'global_weight')
+            local_state_dict = getattr(trainer, 'global_weight', None)
             if local_state_dict is not None:
                 local_state_dict_list[client_id] = copy.deepcopy(local_state_dict)
             

@@ -501,8 +501,8 @@ class LLaVATrainerFEDAVG(LLaVATrainer):
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
                     
                     # wsd
-                    if self.args.lr_scheduler_type == 'WSD' and math.ceil(self.state.epoch*steps_in_epoch) == math.ceil(self.args.decay_ratio*steps_in_epoch):
-                        self.global_weight = {k: t.detach().cpu().clone() for k, t in model.named_parameters() if t.requires_grad}
+                    if self.args.is_wsd == 'WSD' and math.ceil(self.state.epoch*steps_in_epoch) == math.ceil(self.args.decay_ratio*steps_in_epoch):
+                        self.global_weight = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
                     
 
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)

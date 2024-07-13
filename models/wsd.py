@@ -8,7 +8,7 @@ def _get_constant_cosine_schedule_with_warmup_lr_lambda(current_step: int, *, nu
         return float(current_step) / float(max(1.0, num_warmup_steps))
     elif current_step > num_decay_steps:
         progress = float(current_step - num_decay_steps) / float(max(1, num_training_steps - num_decay_steps))
-        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * 2.0 * progress)))
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
     return 1.0
 
 def get_wsd_sched(
