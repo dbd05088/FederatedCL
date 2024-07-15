@@ -7,6 +7,9 @@ import json
 import glob
 import shutil
 
+import numpy as np
+np.random.seed(42)
+
 TOKEN = '<image>'
 
 dir = 'dataset/mPLUG'
@@ -59,7 +62,7 @@ for task in tasks:
                 # check for img invalidity
                 for img in jsondata[idx]['image']:
                     if img in invalid_img_files:
-                        print(img)
+                        # print(img)
                         idx_to_del.append(idx)
                         break
                 
@@ -68,6 +71,18 @@ for task in tasks:
             del jsondata[idx]
         print(len(jsondata))
         total_removed_num += len(idx_to_del)
+        
+    print(len(train_json_data))
+    print(len(test_json_data))
+
+    if len(train_json_data) > 10000:
+        train_json_data = np.random.choice(train_json_data, size=10000, replace=False).tolist()
+    if len(test_json_data) > 2000:
+        test_json_data = np.random.choice(test_json_data, size=2000, replace=False).tolist()
+
+    print("final",len(train_json_data))
+    print("final",len(test_json_data))
+    
 
     with open(f'./dataset/mPLUG/train/dataset-{task_idx}.json', 'w') as json_file:
         json.dump(train_json_data, json_file, indent=4)

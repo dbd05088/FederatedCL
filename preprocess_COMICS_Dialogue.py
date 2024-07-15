@@ -9,7 +9,7 @@ import numpy as np
 
 np.random.seed(42)
 
-dir = 'dataset/VIST'
+dir = 'dataset/COMICS_Dialogue'
 with open(dir+'/full/full.json', 'r') as fp:
     full_data = json.load(fp)
 
@@ -18,11 +18,10 @@ full_data = full_data['data']
 
 total_len = len(full_data)
 
-# train_test_ratio = 0.2
-size = 4000
+train_test_ratio = 0.2
 
 idx_list = list(range(total_len))
-test_idx = np.random.choice(idx_list, size=size, replace=False).tolist()
+test_idx = np.random.choice(idx_list, size=int(total_len*0.2), replace=False).tolist()
 
 subset_folder = os.path.join(dir, 'train')
 if not os.path.exists(subset_folder):
@@ -50,6 +49,9 @@ for idx in range(total_len):
         continue
     
     question = item['task_instance']['context']
+    choice_list = item['task_instance']['choice_list']
+    # Create the string with the selected choices
+    choice_string = ', '.join(f'{choice_list[i]}' for i in range(len(choice_list))) 
     for i in range(len(new_item['image'])):
         rmv_i = '{image#%d}'% (i+1)
         rmv_t = '{table#%d}'% (i+1)
@@ -59,7 +61,7 @@ for idx in range(total_len):
     new_item['conversations'] = [
         {
             "from": "human",
-            "value": meta_data['task_instruction'][item['task_instruction_id']] + question
+            "value": meta_data['task_instruction'][item['task_instruction_id']] + question + f'\nChoice list:[{choice_string}]. Your answer is:'
         },
         {
             "from": "gpt",
@@ -72,6 +74,9 @@ for idx in range(total_len):
     else:
         train_json_data.append(new_item)
 
+print(len(train_json_data))
+print(len(test_json_data))
+
 if len(train_json_data) > 10000:
     train_json_data = np.random.choice(train_json_data, size=10000, replace=False).tolist()
 if len(test_json_data) > 2000:
@@ -79,7 +84,6 @@ if len(test_json_data) > 2000:
 
 print(len(train_json_data))
 print(len(test_json_data))
-
 with open(f'{dir}/train/dataset-{task_idx}.json', 'w') as json_file:
     json.dump(train_json_data, json_file, indent=4)
 with open(f'{dir}/test/dataset-{task_idx}.json', 'w') as json_file:

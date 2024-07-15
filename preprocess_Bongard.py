@@ -58,6 +58,7 @@ def save_dataset(dataset_name, output_folder, subset_name):
                 json_data_list.append(json_data)
     # Save the JSON data list to a file
     json_output_path = os.path.join(output_folder, subset_name, f'dataset-0-{num_per_set}.json')
+    print(len(json_data_list))
     with open(json_output_path, 'w') as json_file:
         json.dump(json_data_list, json_file, indent=4)
 

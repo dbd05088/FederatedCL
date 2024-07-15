@@ -9,7 +9,7 @@ import numpy as np
 
 np.random.seed(42)
 
-dir = 'dataset/VIST'
+dir = 'dataset/RecipeQA_ImageCoherence'
 with open(dir+'/full/full.json', 'r') as fp:
     full_data = json.load(fp)
 
@@ -18,11 +18,10 @@ full_data = full_data['data']
 
 total_len = len(full_data)
 
-# train_test_ratio = 0.2
-size = 4000
+train_test_ratio = 0.2
 
 idx_list = list(range(total_len))
-test_idx = np.random.choice(idx_list, size=size, replace=False).tolist()
+test_idx = np.random.choice(idx_list, size=int(total_len*0.2), replace=False).tolist()
 
 subset_folder = os.path.join(dir, 'train')
 if not os.path.exists(subset_folder):
@@ -40,7 +39,8 @@ for idx in range(total_len):
     item = full_data[idx]
     new_item = {}
     new_item['id'] = item['sample_id']
-    new_item['image'] = [os.path.join(dir, 'full/images', img) for img in item['task_instance']['images_path']]
+    new_item['image'] = [os.path.join(dir, 'full/images', img) for img in item['task_instance']['images_path'][:4]]
+
     try:
         for img_path in new_item['image']:
             image = Image.open(img_path)
@@ -59,11 +59,11 @@ for idx in range(total_len):
     new_item['conversations'] = [
         {
             "from": "human",
-            "value": meta_data['task_instruction'][item['task_instruction_id']] + question
+            "value": meta_data['task_instruction'][item['task_instruction_id']] + question + '\nChoice list:[Image A, Image B, Image C, Image D]. Your answer is:'
         },
         {
             "from": "gpt",
-            "value": item['response']
+            "value": item['response'][:7]
         }
     ]
     
@@ -72,6 +72,9 @@ for idx in range(total_len):
     else:
         train_json_data.append(new_item)
 
+print(len(train_json_data))
+print(len(test_json_data))
+
 if len(train_json_data) > 10000:
     train_json_data = np.random.choice(train_json_data, size=10000, replace=False).tolist()
 if len(test_json_data) > 2000:
@@ -79,7 +82,6 @@ if len(test_json_data) > 2000:
 
 print(len(train_json_data))
 print(len(test_json_data))
-
 with open(f'{dir}/train/dataset-{task_idx}.json', 'w') as json_file:
     json.dump(train_json_data, json_file, indent=4)
 with open(f'{dir}/test/dataset-{task_idx}.json', 'w') as json_file:

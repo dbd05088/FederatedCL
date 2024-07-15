@@ -42,6 +42,14 @@ for idx in range(total_len):
     new_item = {}
     new_item['id'] = item['sample_id']
     new_item['image'] = [os.path.join(f'{dir}/full/images', img) for img in item['task_instance']['images_path']]
+    try:
+        for img_path in new_item['image']:
+            image = Image.open(img_path)
+    except e:
+        print(e)
+        print(img_path)
+        continue
+    
     question = item['task_instance']['context']
     for i in range(len(new_item['image'])):
         rmv_i = '{image#%d}'% (i+1)
@@ -64,6 +72,14 @@ for idx in range(total_len):
         test_json_data.append(new_item)
     else:
         train_json_data.append(new_item)
+
+print(len(train_json_data))
+print(len(test_json_data))
+
+if len(train_json_data) > 4000:
+    train_json_data = np.random.choice(train_json_data, size=4000, replace=False).tolist()
+if len(test_json_data) > 1000:
+    test_json_data = np.random.choice(test_json_data, size=1000, replace=False).tolist()
 
 print(len(train_json_data))
 print(len(test_json_data))

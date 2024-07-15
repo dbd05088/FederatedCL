@@ -9,7 +9,7 @@ import numpy as np
 
 np.random.seed(42)
 
-dir = 'dataset/VIST'
+dir = 'dataset/Fashion200K'
 with open(dir+'/full/full.json', 'r') as fp:
     full_data = json.load(fp)
 
@@ -18,11 +18,10 @@ full_data = full_data['data']
 
 total_len = len(full_data)
 
-# train_test_ratio = 0.2
-size = 4000
+train_test_ratio = 0.2
 
 idx_list = list(range(total_len))
-test_idx = np.random.choice(idx_list, size=size, replace=False).tolist()
+test_idx = np.random.choice(idx_list, size=int(total_len*0.2), replace=False).tolist()
 
 subset_folder = os.path.join(dir, 'train')
 if not os.path.exists(subset_folder):
@@ -35,6 +34,8 @@ if not os.path.exists(subset_folder):
 task_idx = 0
 train_json_data = []
 test_json_data = []
+train_json_data_tf = []
+test_json_data_tf = []
 
 for idx in range(total_len):
     item = full_data[idx]
@@ -50,16 +51,19 @@ for idx in range(total_len):
         continue
     
     question = item['task_instance']['context']
+    choice_list = item['task_instance']['choice_list']
+    # Create the string with the selected choices
+    choice_string = ', '.join(f'{choice_list[i]}' for i in range(len(choice_list))) 
     for i in range(len(new_item['image'])):
         rmv_i = '{image#%d}'% (i+1)
         rmv_t = '{table#%d}'% (i+1)
         question = question.replace(rmv_i, '<image>')
         question = question.replace(rmv_t, '<image>')
-    
+    '\nChoice list:[True, False]. Your answer is:'
     new_item['conversations'] = [
         {
             "from": "human",
-            "value": meta_data['task_instruction'][item['task_instruction_id']] + question
+            "value": meta_data['task_instruction'][item['task_instruction_id']] + question + f'\nChoice list:[{choice_string}]. Your answer is:'
         },
         {
             "from": "gpt",
@@ -68,9 +72,18 @@ for idx in range(total_len):
     ]
     
     if idx in test_idx:
-        test_json_data.append(new_item)
+        if 'True' in choice_string:
+            test_json_data_tf.append(new_item)
+        else:
+            test_json_data.append(new_item)
     else:
-        train_json_data.append(new_item)
+        if 'True' in choice_string:
+            train_json_data_tf.append(new_item)
+        else:
+            train_json_data.append(new_item)
+
+print(len(train_json_data))
+print(len(test_json_data))
 
 if len(train_json_data) > 10000:
     train_json_data = np.random.choice(train_json_data, size=10000, replace=False).tolist()
@@ -84,3 +97,19 @@ with open(f'{dir}/train/dataset-{task_idx}.json', 'w') as json_file:
     json.dump(train_json_data, json_file, indent=4)
 with open(f'{dir}/test/dataset-{task_idx}.json', 'w') as json_file:
     json.dump(test_json_data, json_file, indent=4)
+
+print(len(train_json_data_tf))
+print(len(test_json_data_tf))
+
+if len(train_json_data_tf) > 10000:
+    train_json_data_tf = np.random.choice(train_json_data_tf, size=10000, replace=False).tolist()
+if len(test_json_data_tf) > 2000:
+    test_json_data_tf = np.random.choice(test_json_data_tf, size=2000, replace=False).tolist()
+
+print(len(train_json_data_tf))
+print(len(test_json_data_tf))
+
+with open(f'{dir}/train/dataset-1.json', 'w') as json_file:
+    json.dump(train_json_data_tf, json_file, indent=4)
+with open(f'{dir}/test/dataset-1.json', 'w') as json_file:
+    json.dump(test_json_data_tf, json_file, indent=4)

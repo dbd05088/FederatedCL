@@ -63,6 +63,17 @@ for idx in range(total_len):
     else:
         train_json_data.append(new_item)
 
+print(len(train_json_data))
+print(len(test_json_data))
+
+if len(train_json_data) > 4000:
+    train_json_data = np.random.choice(train_json_data, size=4000, replace=False).tolist()
+if len(test_json_data) > 1000:
+    test_json_data = np.random.choice(test_json_data, size=1000, replace=False).tolist()
+
+print(len(train_json_data))
+print(len(test_json_data))
+
 with open(f'{dir}/train/dataset-{task_idx}.json', 'w') as json_file:
     json.dump(train_json_data, json_file, indent=4)
 with open(f'{dir}/test/dataset-{task_idx}.json', 'w') as json_file:

@@ -132,7 +132,7 @@ def save_dataset(dataset_name, output_folder):
         val_dataset = json.load(fp)
     test_dataset.extend(val_dataset)
     # Process and save the datasets
-    for subset, data, size in [('test', test_dataset, 4000), ('train', train_dataset, 20000), ]:
+    for subset, data, size in [('test', test_dataset, 2000), ('train', train_dataset, 10000), ]:
         if data:
             process_and_save(data, output_folder, subset, size)
 
