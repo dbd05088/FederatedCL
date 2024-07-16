@@ -40,6 +40,7 @@ class TrainingArguments(transformers.TrainingArguments):
     round_to_eval: int = None
     eval_temp: float = 0.2
     eval_server: bool = True
+    zeroshot: bool = False
     
     num_iter:int = field(default=100)
 
@@ -60,6 +61,7 @@ class TrainingArguments(transformers.TrainingArguments):
     # federated learning
     num_clients: int = 5
     num_rounds: int = 20
+    num_tasks: int = 4
     iter_per_round: int = 1
     state_dir: str = field(default="./client_states")
     final_lr: float = field(default=1e-6)

@@ -57,6 +57,7 @@ for idx in range(total_len):
         rmv_t = '{table#%d}'% (i+1)
         question = question.replace(rmv_i, '<image>')
         question = question.replace(rmv_t, '<image>')
+        choice_string = choice_string.replace(rmv_i, '<image>')
     
     new_item['conversations'] = [
         {
@@ -65,7 +66,7 @@ for idx in range(total_len):
         },
         {
             "from": "gpt",
-            "value": item['response']
+            "value": item['response'][:7]
         }
     ]
     
