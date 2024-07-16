@@ -1,10 +1,6 @@
 from PIL import Image
-from io import BytesIO
-import requests
 import os
 import json
-import glob
-import shutil
 import numpy as np
 
 np.random.seed(42)
@@ -16,44 +12,27 @@ with open(dir+'/full/full.json', 'r') as fp:
 meta_data = full_data['metadata']
 full_data = full_data['data']
 
-total_len = len(full_data)
+# Create two sublists for different tasks
+task1_data = []  # Task with 2 images
+task2_data = []  # Task with 4 images
 
-train_test_ratio = 0.2
-
-idx_list = list(range(total_len))
-test_idx = np.random.choice(idx_list, size=int(total_len*0.2), replace=False).tolist()
-
-subset_folder = os.path.join(dir, 'train')
-if not os.path.exists(subset_folder):
-    os.makedirs(subset_folder)
-    
-subset_folder = os.path.join(dir, 'test')
-if not os.path.exists(subset_folder):
-    os.makedirs(subset_folder)
-
-task_idx = 0
-train_json_data = []
-test_json_data = []
-
-for idx in range(total_len):
-    item = full_data[idx]
+for item in full_data:
     new_item = {}
     new_item['id'] = item['sample_id']
     new_item['image'] = [os.path.join(dir, 'full/images', img) for img in item['task_instance']['images_path']]
+    
     try:
         for img_path in new_item['image']:
             image = Image.open(img_path)
-    except e:
+    except Exception as e:
         print(e)
         print(img_path)
         continue
     
     question = item['task_instance']['context']
     for i in range(len(new_item['image'])):
-        rmv_i = '{image#%d}'% (i+1)
-        rmv_t = '{table#%d}'% (i+1)
-        question = question.replace(rmv_i, '<image>')
-        question = question.replace(rmv_t, '<image>')
+        question = question.replace(f'{{image#{i+1}}}', '<image>')
+        question = question.replace(f'{{table#{i+1}}}', '<image>')
     
     new_item['conversations'] = [
         {
@@ -66,22 +45,57 @@ for idx in range(total_len):
         }
     ]
     
-    if idx in test_idx:
-        test_json_data.append(new_item)
-    else:
-        train_json_data.append(new_item)
+    # Categorize the item based on number of images
+    if len(new_item['image']) == 2:
+        task1_data.append(new_item)
+    elif len(new_item['image']) == 4:
+        task2_data.append(new_item)
 
-print(len(train_json_data))
-print(len(test_json_data))
+# Function to split and sample data
+def split_and_sample(data, train_size, test_size):
+    total_len = len(data)
+    test_ratio = test_size / (train_size + test_size)
+    
+    idx_list = list(range(total_len))
+    test_idx = np.random.choice(idx_list, size=int(total_len * test_ratio), replace=False).tolist()
+    
+    train_data = [item for i, item in enumerate(data) if i not in test_idx]
+    test_data = [item for i, item in enumerate(data) if i in test_idx]
+    
+    if len(train_data) > train_size:
+        train_data = np.random.choice(train_data, size=train_size, replace=False).tolist()
+    if len(test_data) > test_size:
+        test_data = np.random.choice(test_data, size=test_size, replace=False).tolist()
+    
+    return train_data, test_data
 
-if len(train_json_data) > 2000:
-    train_json_data = np.random.choice(train_json_data, size=2000, replace=False).tolist()
-if len(test_json_data) > 500:
-    test_json_data = np.random.choice(test_json_data, size=500, replace=False).tolist()
+# Split and sample each task data
+train_task1, test_task1 = split_and_sample(task1_data, 4000, 1000)
+train_task2, test_task2 = split_and_sample(task2_data, 4000, 1000)
 
-print(len(train_json_data))
-print(len(test_json_data))
-with open(f'{dir}/train/dataset-{task_idx}.json', 'w') as json_file:
-    json.dump(train_json_data, json_file, indent=4)
-with open(f'{dir}/test/dataset-{task_idx}.json', 'w') as json_file:
-    json.dump(test_json_data, json_file, indent=4)
+# Combine train and test data for each task
+# train_data = train_task1 + train_task2
+# test_data = test_task1 + test_task2
+
+# Shuffle the combined data
+# np.random.shuffle(train_data)
+# np.random.shuffle(test_data)
+
+print(f"Task 1 (2 images) total items: {len(task1_data)}")
+print(f"Task 2 (4 images) total items: {len(task2_data)}")
+# print(f"Final train items: {len(train_data)}")
+# print(f"Final test items: {len(test_data)}")
+
+# Save the data
+def save_json(data, filename):
+    with open(filename, 'w') as f:
+        json.dump(data, f, indent=4)
+
+print(len(train_task1))
+print(len(test_task1))
+save_json(train_task1, os.path.join(dir, 'train', 'dataset-0.json'))
+save_json(test_task1, os.path.join(dir, 'test', 'dataset-0.json'))
+print(len(train_task2))
+print(len(test_task2))
+save_json(train_task2, os.path.join(dir, 'train', 'dataset-1.json'))
+save_json(test_task2, os.path.join(dir, 'test', 'dataset-1.json'))

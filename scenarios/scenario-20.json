@@ -84,9 +84,9 @@
         "client_id": 9,
         "datasets":[
             {"dataset": "VISION","subset_id": 0},
+            {"dataset": "VISION","subset_id": 1},
             {"dataset": "VizWiz","subset_id": 0},
-            {"dataset": "MIT-States_PropertyCoherence","subset_id": 0},
-            {"dataset": "MIT-States_StateCoherence","subset_id": 0}
+            {"dataset": "MIT-States","subset_id": 0}
         ]
     }
 ]

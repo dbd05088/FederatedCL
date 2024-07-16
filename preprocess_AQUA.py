@@ -92,19 +92,19 @@ def process_and_save(dataset, output_folder, subset_name, size):
         json.dump(json_data_list, json_file, indent=4)
     
     random.shuffle(json_data_list2)
-    json_data_list2_sub1 = json_data_list2[:len(json_data_list2)//2]
+    json_data_list2_sub1 = json_data_list2#[:len(json_data_list2)//2]
     json_output_path = os.path.join(output_folder, subset_name, 'dataset-1.json')
     json_data_list2_sub1 = np.random.choice(json_data_list2_sub1, replace=False, size=min(size, len(json_data_list2_sub1))).tolist()
     print(len(json_data_list2_sub1))
     with open(json_output_path, 'w') as json_file:
         json.dump(json_data_list2_sub1, json_file, indent=4)
     
-    json_output_path = os.path.join(output_folder, subset_name, 'dataset-2.json')
-    json_data_list2_sub2 = json_data_list2[len(json_data_list2)//2:]
-    json_data_list2_sub2 = np.random.choice(json_data_list2_sub2, replace=False, size=min(size, len(json_data_list2_sub2))).tolist()
-    print(len(json_data_list2_sub2))
-    with open(json_output_path, 'w') as json_file:
-        json.dump(json_data_list2_sub2, json_file, indent=4)
+    # json_output_path = os.path.join(output_folder, subset_name, 'dataset-2.json')
+    # json_data_list2_sub2 = json_data_list2[len(json_data_list2)//2:]
+    # json_data_list2_sub2 = np.random.choice(json_data_list2_sub2, replace=False, size=min(size, len(json_data_list2_sub2))).tolist()
+    # print(len(json_data_list2_sub2))
+    # with open(json_output_path, 'w') as json_file:
+    #     json.dump(json_data_list2_sub2, json_file, indent=4)
 
 
 def save_dataset(dataset_name, output_folder):
@@ -132,7 +132,8 @@ def save_dataset(dataset_name, output_folder):
         val_dataset = json.load(fp)
     test_dataset.extend(val_dataset)
     # Process and save the datasets
-    for subset, data, size in [('test', test_dataset, 2000), ('train', train_dataset, 10000), ]:
+    # for subset, data, size in [('test', test_dataset, 2000), ('train', train_dataset, 10000), ]:
+    for subset, data, size in [('test', test_dataset, 1750), ('train', train_dataset, 7000), ]:
         if data:
             process_and_save(data, output_folder, subset, size)
 

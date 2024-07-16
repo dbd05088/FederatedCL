@@ -43,7 +43,7 @@ for idx in range(total_len):
     try:
         for img_path in new_item['image']:
             image = Image.open(img_path)
-    except e:
+    except Exception as e:
         print(e)
         print(img_path)
         continue

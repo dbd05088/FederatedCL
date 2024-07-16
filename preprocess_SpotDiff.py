@@ -45,8 +45,7 @@ for idx in range(total_len):
     try:
         for img_path in new_item['image']:
             image = Image.open(img_path)
-    except e:
-        print(e)
+    except:
         print(img_path)
         continue
     
@@ -76,10 +75,10 @@ for idx in range(total_len):
 print(len(train_json_data))
 print(len(test_json_data))
 
-if len(train_json_data) > 4000:
-    train_json_data = np.random.choice(train_json_data, size=4000, replace=False).tolist()
-if len(test_json_data) > 1000:
-    test_json_data = np.random.choice(test_json_data, size=1000, replace=False).tolist()
+if len(train_json_data) > 3000:
+    train_json_data = np.random.choice(train_json_data, size=3000, replace=False).tolist()
+if len(test_json_data) > 750:
+    test_json_data = np.random.choice(test_json_data, size=750, replace=False).tolist()
 
 print(len(train_json_data))
 print(len(test_json_data))
