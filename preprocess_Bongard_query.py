@@ -5,10 +5,12 @@ import requests
 import os
 import json
 import glob
-import random
+# import random
 import jsonlines
+import numpy as np
 
-random.seed(42)
+np.random.seed(42)
+# random.seed(42)
 
 num_per_set = 3
 prompts = f'''Given {num_per_set} "positive" images and {num_per_set} "negative" images, where "positive" images share "common" visual concepts and "negative" images cannot, the "common" visual concepts exclusively depicted by the "positive" images. And then given 1 "query" image, please determine whether it belongs to "positive" or "negative".'''
@@ -60,7 +62,8 @@ def save_dataset(dataset_name, output_folder, subset_name):
                 }
                 json_data_list.append(json_data)
                 
-                imgs = random.choices(positive_files, k=3) + random.choices(negative_files, k=3)
+                imgs = np.random.choice(positive_files, size=3, replace=False).tolist() + np.random.choice(negative_files, size=3, replace=False).tolist()
+                
                 # breakpoint()
                 json_data = {
                     "id": item['uid'] + "-" + str(idx),
@@ -79,7 +82,7 @@ def save_dataset(dataset_name, output_folder, subset_name):
                 }
                 json_data_list.append(json_data)
     # Save the JSON data list to a file
-    json_output_path = os.path.join(output_folder, subset_name, f'dataset-1-{num_per_set}.json')
+    json_output_path = os.path.join(output_folder, subset_name, f'dataset-1.json')
     print(len(json_data_list))
     with open(json_output_path, 'w') as json_file:
         json.dump(json_data_list, json_file, indent=4)

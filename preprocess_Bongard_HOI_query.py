@@ -90,7 +90,7 @@ def save_dataset(dataset_name, output_folder, subset_name, max_num=None):
         all_samples = all_samples[:max_num]
     
     # Save the combined samples to a single JSON file
-    json_output_path = os.path.join(output_folder, subset_name, f'dataset-1-{num_per_set}.json')
+    json_output_path = os.path.join(output_folder, subset_name, f'dataset-1.json')
     with open(json_output_path, 'w') as json_file:
         json.dump(all_samples, json_file, indent=4)
     
