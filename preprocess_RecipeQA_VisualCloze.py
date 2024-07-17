@@ -42,29 +42,33 @@ for idx in range(total_len):
     new_item['image'] = [os.path.join(dir, 'full/images', img) for img in item['task_instance']['images_path']]
     if len(new_item['image']) > 10:
         continue
-    try:
-        for img_path in new_item['image']:
-            image = Image.open(img_path)
-    except Exception as e:
-        print(e)
-        print(img_path)
-        continue
+    # try:
+    #     for img_path in new_item['image']:
+    #         image = Image.open(img_path)
+    # except Exception as e:
+    #     print(e)
+    #     print(img_path)
+    #     continue
     
     question = item['task_instance']['context']
+    choice_list = item['task_instance']['choice_list']
+    # Create the string with the selected choices
+    choice_string = ', '.join(f'{choice_list[i]}' for i in range(len(choice_list))) 
     for i in range(len(new_item['image'])):
         rmv_i = '{image#%d}'% (i+1)
         rmv_t = '{table#%d}'% (i+1)
         question = question.replace(rmv_i, '<image>')
         question = question.replace(rmv_t, '<image>')
+        choice_string = choice_string.replace(rmv_i, '<image>')
     
     new_item['conversations'] = [
         {
             "from": "human",
-            "value": meta_data['task_instruction'][item['task_instruction_id']] + question
+            "value": meta_data['task_instruction'][item['task_instruction_id']] + question + f'\nChoice list:[{choice_string}]. Your answer is:'
         },
         {
             "from": "gpt",
-            "value": item['response']
+            "value": item['response'][:7]
         }
     ]
     

@@ -40,13 +40,13 @@ for idx in range(total_len):
     new_item = {}
     new_item['id'] = item['sample_id']
     new_item['image'] = [os.path.join(dir, 'full/images', img) for img in item['task_instance']['images_path']]
-    try:
-        for img_path in new_item['image']:
-            image = Image.open(img_path)
-    except Exception as e:
-        print(e)
-        print(img_path)
-        continue
+    # try:
+    #     for img_path in new_item['image']:
+    #         image = Image.open(img_path)
+    # except Exception as e:
+    #     print(e)
+    #     print(img_path)
+    #     continue
     
     question = item['task_instance']['context']
     choice_list = item['task_instance']['choice_list']
