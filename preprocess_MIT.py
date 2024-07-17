@@ -87,7 +87,7 @@ print(f"Final test set size: {len(test_data)}")
 os.makedirs(os.path.join(dir, 'train'), exist_ok=True)
 os.makedirs(os.path.join(dir, 'test'), exist_ok=True)
 
-with open(os.path.join(dir, 'train', 'dataset.json'), 'w') as json_file:
+with open(os.path.join(dir, 'train', 'dataset-0.json'), 'w') as json_file:
     json.dump(train_data, json_file, indent=4)
-with open(os.path.join(dir, 'test', 'dataset.json'), 'w') as json_file:
+with open(os.path.join(dir, 'test', 'dataset-0.json'), 'w') as json_file:
     json.dump(test_data, json_file, indent=4)

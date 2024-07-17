@@ -8,6 +8,14 @@ np.random.seed(42)
 dir = 'dataset/PororoSV'
 with open(dir+'/full/full.json', 'r') as fp:
     full_data = json.load(fp)
+    
+subset_folder = os.path.join(dir, 'train')
+if not os.path.exists(subset_folder):
+    os.makedirs(subset_folder)
+    
+subset_folder = os.path.join(dir, 'test')
+if not os.path.exists(subset_folder):
+    os.makedirs(subset_folder)
 
 meta_data = full_data['metadata']
 full_data = full_data['data']
