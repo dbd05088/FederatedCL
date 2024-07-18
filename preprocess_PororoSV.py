@@ -136,10 +136,10 @@ for idx, item in enumerate(full_data):
 print(len(train_json_data))
 print(len(test_json_data))
 
-if len(train_json_data) > 10000:
-    train_json_data = np.random.choice(train_json_data, size=10000, replace=False).tolist()
-if len(test_json_data) > 2000:
-    test_json_data = np.random.choice(test_json_data, size=2000, replace=False).tolist()
+if len(train_json_data) > 6000:
+    train_json_data = np.random.choice(train_json_data, size=6000, replace=False).tolist()
+if len(test_json_data) > 1500:
+    test_json_data = np.random.choice(test_json_data, size=1500, replace=False).tolist()
 
 print(len(train_json_data))
 print(len(test_json_data))

@@ -10,14 +10,10 @@ unzip FlintstonesSV.zip
 rm FlintstonesSV.zip
 
 #vist
-# ./gdrive files download 1XA3C8CsxwAomJywTKZtajGTbBQYykhNG
-# unzip VIST.zip
-# rm VIST.zip
+gdrive files download 1XA3C8CsxwAomJywTKZtajGTbBQYykhNG
+unzip VIST.zip
+rm VIST.zip
 
-#didemosv
-# ./gdrive files download 17eOixv-DcQPATPdIdPpNrzOwrdenrYnX
-# unzip DiDeMoSV.zip
-# rm DiDeMoSV.zip
 
 # AESOP
 gdrive files download 1ErP6pHcsYtmoBjNSfyZwExJwRAdw5UyJ

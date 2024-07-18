@@ -1,14 +1,17 @@
 # CIL CONFIG
-NOTE="fedavg_llava_sc10_lr5e-5_bs16_itr100_constant" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="fedavg"
+NOTE="llava_zeroshot_full" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="llava_zeroshot"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 
 # fed args
-SCENARIO=10
-NUM_ROUNDS=10
-NUM_CLIENTS=9
-MODEL_MAX_LEN=7000
-MAX_NEW_TOKENS=256
+SCENARIO=20
+NUM_ROUNDS=5
+NUM_TASKS=4
+NUM_CLIENTS=10
+MODEL_MAX_LEN=20000
+MAX_NEW_TOKENS=512
+
+ROUND_TO_EVAL=$2
 
 # adam8bit_bnb adamw_torch
 
@@ -36,7 +39,7 @@ else
     exit 1
 fi
 
-CUDA_VISIBLE_DEVICES=3 python eval_VLM.py \
+CUDA_VISIBLE_DEVICES=$1 python eval_VLM_CL.py \
     --is_eval True \
     --model_name_or_path $MODEL_NAME \
     --model_name_for_dataarg $MODEL_NAME \
@@ -44,6 +47,7 @@ CUDA_VISIBLE_DEVICES=3 python eval_VLM.py \
     --version $VERSION \
     --scenario $SCENARIO \
     --num_rounds $NUM_ROUNDS \
+    --num_tasks $NUM_TASKS \
     --num_clients $NUM_CLIENTS \
     --model_max_length $MODEL_MAX_LEN \
     --max_new_tokens $MAX_NEW_TOKENS \
@@ -53,7 +57,8 @@ CUDA_VISIBLE_DEVICES=3 python eval_VLM.py \
     --tf32 True \
     --note $NOTE \
     --mode $MODE \
-    --eval_server True \
-    --round_to_eval 10 \
-    --output_dir "./nohup" > ./nohup/fedavg_llava_sc10_lr5e-5_bs16_itr100_constant_eval_round10.log 2>&1 &
+    --eval_server False \
+    --lora_enable False \
+    --round_to_eval $ROUND_TO_EVAL \
+    --output_dir "./nohup" > ./nohup/llava_zeroshot_full_eval_round$ROUND_TO_EVAL.log 2>&1 &
 # --eval_period $EVAL_PERIOD
