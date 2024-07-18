@@ -312,7 +312,7 @@ class CLManagerClient: # Client
             self.init_model()
             self.data_stream = iter(train_datalist)
             
-            # self.create_scheduler((len(train_datalist)//self.gradient_accumulation_steps)+1, self.num_rounds)
+            # self.create_scheduler((len(train_datalist))//self.gradient_accumulation_steps, num_cycles=1)
             
             self.initialize_future(train_datalist)
         else: # load_state
@@ -421,6 +421,8 @@ class CLManagerClient: # Client
         #         self.evaluate(data_info['data_name'], data_info['data'], curr_round)
         
         self.save_state(self.state['round_cnt'])
+        
+        # torch.cuda.empty_cache()
 
     # Memory 새로 정의 (not MemoryBase)
     def initialize_future(self, train_datalist):
@@ -452,9 +454,13 @@ class CLManagerClient: # Client
         self.future_num_updates += self.online_iter
 
         if len(self.temp_future_batch) >= self.temp_batch_size:
-            self.generate_waiting_batch(int(self.future_num_updates))
+            # self.generate_waiting_batch(int(self.future_num_updates))
+            # for stored_sample in self.temp_future_batch:
+            #     self.update_memory(stored_sample)
             for stored_sample in self.temp_future_batch:
                 self.update_memory(stored_sample)
+            self.generate_waiting_batch(int(self.future_num_updates))
+            
             self.temp_future_batch = []
             self.future_num_updates -= int(self.future_num_updates)
         self.future_sample_num += 1
@@ -492,14 +498,14 @@ class CLManagerClient: # Client
 
     def generate_waiting_batch(self, iterations):
         for i in range(iterations):
-            self.waiting_batch.append(self.temp_future_batch + self.memory.retrieval(self.memory_batch_size))
+            self.waiting_batch.append(self.temp_future_batch[:self.temp_batch_size] + self.memory.retrieval(self.memory_batch_size))
 
     def online_step(self, sample, sample_num, n_worker):
         self.sample_num = sample_num
         self.temp_batch.append(sample)
         self.num_updates += self.online_iter
         if len(self.temp_batch) >= self.temp_batch_size:
-            if int(self.num_updates) > 0:
+            if int(self.num_updates) >= 1:
                 train_loss = self.online_train(iterations=int(self.num_updates))
                 self.report_training(sample_num, train_loss)
                 self.num_updates -= int(self.num_updates)
