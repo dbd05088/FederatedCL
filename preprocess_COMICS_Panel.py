@@ -62,7 +62,7 @@ for idx in range(total_len):
     new_item['conversations'] = [
         {
             "from": "human",
-            "value": meta_data['task_instruction'][item['task_instruction_id']] + question + f'\nChoice list:[{choice_string}]. Your answer is:'
+            "value": meta_data['task_instruction'][item['task_instruction_id']] + question + f'\nChoices: {choice_string}. \nChoice list:[Image A, Image B, Image C, Image D]. Your answer is:'
         },
         {
             "from": "gpt",

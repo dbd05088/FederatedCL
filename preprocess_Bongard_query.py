@@ -32,14 +32,17 @@ def save_dataset(dataset_name, output_folder, subset_name):
         
         answer = item['caption']
         positive_imgfiles = item['imageFiles'][:7]
+        negative_imgfiles = item['imageFiles'][7:]
+        positive_imgfiles = ["dataset/Bongard-OpenWorld/"+path for path in positive_imgfiles]
+        negative_imgfiles = ["dataset/Bongard-OpenWorld/"+path for path in negative_imgfiles]
+        
         positive_files = positive_imgfiles[:-1]
         positive_queryfile = positive_imgfiles[-1]
-        negative_imgfiles = item['imageFiles'][7:]
+        
         negative_files = negative_imgfiles[:-1]
         negative_queryfile =  negative_imgfiles[-1]
         
-        positive_imgfiles = ["dataset/Bongard-OpenWorld/"+path for path in positive_imgfiles]
-        negative_imgfiles = ["dataset/Bongard-OpenWorld/"+path for path in negative_imgfiles]
+        
         
         for idx in range(0, len(positive_imgfiles),num_per_set):
             imgs = positive_files[idx:idx+num_per_set] + negative_files[idx:idx+num_per_set]
