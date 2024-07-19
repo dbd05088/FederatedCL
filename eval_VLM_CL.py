@@ -339,18 +339,18 @@ def main():
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     
     server_eval_key = []
-    # logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
-    # server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
+    logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
+    server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
         # load client weight
-        # logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
-        # client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
+        logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
+        client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
         
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
             if train_datalists[client_id][training_args.round_to_eval-1]['train_cnt'] > data_info['eval_cnt']:
                 # breakpoint()
-                # model.load_state_dict(client_state_dict, strict=False)
+                model.load_state_dict(client_state_dict, strict=False)
                 # model.load_state_dict(server_state_dict, strict=False)
                 if training_args.mode in ['apfl', 'ditto']:
                     for name, module in model.named_modules():
