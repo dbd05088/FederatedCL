@@ -197,7 +197,8 @@ def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_a
                 pred_option = can_infer(pred_sentence, choices)
             
                 if isinstance(pred_option, str):
-                    if gold == pred_option:
+                    # if gold == pred_option:
+                    if gold.lower() == pred_option.lower():
                         correct += 1
                         status='correct'
                     else:
@@ -224,6 +225,15 @@ def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_a
 def parse_choice_list(input_string):
     # Try to find the choice list in the format "Choice list:[...]"
     match = re.search(r'Choice list:\[(.*?)\]', input_string)
+    if match:
+        # Split the choices and strip whitespace
+        choices = [choice.strip() for choice in match.group(1).split(',')]
+        # If choices start with "Image", only keep the "Image X" part
+        if all(choice.startswith("Image ") for choice in choices):
+            choices = [re.match(r'(Image [A-D])', choice).group(1) for choice in choices]
+        return choices
+    
+    match = re.search(r'Choice List: \[(.*?)\]', input_string)
     if match:
         # Split the choices and strip whitespace
         choices = [choice.strip() for choice in match.group(1).split(',')]
