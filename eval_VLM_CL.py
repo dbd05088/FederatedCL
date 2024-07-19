@@ -273,6 +273,17 @@ def can_infer(answer, choices):
         for choice in choices:
             if choice in answer.upper():
                 return choice
+            
+    # remove underscore and try
+    answer =  answer.strip().replace('_', ' ').lower()
+    normalized_choices = [choice.replace('_', ' ').lower() for choice in choices]
+    if answer in normalized_choices:
+        return choices[normalized_choices.index(answer)]
+    # Check for partial matches
+    for i, choice in enumerate(normalized_choices):
+        if answer in choice or choice in answer:
+            return choices[i]
+    
     
     # If no match found, return False
     return False
