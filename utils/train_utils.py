@@ -16,6 +16,8 @@ from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
 from models.duallora.dualloralayer import DualLoraLayer
 from models.feddat_lora.tripleloralayer import TripleLoraLayer
 from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
+from models.llava.l2p_model import Llava_L2P
+
 import copy
 ACCESS_TOKEN = "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"
 
@@ -110,6 +112,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         #         **bnb_model_from_pretrained_args
         #     )
         #     print('load feddat')
+        elif training_args.mode == 'l2p':
+            assert model_args.model_type != 'mpt'
+            model = Llava_L2P.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load l2p')
         elif training_args.mode == 'fedsim' and training_args.is_eval:
             assert model_args.model_type != 'mpt'
             model = FEDSIMLlavaLlamaForCausalLM.from_pretrained(
@@ -224,16 +237,16 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             task_type="CAUSAL_LM",
         )
         
-        if training_args.mode in ['fedsim', 'apfl', 'ditto']:
+        if training_args.mode in ['fedsim', 'apfl', 'ditto'] or training_args.mode =='feddat':
             from models.duallora.dualloramodel import DualLoraModel
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['DUALLORA'] = DualLoraModel
             lora_config.peft_type = 'DUALLORA'
-        elif training_args.mode in ['feddat']:
-            from models.feddat_lora.tripleloramodel import TripleLoraModel
-            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
-            PEFT_TYPE_TO_MODEL_MAPPING['TRIPLELORA'] = TripleLoraModel
-            lora_config.peft_type = 'TRIPLELORA'
+        # elif training_args.mode in ['feddat']:
+            # from models.feddat_lora.tripleloramodel import TripleLoraModel
+            # from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            # PEFT_TYPE_TO_MODEL_MAPPING['TRIPLELORA'] = TripleLoraModel
+            # lora_config.peft_type = 'TRIPLELORA'
         
         # rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
@@ -260,7 +273,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-    
+    if training_args.mode == 'l2p':
+        vision_tower.select_feature = 'cls_path'
     # if not training_args.is_eval:
     #     data_args.img_mean = vision_tower.image_processor.image_mean
     #     data_args.img_std = vision_tower.image_processor.image_std
@@ -282,12 +296,14 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     elif training_args.mode == 'feddat':
         if training_args.is_eval:
             for name, module in model.named_modules():
-                if isinstance(module, TripleLoraLayer):
+                # if isinstance(module, TripleLoraLayer):
+                if isinstance(module, DualLoraLayer):
                     module.set_state('gate')
                     module.activate_all()
         else:
             for name, module in model.named_modules():
-                if isinstance(module, TripleLoraLayer):
+                # if isinstance(module, TripleLoraLayer):
+                if isinstance(module, DualLoraLayer):
                     module.set_state('lora1')
                     module.activate_all()
             model.lm_head.requires_grad_(False)
