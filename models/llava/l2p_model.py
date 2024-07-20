@@ -3,12 +3,15 @@ from torch import nn
 from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 from models.prompt import Prompt
+from typing import List, Optional, Tuple, Union
+from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.generation.utils import GenerateOutput
 
 class Llava_L2P(LlavaLlamaForCausalLM):
-    def __init__(self, config, prompt_num=20, topk=5, pool_size=10):
+    def __init__(self, config, prompt_num=20, top_k=5, pool_size=10):
         super().__init__(config)
         
-        self.lang_prompt = Prompt(length=prompt_num, topk=topk, pool_size=pool_size)
+        self.lang_prompt = Prompt(length=prompt_num, top_k=top_k, pool_size=pool_size, embed_dim=self.model.mm_projector[-1].out_features)
         # self.vis_prompt = nn.Parameter(torch.zero(1, prompt_num, embedding_size))
     
     def activate_prompt(self):
@@ -102,12 +105,12 @@ class Llava_L2P(LlavaLlamaForCausalLM):
             # cur_new_labels = []
             
             # l2p
-            breakpoint()
-            mean_cls_features = cls_features.mean(dim=1)
-            selected_prompts = self.lang_prompt(mean_cls_features)
-            breakpoint()
+            mean_cls_features = cls_features[batch_idx].mean(dim=0)
+            prompt_pool_output = self.lang_prompt(mean_cls_features.unsqueeze(0))
+            selected_prompts = prompt_pool_output['batched_prompt'][0]
+
             cur_new_input_embeds = [selected_prompts]
-            cur_new_labels = [torch.full((self.lang_prompt.shape[1],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype)]
+            cur_new_labels = [torch.full((selected_prompts.shape[0],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype)]
 
             for i in range(num_images + 1):
                 cur_new_input_embeds.append(cur_input_embeds_no_im[i])
@@ -177,4 +180,99 @@ class Llava_L2P(LlavaLlamaForCausalLM):
         if _position_ids is None:
             position_ids = None
 
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, prompt_pool_output
+    
+    def forward(
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        images: Optional[torch.FloatTensor] = None,
+        image_sizes: Optional[List[List[int]]] = None,
+        return_dict: Optional[bool] = None,
+        cache_position=None
+    ) -> Union[Tuple, CausalLMOutputWithPast]:
+
+        if inputs_embeds is None:
+            (
+                input_ids,
+                position_ids,
+                attention_mask,
+                past_key_values,
+                inputs_embeds,
+                labels,
+                prompt_pool_output
+            ) = self.prepare_inputs_labels_for_multimodal(
+                input_ids,
+                position_ids,
+                attention_mask,
+                past_key_values,
+                labels,
+                images,
+                image_sizes
+            )
+        self.labels = labels
+        outputs =  super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            labels=labels,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict
+        )
+        
+        if 'loss' in outputs and outputs['loss'] is not None:
+            outputs['loss'] -= 0.1*prompt_pool_output['reduce_sim']
+        
+        return outputs
+        
+    @torch.no_grad()
+    def generate(
+        self,
+        inputs: Optional[torch.Tensor] = None,
+        images: Optional[torch.Tensor] = None,
+        image_sizes: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> Union[GenerateOutput, torch.LongTensor]:
+        position_ids = kwargs.pop("position_ids", None)
+        attention_mask = kwargs.pop("attention_mask", None)
+        if "inputs_embeds" in kwargs:
+            raise NotImplementedError("`inputs_embeds` is not supported")
+
+        if images is not None:
+            (
+                inputs,
+                position_ids,
+                attention_mask,
+                _,
+                inputs_embeds,
+                _,
+                _
+            ) = self.prepare_inputs_labels_for_multimodal(
+                inputs,
+                position_ids,
+                attention_mask,
+                None,
+                None,
+                images,
+                image_sizes=image_sizes
+            )
+        else:
+            inputs_embeds = self.get_model().embed_tokens(inputs)
+
+        return super().generate(
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            inputs_embeds=inputs_embeds,
+            **kwargs
+        )

@@ -2,12 +2,13 @@ import torch
 import torch.nn as nn
 
 class Prompt(nn.Module):
-    def __init__(self, length=20, embed_dim=1024, embedding_key='cls', prompt_init='uniform', prompt_pool=True, 
+    def __init__(self, length=20, embed_dim=1024, key_dim=1024, embedding_key='cls', prompt_init='uniform', prompt_pool=True, 
                  prompt_key=True, pool_size=10, top_k=5, batchwise_prompt=True, prompt_key_init='uniform',):
         super().__init__()
 
         self.length = length
         self.embed_dim = embed_dim
+        self.key_dim = key_dim
         self.prompt_pool = prompt_pool
         self.embedding_key = embedding_key
         self.prompt_init = prompt_init
@@ -26,7 +27,7 @@ class Prompt(nn.Module):
         
         # if using learnable prompt keys
         if prompt_key:
-            key_shape = (pool_size, embed_dim)
+            key_shape = (pool_size, key_dim)
             if prompt_key_init == 'zero':
                 self.prompt_key = nn.Parameter(torch.zeros(key_shape))
             elif prompt_key_init == 'uniform':
@@ -114,6 +115,6 @@ class Prompt(nn.Module):
         
         # The input with the prompt concatenated to the front. [B, prompt+token, C]
         out['total_prompt_len'] = batched_prompt.shape[1]
-        out['prompted_embedding'] = torch.cat([batched_prompt, x_embed], dim=1)
+        out['batched_prompt'] = batched_prompt
 
         return out
