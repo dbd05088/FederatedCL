@@ -6,14 +6,38 @@ from models.prompt import Prompt
 from typing import List, Optional, Tuple, Union
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.generation.utils import GenerateOutput
+from models.llava.llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, \
+                         LlamaConfig, LlamaModel, LlamaForCausalLM
+                         
+class LlavaConfig(LlamaConfig):
+    model_type = "llava_llama"
 
-class Llava_L2P(LlavaLlamaForCausalLM):
+
+class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
+    config_class = LlavaConfig
+
+    def __init__(self, config: LlamaConfig):
+        super(LlavaLlamaModel, self).__init__(config)
+        
+class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
+    config_class = LlavaConfig
+
     def __init__(self, config, prompt_num=20, top_k=5, pool_size=10):
-        super().__init__(config)
+        super(LlamaForCausalLM, self).__init__(config)
+        self.model = LlavaLlamaModel(config)
+        self.pretraining_tp = config.pretraining_tp
+        self.vocab_size = config.vocab_size
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        # Initialize weights and apply final processing
+        self.post_init()
         
         self.lang_prompt = Prompt(length=prompt_num, top_k=top_k, pool_size=pool_size, embed_dim=self.model.mm_projector[-1].out_features)
-        # self.vis_prompt = nn.Parameter(torch.zero(1, prompt_num, embedding_size))
-    
+
+    def get_model(self):
+        return self.model
+
     def activate_prompt(self):
         self.lang_prompt.requires_grad_(True)
     
@@ -276,3 +300,16 @@ class Llava_L2P(LlavaLlamaForCausalLM):
             inputs_embeds=inputs_embeds,
             **kwargs
         )
+    
+    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, attention_mask=None,
+                                      inputs_embeds=None, **kwargs):
+        images = kwargs.pop("images", None)
+        image_sizes = kwargs.pop("image_sizes", None)
+        inputs = super().prepare_inputs_for_generation(
+            input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, attention_mask=attention_mask, **kwargs
+        )
+        if images is not None:
+            inputs['images'] = images
+        if image_sizes is not None:
+            inputs['image_sizes'] = image_sizes
+        return inputs
