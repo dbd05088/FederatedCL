@@ -65,7 +65,7 @@ def save_dataset(dataset_name, output_folder, subset_name):
                 }
                 json_data_list.append(json_data)
                 
-                imgs = np.random.choice(positive_files, size=3, replace=False).tolist() + np.random.choice(negative_files, size=3, replace=False).tolist()
+                imgs = np.random.choice(positive_files, size=num_per_set, replace=False).tolist() + np.random.choice(negative_files, size=num_per_set, replace=False).tolist()
                 
                 # breakpoint()
                 json_data = {

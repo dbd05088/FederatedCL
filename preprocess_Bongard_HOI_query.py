@@ -62,6 +62,8 @@ def save_dataset(dataset_name, output_folder, subset_name, max_num=None):
             }
             positive_samples.append(positive_sample)
             
+            selected_positive = random.sample(positive_files, num_per_set)
+            selected_negative = random.sample(negative_files, num_per_set)
             # Create negative sample
             negative_sample = {
                 "id": f"{type_name}-{idx}-negative",
