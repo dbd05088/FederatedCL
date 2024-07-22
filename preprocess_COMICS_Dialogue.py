@@ -34,7 +34,7 @@ if not os.path.exists(subset_folder):
 task_idx = 0
 train_json_data = []
 test_json_data = []
-
+alphabet = ['A','B','C','D','E']
 for idx in range(total_len):
     item = full_data[idx]
     new_item = {}
@@ -50,8 +50,9 @@ for idx in range(total_len):
     
     question = item['task_instance']['context']
     choice_list = item['task_instance']['choice_list']
+    answer_idx = choice_list.index(item['response'])
     # Create the string with the selected choices
-    choice_string = ', '.join(f'{choice_list[i]}' for i in range(len(choice_list))) 
+    choice_string = '| '.join(f'{alphabet[i]}: {choice_list[i]}' for i in range(len(choice_list))) 
     for i in range(len(new_item['image'])):
         rmv_i = '{image#%d}'% (i+1)
         rmv_t = '{table#%d}'% (i+1)
@@ -65,7 +66,7 @@ for idx in range(total_len):
         },
         {
             "from": "gpt",
-            "value": item['response']
+            "value": f"{alphabet[answer_idx]}: {item['response']}"
         }
     ]
     
