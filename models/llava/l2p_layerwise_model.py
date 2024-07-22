@@ -90,8 +90,10 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
             hidden_states = torch.concat((selected_prompts, hidden_states), dim=1)
             len_prompt = selected_prompts.shape[1]
             
-            attention_mask = torch.concat((torch.full((bsz, selected_prompts.shape[1]), True).cuda(), attention_mask), dim=1)
-            position_ids = torch.arange(hidden_states.shape[1]).unsqueeze(0).cuda()
+            if attention_mask is not None:
+                attention_mask = torch.concat((torch.full((bsz, selected_prompts.shape[1]), True).cuda(), attention_mask), dim=1)
+            if position_ids is not None:
+                position_ids = torch.arange(hidden_states.shape[1]).unsqueeze(0).cuda()
 
         residual = hidden_states
 
