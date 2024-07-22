@@ -18,6 +18,7 @@ from models.feddat_lora.tripleloralayer import TripleLoraLayer
 from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
 from models.llava.l2p_model import Llava_L2P
 from models.llava.l2p_layerwise_model import LlavaLlamaL2PForCausalLM
+from models.llava.dap_model import LlavaLlamaDAPForCausalLM
 
 import copy
 ACCESS_TOKEN = "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"
@@ -27,7 +28,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     attn_implementation = "flash_attention_2"
     assert model_args.vision_tower is not None
     
-    if training_args.mode == 'pfedpg' or training_args.mode == 'fedadapter' or training_args.mode == 'l2p' or training_args.mode == 'layer_l2p':
+    if training_args.mode == 'pfedpg' or training_args.mode == 'fedadapter' or training_args.mode == 'l2p' or training_args.mode == 'layer_l2p' or training_args.mode == 'dap':
         assert training_args.lora_enable == False, "no lora in pFedPG and feddat  and fedadapter"
     if training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
         assert training_args.gradient_accumulation_steps == 1
@@ -135,6 +136,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load layerwise l2p')
+        elif training_args.mode == 'dap':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaDAPForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load dap')
         elif training_args.mode == 'fedsim' and training_args.is_eval:
             assert model_args.model_type != 'mpt'
             model = FEDSIMLlavaLlamaForCausalLM.from_pretrained(
@@ -285,7 +297,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-    if training_args.mode == 'l2p':
+    if training_args.mode == 'l2p' or training_args.mode == 'dap':
         vision_tower.select_feature = 'cls_patch'
     # if not training_args.is_eval:
     #     data_args.img_mean = vision_tower.image_processor.image_mean
@@ -301,10 +313,15 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
     # FIXME: freeze mm_projector for feddat or not?
-    if training_args.mode == 'pfedpg' or training_args.mode == 'l2p' or training_args.mode == 'layer_l2p':
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = False
-        model.lm_head.requires_grad_(False)
+    if training_args.mode == 'pfedpg' or training_args.mode == 'l2p' or training_args.mode == 'layer_l2p' or training_args.mode == 'dap':
+        # for p in model.get_model().mm_projector.parameters():
+        #     p.requires_grad = False
+        # model.lm_head.requires_grad_(False)
+        for n, p in model.named_parameters():
+            if 'lang_prompt' in n :
+                p.requires_grad_(True)
+            else:
+                p.requires_grad_(False)
     elif training_args.mode == 'feddat':
         if training_args.is_eval:
             for name, module in model.named_modules():
