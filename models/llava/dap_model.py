@@ -97,8 +97,8 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         if image_feature_indices is not None:
             image_features = []
             for i in range(bsz):
-                img_feat = torch.stack(torch.split(hidden_states[i,image_feature_indices[i], :], 576, dim=1), dim=1)
-                img_feat = torch.mean(img_feat, dim=1)
+                img_feat = torch.stack(torch.split(hidden_states[i,image_feature_indices[i], :], 576, dim=0), dim=0)
+                img_feat = torch.mean(img_feat, dim=0)
                 image_features.append(img_feat)
                 
             image_features = torch.stack(image_features, dim=0)
@@ -398,7 +398,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         
         self.pool_size = 4
         self.prompt_dim = 1024
-        val = math.sqrt(6. / float(3 * reduce(mul, self.patch_size, 1) + self.prompt_dim))
+        val = math.sqrt(6. / float(3 * reduce(mul, (576,), 1) + self.prompt_dim))
         self.lang_prompt_dap_key_embeddings = nn.Parameter(torch.zeros(self.pool_size, self.prompt_dim))
         nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
         self.lang_prompt_dap_emb = torch.nn.Embedding(self.pool_size, 1024)
@@ -421,7 +421,9 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         images: Optional[torch.FloatTensor] = None,
         image_sizes: Optional[List[List[int]]] = None,
         return_dict: Optional[bool] = None,
-        cache_position=None
+        cache_position=None,
+        image_feature_indices=None,
+        task_id_estimated_emb=None
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
         if inputs_embeds is None:
@@ -442,7 +444,11 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 images,
                 image_sizes
             )
-            image_feature_indices, task_id_estimated_emb, reduce_sim = image_feature_indices
+            if image_feature_indices is not None:
+                image_feature_indices, task_id_estimated_emb, reduce_sim = image_feature_indices
+            else:
+                task_id_estimated_emb = None
+                reduce_sim=0
 
         outputs = super().forward(
             input_ids=input_ids,
@@ -485,7 +491,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 _,
                 inputs_embeds,
                 _,
-                _
+                image_feature_indices
             ) = self.prepare_inputs_labels_for_multimodal(
                 inputs,
                 position_ids,
@@ -495,6 +501,9 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 images,
                 image_sizes=image_sizes
             )
+            image_feature_indices, task_id_estimated_emb, reduce_sim = image_feature_indices
+            kwargs["image_feature_indices"] = image_feature_indices
+            kwargs["task_id_estimated_emb"] = task_id_estimated_emb
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
@@ -513,16 +522,103 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         return image_features, cls_feature
     
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, attention_mask=None,
-                                      inputs_embeds=None, **kwargs):
+                                      inputs_embeds=None, image_feature_indices=None, task_id_estimated_emb=None, cache_position=None, **kwargs):
         images = kwargs.pop("images", None)
         image_sizes = kwargs.pop("image_sizes", None)
-        inputs = super().prepare_inputs_for_generation(
-            input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, attention_mask=attention_mask, **kwargs
+        # image_feature_indices = kwargs.pop("image_feature_indices", None)
+        
+        # With static cache, the `past_key_values` is None
+        # TODO joao: standardize interface for the different Cache classes and remove of this if
+        has_static_cache = False
+        if past_key_values is None:
+            past_key_values = getattr(getattr(self.model.layers[0], "self_attn", {}), "past_key_value", None)
+            has_static_cache = past_key_values is not None
+
+        past_length = 0
+        if past_key_values is not None:
+            if isinstance(past_key_values, Cache):
+                past_length = cache_position[0] if cache_position is not None else past_key_values.get_seq_length()
+                max_cache_length = (
+                    torch.tensor(past_key_values.get_max_length(), device=input_ids.device)
+                    if past_key_values.get_max_length() is not None
+                    else None
+                )
+                cache_length = past_length if max_cache_length is None else torch.min(max_cache_length, past_length)
+            # TODO joao: remove this `else` after `generate` prioritizes `Cache` objects
+            else:
+                cache_length = past_length = past_key_values[0][0].shape[2]
+                max_cache_length = None
+
+            # Keep only the unprocessed tokens:
+            # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
+            # some of the inputs are exclusively passed as part of the cache (e.g. when passing input_embeds as
+            # input)
+            past_length -= 100 # - prompt num
+            if attention_mask is not None and attention_mask.shape[1] > input_ids.shape[1]:
+                input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
+            # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
+            # input_ids based on the past_length.
+            elif past_length < input_ids.shape[1]:
+                input_ids = input_ids[:, past_length:]
+            # 3 - Otherwise (past_length >= input_ids.shape[1]), let's assume input_ids only has unprocessed tokens.
+
+            # If we are about to go beyond the maximum cache length, we need to crop the input attention mask.
+            if (
+                max_cache_length is not None
+                and attention_mask is not None
+                and cache_length + input_ids.shape[1] > max_cache_length
+            ):
+                attention_mask = attention_mask[:, -max_cache_length:]
+
+        position_ids = kwargs.get("position_ids", None)
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values:
+                position_ids = position_ids[:, -input_ids.shape[1] :]
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            # The `contiguous()` here is necessary to have a static stride during decoding. torchdynamo otherwise
+            # recompiles graphs as the stride of the inputs is a guard. Ref: https://github.com/huggingface/transformers/pull/29114
+            # TODO: use `next_tokens` directly instead.
+            model_inputs = {"input_ids": input_ids.contiguous()}
+
+        input_length = position_ids.shape[-1] if position_ids is not None else input_ids.shape[-1]
+        if cache_position is None:
+            cache_position = torch.arange(past_length, past_length + input_length, device=input_ids.device)
+        else:
+            cache_position = cache_position[-input_length:]
+
+        if has_static_cache:
+            past_key_values = None
+
+        model_inputs.update(
+            {
+                "position_ids": position_ids,
+                "cache_position": cache_position,
+                "past_key_values": past_key_values,
+                "use_cache": kwargs.get("use_cache"),
+                "attention_mask": attention_mask,
+            }
         )
+        
+        inputs = model_inputs
+        
+        
+        
+        
         if images is not None:
             inputs['images'] = images
         if image_sizes is not None:
             inputs['image_sizes'] = image_sizes
+        if image_feature_indices is not None:
+            inputs['image_feature_indices'] = image_feature_indices
+        if task_id_estimated_emb is not None:
+            inputs['task_id_estimated_emb'] = task_id_estimated_emb
         return inputs
     
     def prepare_inputs_labels_for_multimodal(
