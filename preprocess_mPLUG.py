@@ -50,7 +50,7 @@ for task in tasks:
         print(len(jsondata))
         for idx in range(len(jsondata)):
             if len(jsondata[idx]['image']) == 0:
-                continue
+                idx_to_del.append(idx)
             else:
                 # check image token invalidity
                 valid_img_num = len(jsondata[idx]['image'])
