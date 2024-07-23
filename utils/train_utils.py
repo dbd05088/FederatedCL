@@ -19,6 +19,8 @@ from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
 from models.llava.l2p_model import Llava_L2P
 from models.llava.l2p_layerwise_model import LlavaLlamaL2PForCausalLM
 from models.llava.dap_model import LlavaLlamaDAPForCausalLM
+from models.llava.l2p_layerwise_text_model import LlavaLlamaL2PtextForCausalLM
+from models.llava.l2p_text_model import Llava_L2Ptext
 
 import copy
 ACCESS_TOKEN = "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"
@@ -28,7 +30,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     attn_implementation = "flash_attention_2"
     assert model_args.vision_tower is not None
     
-    if training_args.mode == 'pfedpg' or training_args.mode == 'fedadapter' or training_args.mode == 'l2p' or training_args.mode == 'layer_l2p' or training_args.mode == 'dap':
+    if training_args.mode == 'pfedpg' or training_args.mode == 'fedadapter' or training_args.mode == 'dap' or 'l2p' in training_args.mode:
         assert training_args.lora_enable == False, "no lora in pFedPG and feddat  and fedadapter"
     if training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
         assert training_args.gradient_accumulation_steps == 1
@@ -104,16 +106,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load pfedpg')
-        # elif training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
-        #     assert model_args.model_type != 'mpt'
-        #     model = LlavaLlamaAdapterForCausalLM.from_pretrained(
-        #         model_args.model_name_or_path,
-        #         cache_dir=training_args.cache_dir,
-        #         attn_implementation=attn_implementation,
-        #         torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-        #         **bnb_model_from_pretrained_args
-        #     )
-        #     print('load feddat')
         elif training_args.mode == 'l2p':
             assert model_args.model_type != 'mpt'
             model = Llava_L2P.from_pretrained(
@@ -136,6 +128,28 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load layerwise l2p')
+        elif training_args.mode == 'layer_l2p_text':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaL2PtextForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load layerwise l2p text')
+        elif training_args.mode == 'l2p_text':
+            assert model_args.model_type != 'mpt'
+            model = Llava_L2Ptext.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load l2p text')
         elif training_args.mode == 'dap':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaDAPForCausalLM.from_pretrained(
@@ -313,7 +327,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
     # FIXME: freeze mm_projector for feddat or not?
-    if training_args.mode == 'pfedpg' or training_args.mode == 'l2p' or training_args.mode == 'layer_l2p' or training_args.mode == 'dap':
+    if training_args.mode == 'pfedpg' or training_args.mode == 'dap' or 'l2p' in training_args.mode:
         # for p in model.get_model().mm_projector.parameters():
         #     p.requires_grad = False
         # model.lm_head.requires_grad_(False)
@@ -397,6 +411,14 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
+    total_count = 0
+    for n, p in model.named_parameters():
+        if p.requires_grad:
+            print(n)
+            total_count += p.numel()
+    print(total_count)
+    # breakpoint()
+    
     return model, tokenizer, data_args
 
 def find_all_linear_names(model):

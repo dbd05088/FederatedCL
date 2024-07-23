@@ -53,7 +53,7 @@ for idx in range(total_len):
     question = item['task_instance']['context']
     choice_list = item['task_instance']['choice_list']
     # Create the string with the selected choices
-    choice_string = ', '.join(f'{choice_list[i]}' for i in range(len(choice_list))) 
+    choice_string = '| '.join(f'{choice_list[i]}' for i in range(len(choice_list))) 
     for i in range(len(new_item['image'])):
         rmv_i = '{image#%d}'% (i+1)
         rmv_t = '{table#%d}'% (i+1)

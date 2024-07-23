@@ -427,7 +427,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         image_feature_indices=None,
         task_id_estimated_emb=None
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-
+        
         if inputs_embeds is None:
             (
                 input_ids,
@@ -484,7 +484,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         attention_mask = kwargs.pop("attention_mask", None)
         if "inputs_embeds" in kwargs:
             raise NotImplementedError("`inputs_embeds` is not supported")
-
+        
         if images is not None:
             (
                 inputs,
@@ -558,6 +558,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             past_length -= 100 # - prompt num
             if attention_mask is not None and attention_mask.shape[1] > input_ids.shape[1]:
                 input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
+                attention_mask = torch.concat((torch.full((attention_mask.shape[0], 100), True).cuda(), attention_mask), dim=1)
             # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
             # input_ids based on the past_length.
             elif past_length < input_ids.shape[1]:
@@ -578,7 +579,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past_key_values:
-                position_ids = position_ids[:, -input_ids.shape[1] :]
+                position_ids = position_ids[:, -input_ids.shape[1] :] #+ 100
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
         if inputs_embeds is not None and past_key_values is None:
@@ -593,14 +594,14 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         if cache_position is None:
             cache_position = torch.arange(past_length, past_length + input_length, device=input_ids.device)
         else:
-            cache_position = cache_position[-input_length:]
+            cache_position = cache_position[-input_length:] + 100
 
         if has_static_cache:
             past_key_values = None
 
         model_inputs.update(
             {
-                "position_ids": position_ids,
+                "position_ids": position_ids ,
                 "cache_position": cache_position,
                 "past_key_values": past_key_values,
                 "use_cache": kwargs.get("use_cache"),
@@ -609,9 +610,6 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         )
         
         inputs = model_inputs
-        
-        
-        
         
         if images is not None:
             inputs['images'] = images

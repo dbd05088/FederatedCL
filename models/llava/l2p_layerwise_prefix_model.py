@@ -20,7 +20,7 @@ import torch.nn as nn
 
 from transformers import AutoConfig, AutoModelForCausalLM, \
                          LlamaConfig, LlamaModel, LlamaForCausalLM
-from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
+from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer, LlamaMLP
 
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.generation.utils import GenerateOutput
@@ -36,13 +36,20 @@ from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 from models.prompt import Prompt
 import torch.nn.functional as F
+from models.prefix_tuning import Prefix_Tuning_attention
 
 logger = logging.get_logger(__name__)
 
 
-class LlamaDecoderL2PLayer(LlamaDecoderLayer):
+class LlamaDecoderL2PprefixLayer(LlamaDecoderLayer):
     def __init__(self, config: LlamaConfig, layer_idx: int):
-        super().__init__(config, layer_idx)
+        super(LlamaDecoderLayer, self).__init__()
+        self.hidden_size = config.hidden_size
+
+        self.self_attn = Prefix_Tuning_attention(config=config, layer_idx=layer_idx)
+        self.mlp = LlamaMLP(config)
+        self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
         self.lang_prompt = Prompt(length=20, top_k=5, pool_size=10, embed_dim=config.hidden_size, key_dim=config.hidden_size)
 
@@ -87,18 +94,12 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
             image_features = torch.stack(image_features, dim=0)
             prompt_pool_output = self.lang_prompt(image_features)
             selected_prompts = prompt_pool_output['batched_prompt']
-            hidden_states = torch.concat((selected_prompts, hidden_states), dim=1)
-            len_prompt = selected_prompts.shape[1]
-            
-            if attention_mask is not None:
-                attention_mask = torch.concat((torch.full((bsz, selected_prompts.shape[1]), True).cuda(), attention_mask), dim=1)
-            if position_ids is not None:
-                position_ids = torch.arange(hidden_states.shape[1]).unsqueeze(0).cuda()
-
+        else:
+            selected_prompts = None
         residual = hidden_states
 
         hidden_states = self.input_layernorm(hidden_states)
-
+        breakpoint()
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
             hidden_states=hidden_states,
@@ -108,6 +109,7 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
+            prompts=selected_prompts,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -118,9 +120,6 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
         
-        # remove prompt
-        if image_feature_indices is not None:
-            hidden_states = hidden_states[:,len_prompt:,:]
         
         outputs = (hidden_states,)
 
@@ -134,7 +133,7 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
             outputs += (prompt_pool_output['reduce_sim'],)
 
         return outputs
-class LlamaL2PModel(LlamaModel):
+class LlamaL2PprefixModel(LlamaModel):
     def __init__(self, config: LlamaConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
@@ -142,7 +141,7 @@ class LlamaL2PModel(LlamaModel):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
-            [LlamaDecoderL2PLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [LlamaDecoderL2PprefixLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.gradient_checkpointing = False
@@ -276,14 +275,14 @@ class LlavaConfig(LlamaConfig):
     model_type = "llava_llama"
 
 
-class LlavaLlamaL2PModel(LlavaMetaModel, LlamaL2PModel):
+class LlavaLlamaL2PprefixModel(LlavaMetaModel, LlamaL2PprefixModel):
     config_class = LlavaConfig
 
     def __init__(self, config: LlamaConfig):
-        super(LlavaLlamaL2PModel, self).__init__(config)
+        super(LlavaLlamaL2PprefixModel, self).__init__(config)
 
 
-class LlamaL2pForCausalLM(LlamaForCausalLM):
+class LlamaL2pprefixForCausalLM(LlamaForCausalLM):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -357,12 +356,12 @@ class LlamaL2pForCausalLM(LlamaForCausalLM):
         )
 
 
-class LlavaLlamaL2PForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
+class LlavaLlamaL2PprefixForCausalLM(LlamaL2pprefixForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
     def __init__(self, config, prompt_num):
         super(LlamaForCausalLM, self).__init__(config)
-        self.model = LlavaLlamaL2PModel(config)
+        self.model = LlavaLlamaL2PprefixModel(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
@@ -500,7 +499,6 @@ class LlavaLlamaL2PForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
             past_length -= 100 # - prompt num
             if attention_mask is not None and attention_mask.shape[1] > input_ids.shape[1]:
                 input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
-                attention_mask = torch.concat((torch.full((attention_mask.shape[0], 100), True).cuda(), attention_mask), dim=1)
             # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
             # input_ids based on the past_length.
             elif past_length < input_ids.shape[1]:
@@ -521,7 +519,7 @@ class LlavaLlamaL2PForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past_key_values:
-                position_ids = position_ids[:, -input_ids.shape[1] :] #+ 100
+                position_ids = position_ids[:, -input_ids.shape[1] :]
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
         if inputs_embeds is not None and past_key_values is None:
@@ -536,7 +534,7 @@ class LlavaLlamaL2PForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
         if cache_position is None:
             cache_position = torch.arange(past_length, past_length + input_length, device=input_ids.device)
         else:
-            cache_position = cache_position[-input_length:] + 100
+            cache_position = cache_position[-input_length:]
 
         if has_static_cache:
             past_key_values = None
@@ -552,6 +550,9 @@ class LlavaLlamaL2PForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
         )
         
         inputs = model_inputs
+        
+        
+        
         
         if images is not None:
             inputs['images'] = images

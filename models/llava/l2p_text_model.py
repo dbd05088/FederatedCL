@@ -20,7 +20,7 @@ class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
     def __init__(self, config: LlamaConfig):
         super(LlavaLlamaModel, self).__init__(config)
         
-class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
+class Llava_L2Ptext(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
     def __init__(self, config, prompt_num=20, top_k=5, pool_size=10):
@@ -33,7 +33,8 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
         # Initialize weights and apply final processing
         self.post_init()
         
-        self.lang_prompt = Prompt(length=prompt_num, top_k=top_k, pool_size=pool_size, embed_dim=self.model.mm_projector[-1].out_features)
+        self.lang_prompt = Prompt(length=prompt_num, top_k=top_k, pool_size=pool_size, embed_dim=self.model.mm_projector[-1].out_features,
+                                  key_dim=self.model.mm_projector[-1].out_features)
 
     def get_model(self):
         return self.model
@@ -47,13 +48,6 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
     def get_prompt(self):
         return self.lang_prompt
     
-    def encode_images(self, images):
-        image_features = self.get_model().get_vision_tower()(images)
-        cls_feature = image_features[:, 0]
-        image_features = image_features[:, 1:]
-        image_features = self.get_model().mm_projector(image_features)
-        return image_features, cls_feature
-    
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
         images, image_sizes=None
@@ -66,14 +60,13 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
             if type(images) is list:
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
             concat_images = torch.cat([image for image in images], dim=0)
-            image_features, cls_features = self.encode_images(concat_images)
+            image_features = self.encode_images(concat_images)
             split_sizes = [image.shape[0] for image in images]
             image_features = torch.split(image_features, split_sizes, dim=0)
-            cls_features = torch.split(cls_features, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
             image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
         else:
-            image_features, cls_features = self.encode_images(images)
+            image_features = self.encode_images(images)
 
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(self.config, 'mm_use_im_start_end', False):
@@ -104,7 +97,6 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
         new_labels = []
         
         cur_image_idx = 0
-        reduce_sim = 0
         for batch_idx, cur_input_ids in enumerate(input_ids):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
             if num_images == 0:
@@ -126,17 +118,11 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
             split_sizes = [x.shape[0] for x in cur_labels_noim]
             cur_input_embeds = self.get_model().embed_tokens(torch.cat(cur_input_ids_noim))
             cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)
-            # cur_new_input_embeds = []
-            # cur_new_labels = []
+            cur_new_input_embeds = []
+            cur_new_labels = []
             
-            # l2p
-            mean_cls_features = cls_features[batch_idx].mean(dim=0)
-            prompt_pool_output = self.lang_prompt(mean_cls_features.unsqueeze(0))
-            selected_prompts = prompt_pool_output['batched_prompt'][0]
-            reduce_sim += prompt_pool_output['reduce_sim']
-
-            cur_new_input_embeds = [selected_prompts]
-            cur_new_labels = [torch.full((selected_prompts.shape[0],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype)]
+            # cur_new_input_embeds = [selected_prompts]
+            # cur_new_labels = [torch.full((selected_prompts.shape[0],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype)]
 
             for i in range(num_images + 1):
                 cur_new_input_embeds.append(cur_input_embeds_no_im[i])
@@ -154,6 +140,17 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
 
             new_input_embeds.append(cur_new_input_embeds)
             new_labels.append(cur_new_labels)
+
+        
+        # l2p
+        mean_cls_features = torch.stack([input_embed.mean(dim=0) for input_embed in new_input_embeds])
+        # mean_cls_features = new_input_embeds.mean(dim=1)
+        prompt_pool_output = self.lang_prompt(mean_cls_features)
+        selected_prompts = prompt_pool_output['batched_prompt']
+        
+        for b in range(len(selected_prompts)):
+            new_input_embeds[b] = torch.concat((selected_prompts[b], new_input_embeds[b]), dim=0)
+            new_labels[b] = torch.concat((torch.full((selected_prompts.shape[1],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype),new_labels[b]), dim=0)
 
         # Truncate sequences to max length as image embeddings can make the sequence longer
         tokenizer_model_max_length = getattr(self.config, 'tokenizer_model_max_length', None)
@@ -206,7 +203,7 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
         if _position_ids is None:
             position_ids = None
 
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, reduce_sim
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, prompt_pool_output
     
     def forward(
         self,
@@ -233,7 +230,7 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 inputs_embeds,
                 labels,
-                reduce_sim
+                prompt_pool_output
             ) = self.prepare_inputs_labels_for_multimodal(
                 input_ids,
                 position_ids,
@@ -258,7 +255,7 @@ class Llava_L2P(LlamaForCausalLM, LlavaMetaForCausalLM):
         )
         
         if 'loss' in outputs and outputs['loss'] is not None:
-            outputs['loss'] -= 0.1*reduce_sim
+            outputs['loss'] -= 0.1*prompt_pool_output['reduce_sim']
         
         return outputs
         

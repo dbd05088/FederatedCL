@@ -82,7 +82,7 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
         if image_feature_indices is not None:
             image_features = []
             for i in range(bsz):
-                image_features.append(hidden_states[i,image_feature_indices[i], :].mean(dim=0))
+                image_features.append(hidden_states[i,:, :].mean(dim=0))
                 
             image_features = torch.stack(image_features, dim=0)
             prompt_pool_output = self.lang_prompt(image_features)
@@ -357,7 +357,7 @@ class LlamaL2pForCausalLM(LlamaForCausalLM):
         )
 
 
-class LlavaLlamaL2PForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
+class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
     def __init__(self, config, prompt_num):
