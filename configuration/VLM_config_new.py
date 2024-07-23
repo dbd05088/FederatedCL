@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 import transformers
-from typing import Dict, Optional, Sequence, List, Union
+from typing import Optional
 
 @dataclass
 class ModelArguments:
@@ -29,10 +29,6 @@ class DataArguments:
     image_folder: Optional[str] = field(default=None)
     image_aspect_ratio: str = 'pad'
     model_name_for_dataarg: Optional[str] = field(default=None)
-
-
-import torch
-import os
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
@@ -66,19 +62,19 @@ class TrainingArguments(transformers.TrainingArguments):
     state_dir: str = field(default="./client_states")
     final_lr: float = field(default=1e-6)
     mm_final_lr: float = field(default=1e-6)
+    
+    # continual learning
+    memory_size: int = 100000
+    is_streamonly: bool = True
+    
     # prompt tuning args
     prompt_num: int = field(default=100)
-    # dataloader_num_workers
+    
     optim: str = field(default="adamw_torch")
     is_wsd: str = field(default=None)
     decay_ratio: float = field(default=1.0)
-    # per_gpu_train_batch_size
-    # per_device_eval_batch_size
-    # per_device_eval_batch_size
-    # learning_rate
+    
     temp_batchsize: int = field(default=2)
-    # seed
-    # tf32
 
     cache_dir: Optional[str] = field(default=None)
     

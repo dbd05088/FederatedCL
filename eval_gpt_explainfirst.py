@@ -12,8 +12,7 @@ NUM_SECONDS_TO_SLEEP = 0.5
 
 client = OpenAI(
     # This is the default and can be omitted
-    # api_key=os.environ.get("OPENAI_API_KEY"),
-    api_key="sk-proj-uw3bhK9gbQ9hri0UHhjKT3BlbkFJrQgQPShJ3kDn639B7OI9"
+    api_key=os.environ.get("OPENAI_API_KEY"),
 )
 
 def get_eval(content: str, max_tokens: int):
@@ -21,7 +20,8 @@ def get_eval(content: str, max_tokens: int):
                         {"type":"text", "text":content['text']},
                     ]
 
-    while True:
+    count = 0
+    while count < 10:
         try:
             '''
             
@@ -38,7 +38,7 @@ def get_eval(content: str, max_tokens: int):
                 temperature=0.2,  # TODO: figure out which temperature is best for evaluation
                 max_tokens=max_tokens,
             )
-            break
+            return response.choices[0].message.content
         except openai.APIConnectionError as e:
             print("The server could not be reached")
             print(e.__cause__)  # an underlying Exception, likely raised within httpx.
@@ -49,7 +49,8 @@ def get_eval(content: str, max_tokens: int):
             print(e.status_code)
             print(e.response)
         time.sleep(NUM_SECONDS_TO_SLEEP)
-    return response.choices[0].message.content
+        count += 1
+    return "Score: 0"
 
 def parse_score(review):
     try:
@@ -101,16 +102,16 @@ if __name__ == '__main__':
     #             The assistant receives an overall score on a scale of 1 to 10, where a higher score indicates better overall performance.\n\
     #             Please first provide a brief explanation of your evaluation explanation.\n\
     #             In the subsequent line, please provide a single line containing the score for Assistant, in the format of\n\
-    #             Score: <an integer value on a sacle 1 to 10>"}
+    #             Score: <an integer value on a scale 1 to 10>"}
     
     rule = {"role": "Assistant", 
             "prompt": "We would like to request your feedback on the performance of an AI assistant in response to the user input and ground-truth response displayed above.\
-                The user asks the question on observing an image or mutiple images. The images replaces <image> tokens in [Input].\n\
-                Please rate relevance and correctness of [Assistant] compared to [Ground-Truth]. \
+                The user asks the question on observing an image or mutiple images. The images replace <image> tokens in [Input].\n\
+                Please rate a correctness of [Assistant] compared to [Ground-Truth]. \
                 The assistant receives an overall score on a scale of 1 to 10, where a higher score indicates better overall performance.\n\
                 Please first provide a brief explanation of your evaluation explanation.\n\
                 In the subsequent line, please provide a single line containing the score for Assistant, in the format of\n\
-                Score: <an integer value on a sacle 1 to 10>"}
+                Score: <an integer value on a scale 1 to 10>"}
     
     handles = []
     for item in results_dict[:-1]:

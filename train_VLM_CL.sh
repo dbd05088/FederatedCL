@@ -1,7 +1,7 @@
 #/bin/bash
 # CIL CONFIG
-NOTE="sft_nomem_sc20_lr5e-5_4tasks_5rounds_itr125" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="sft"
+NOTE="dap_100_4_1024_nomem_sc20_lr1e-2_4tasks_5rounds_itr125" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="dap"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 RND_SEED=1
 
@@ -12,13 +12,19 @@ NUM_TASKS=4
 NUM_CLIENTS=10
 MODEL_MAX_LEN=15000
 NUM_ITER=125
+MEMORY_SIZE=100000
+IS_STREAMONLY=True
+
+LORA_ENABLE=False
+PROMPT_NUM=100
+
 
 BATCHSIZE=4
 
-LR=5e-5
-MM_PROJECTOR_LR=5e-5
-FINAL_LR=5e-5
-MM_FINAL_LR=5e-5
+LR=1e-2
+MM_PROJECTOR_LR=1e-2
+FINAL_LR=1e-2
+MM_FINAL_LR=1e-2
 OPT_NAME="adamw_torch" # adam8bit_bnb adamw_torch
 SCHED_NAME="constant" #cosine
 WARMUP_RATIO=0.1 # SHOULD BE 0.03 / NUM_ROUNDS
@@ -82,8 +88,11 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port 29500 \
     --save_strategy "no" \
     --logging_steps 2 \
     --note $NOTE \
-    --lora_enable True \
-    --output_dir "./results/test/" > ./nohup/sft_nomem_sc20_lr5e-5_4tasks_5rounds_itr125.log 2>&1 &
+    --memory_size $MEMORY_SIZE \
+    --is_streamonly $IS_STREAMONLY \
+    --prompt_num $PROMPT_NUM \
+    --lora_enable $LORA_ENABLE \
+    --output_dir "./results/test/" > ./nohup/dap_100_4_1024_nomem_sc20_lr1e-2_4tasks_5rounds_itr125.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD
 # lr_scheduler_type

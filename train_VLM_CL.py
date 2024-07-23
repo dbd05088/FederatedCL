@@ -8,24 +8,15 @@ from configuration.VLM_config_new import ModelArguments, DataArguments, Training
 import transformers
 from utils.train_utils import get_VLMmodel, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, safe_save_model_for_hf_trainer, load_deepspeed
 
-# from utils.method_manager_VLM import select_method
 from federated_methods.method_manager import select_method
 from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
-from typing import Dict, Optional, Sequence, List
+from typing import Dict
 
-from torch import multiprocessing
 import copy
-import torch.distributed as dist
 import json
 from transformers import BitsAndBytesConfig
-from models.llava.llava_trainer import LLaVATrainer
-from collections import OrderedDict
-from deepspeed import zero
 import time
 import datetime
-import math
-# import warnings
-# warnings.filterwarnings('ignore')
 
 def main():
     parser = transformers.HfArgumentParser(
@@ -54,8 +45,6 @@ def main():
     os.makedirs(f"results/{training_args.mode}/{training_args.note}", exist_ok=True)
     os.makedirs(f"tensorboard/{training_args.mode}/{training_args.note}", exist_ok=True)
     fileHandler = logging.FileHandler(f'results/{training_args.mode}/{training_args.note}/seed_{training_args.seed}.log', mode="w")
-
-    # writer = SummaryWriter(f'tensorboard/{training_args.mode}/{training_args.note}/federated')
 
     formatter = logging.Formatter(
         "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
@@ -99,12 +88,13 @@ def main():
     extra_state_dict_dict = set_state_dict(model, global_state_dict, local_state_dict_list, training_args)
 
     training_loss = [[] for i in range(training_args.num_clients)]
+    
     # start federated learning
     start_time = time.time()
     frac_clients = 1
-    # memory = [[]]*training_args.num_clients
+    
     memory = [[] for id in range(training_args.num_clients)]
-    memory_size = 50000
+    memory_size = training_args.memory_size
     total_batchsize = training_args.per_gpu_train_batch_size*training_args.world_size*training_args.gradient_accumulation_steps
     init_lr = training_args.learning_rate
     mm_init_lr = training_args.mm_projector_lr
@@ -122,7 +112,7 @@ def main():
         selected_ids = sorted(random.sample(cids, num_selection)) #[0,1,2,3]#
         if training_args.local_rank == 0 or training_args.local_rank == -1: 
             logger.info(f"Round {curr_round} | selected_ids: {selected_ids}\n")
-        # print(f"Round {curr_round} | selected_ids: {selected_ids}\n")
+        
         # selected_ids = cids
         training_args.learning_rate = init_lr - lr_step*curr_round
         training_args.mm_projector_lr = mm_init_lr - mm_lr_step*curr_round
@@ -145,28 +135,29 @@ def main():
             datalist = []
             iter_ratio = num_iterations / len(sub_dataset)
             
-            # memory-only
-            # for i, sample in enumerate(sub_dataset):
-            #     if len(memory[client_id]) == memory_size:
-            #         memory[client_id].pop(random.randrange(memory_size))
-            #     memory[client_id].append(sample)
-            #     iteration += iter_ratio
-            #     if iteration >= 1:
-            #         for _ in range(int(iteration)):
-            #             batch = random.sample(memory[client_id], k=min(len(memory[client_id]), total_batchsize))
-            #             mul = (total_batchsize//len(batch)) + 1
-            #             batch = (batch*mul)[:total_batchsize]
-            #             datalist.extend(batch[:])
-            #             iteration -= 1
-            
-            # if len(datalist) < num_iterations*total_batchsize:
-            #     batch = random.sample(memory[client_id], k=min(len(memory[client_id]), total_batchsize))
-            #     mul = (total_batchsize//len(batch)) + 1
-            #     batch = (batch*mul)[:total_batchsize]
-            #     datalist.extend(batch[:])
-            
-            # stream-only
-            datalist = sub_dataset[:num_iterations*total_batchsize]
+            if not training_args.is_streamonly:
+                # memory-only
+                for i, sample in enumerate(sub_dataset):
+                    if len(memory[client_id]) == memory_size:
+                        memory[client_id].pop(random.randrange(memory_size))
+                    memory[client_id].append(sample)
+                    iteration += iter_ratio
+                    if iteration >= 1:
+                        for _ in range(int(iteration)):
+                            batch = random.sample(memory[client_id], k=min(len(memory[client_id]), total_batchsize))
+                            mul = (total_batchsize//len(batch)) + 1
+                            batch = (batch*mul)[:total_batchsize]
+                            datalist.extend(batch[:])
+                            iteration -= 1
+                
+                if len(datalist) < num_iterations*total_batchsize:
+                    batch = random.sample(memory[client_id], k=min(len(memory[client_id]), total_batchsize))
+                    mul = (total_batchsize//len(batch)) + 1
+                    batch = (batch*mul)[:total_batchsize]
+                    datalist.extend(batch[:])
+            else:
+                # stream-only
+                datalist = sub_dataset[:num_iterations*total_batchsize]
             
             data_module = make_supervised_data_module(client_data=datalist, # sub_dataset
                                                 tokenizer=tokenizer,
@@ -180,11 +171,6 @@ def main():
             extra_state_dict_dict['curr_round'] = curr_round
             trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
 
-            # if curr_round > 0:
-            #     path = os.path.join(training_args.state_dir, f"{client_id}_trainer_state.json")
-            #     shutil.copy(path, os.path.join(training_args.output_dir, "trainer_state.json"))
-            #     results = trainer.train(resume_from_checkpoint=True)
-            # else:
             results = trainer.train()
             training_loss[client_id].append(results.training_loss)
             
@@ -193,8 +179,6 @@ def main():
                 trainer.state.save_to_json(path)
             
             model.config.use_cache = True
-            
-            
             
             # save local model
             output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_model_round{curr_round+1}.pth")
@@ -206,12 +190,9 @@ def main():
                     model.named_parameters()
                 )
                 state_dict.update(non_lora_state_dict)
-                    # model.config.save_pretrained(training_args.output_dir)
-                    # model.save_pretrained(training_args.output_dir, state_dict=state_dict)
-                    # torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
             else:
                 state_dict = {k: t.detach().cpu().clone() for k, t in model.named_parameters() if t.requires_grad}
-            # if (training_args.local_rank == 0 or training_args.local_rank == -1) and training_args.mode != 'pfedpg':
+            
             local_state_dict_list[client_id] = copy.deepcopy(state_dict)
             
             k_to_del = []
@@ -235,18 +216,12 @@ def main():
             trainer.deepspeed.empty_partition_cache()
             del trainer
             logger.info(f"done Round {curr_round} client {client_id} | elapsed time {datetime.timedelta(seconds=int(time.time() - start_time))} | ")
-        #self.do_server_work(curr_round)
+
         
         aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **extra_state_dict_dict)
         
-        # TODO: Save server model
-        # if (training_args.local_rank == 0 or training_args.local_rank == -1) and training_args.mode != 'pfedpg': 
+        # Save server model
         if (training_args.local_rank == 0 or training_args.local_rank == -1): 
-            # torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
-            # if training_args.mode == 'scaffold':
-            #     if (curr_round+1) % 10 == 0:
-            #         torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
-            # else:
             torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
     logger.info("total done\n")
 
@@ -280,7 +255,7 @@ def get_datalists(args, scenario_num):
                 datalist = json.load(fp)
             random.shuffle(datalist)
             samplenum_per_rounds = int(len(datalist) / rounds_per_task)
-            num_iter = int(max_iterations*samplenum_per_rounds/2000) # 10000 / 5 = 2000
+            num_iter = max(int(max_iterations*samplenum_per_rounds/2000), 10) # 10000 / 5 = 2000
             for i in range(rounds_per_task):
                 train_datalist.append(
                     {'datalist':datalist[i*samplenum_per_rounds:(i+1)*samplenum_per_rounds],

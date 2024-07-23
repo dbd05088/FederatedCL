@@ -226,6 +226,11 @@ def parse_choice_list(input_string):
     # Try to find the choice list in the format "Choice list:[...]"
     match = re.search(r'Choice list:\[(.*?)\]', input_string)
     if match:
+        # comics_dialogue
+        choices = [choice.strip() for choice in match.group(1).split('|')]
+        if len(choices > 1):
+            return choices
+        
         # Split the choices and strip whitespace
         choices = [choice.strip() for choice in match.group(1).split(',')]
         # If choices start with "Image", only keep the "Image X" part
