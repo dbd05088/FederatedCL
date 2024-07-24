@@ -36,6 +36,7 @@ class TrainingArguments(transformers.TrainingArguments):
     round_to_eval: int = None
     eval_temp: float = 0.2
     eval_server: bool = True
+    eval_client: int = field(default=None)
     zeroshot: bool = False
     
     num_iter:int = field(default=100)

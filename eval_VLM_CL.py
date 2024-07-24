@@ -369,6 +369,9 @@ def main():
         logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
         server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
+        if training_args.eval_client:
+            if client_id != training_args.eval_client:
+                continue
         # load client weight
         if not training_args.zeroshot:
             logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
