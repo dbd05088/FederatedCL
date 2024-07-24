@@ -35,6 +35,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 from transformers import StoppingCriteria, StoppingCriteriaList
 
+ALPHABET = ['A','B','C','D','E','F']
+
 class CustomStoppingCriteria(StoppingCriteria):
     def __init__(self, repeat_len = 2):
       self.n = repeat_len
@@ -53,8 +55,8 @@ class CustomStoppingCriteria(StoppingCriteria):
                     should_stop = True
         return should_stop
 
-def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None):
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=False, pin_memory=True, num_workers=2, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
+def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None, batch_size=2):
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=0, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
     # dataloader = DataLoader(dataset, batch_size=1, shuffle=False, pin_memory=True, num_workers=4, drop_last=False)
     
     if 'llava' in model_args.model_name_or_path.lower():
@@ -140,8 +142,8 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
             json.dump(predictions, fp, indent=4)
     torch.cuda.empty_cache()
 
-def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None):
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=False, pin_memory=True, num_workers=2, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
+def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_args, training_args, logger, client_id=None, batch_size=2):
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=0, drop_last=False, collate_fn=DataCollatorForGenerationDataset(tokenizer))
 
     if 'llava' in model_args.model_name_or_path.lower():
         conv = conversation_lib_llava.default_conversation
@@ -182,7 +184,7 @@ def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_a
                     top_p=None,#args.top_p,
                     num_beams=1,#args.num_beams,
                     max_new_tokens=model_args.max_new_tokens,#args.max_new_tokens,
-                    use_cache=True,
+                    use_cache=False,
                     pad_token_id=tokenizer.eos_token_id,
                     stopping_criteria = stopping_criteria
                 )
@@ -226,10 +228,10 @@ def parse_choice_list(input_string):
     # Try to find the choice list in the format "Choice list:[...]"
     match = re.search(r'Choice list:\[(.*?)\]', input_string)
     if match:
-        # comics_dialogue
+        # comics_dialogue & textcloze
         choices = [choice.strip() for choice in match.group(1).split('|')]
-        if len(choices > 1):
-            return choices
+        if len(choices) > 2:
+            return ALPHABET[:len(choices)]
         
         # Split the choices and strip whitespace
         choices = [choice.strip() for choice in match.group(1).split(',')]
@@ -304,10 +306,6 @@ def can_infer(answer, choices):
     return False
 
 def main():
-    ##################################
-    # round_to_eval = 1
-    ##################################
-    CHOICE_DATA = []#['HRVQA-0','HRVQA-1','HRVQA-2','HRVQA-3','HRVQA-4','HRVQA-5','HRVQA-6','HRVQA-7','HRVQA-8','HRVQA-9',]
     
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
@@ -361,22 +359,27 @@ def main():
     
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     
+    batch_size = 1 if 'l2p' in training_args.mode or 'dap' in training_args.mode else 2
     
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     
     server_eval_key = []
-    logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
-    server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
+    
+    if not training_args.zeroshot and not training_args.eval_server:
+        logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
+        server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
         # load client weight
-        logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
-        client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
+        if not training_args.zeroshot:
+            logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
+            client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
         
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
             if train_datalists[client_id][training_args.round_to_eval-1]['train_cnt'] > data_info['eval_cnt']:
                 # breakpoint()
-                model.load_state_dict(client_state_dict, strict=False)
+                if not training_args.zeroshot:
+                    model.load_state_dict(client_state_dict, strict=False)
                 # model.load_state_dict(server_state_dict, strict=False)
                 if training_args.mode in ['apfl', 'ditto']:
                     for name, module in model.named_modules():
@@ -384,21 +387,18 @@ def main():
                             module.set_state('lora2')
                     model.base_model.model.model.mm_projector = model.base_model.model.model.local_mm_projector
                 dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
-                # evaluate(data_info['data'], data_info['data_name'], round_to_eval, model, tokenizer, data_args, device, model_args, training_args, logger, client_id)
                 
-                # if data_info['data_name'] in CHOICE_DATA: 
-                #     evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
-                # else:
                 if training_args.mode not in ['fedsim', 'feddat']:
                     
                     if data_info['type'] == 'open-ended':
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
+                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
                     elif data_info['type'] == 'multi-choice':
-                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
+                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
                     else:
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id)
+                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
                 if training_args.eval_server and data_info['data_name'] not in server_eval_key:
-                    model.load_state_dict(server_state_dict, strict=False)
+                    if not training_args.zeroshot:
+                        model.load_state_dict(server_state_dict, strict=False)
                     if training_args.mode in ['apfl', 'ditto']:
                         for name, module in model.named_modules():
                             if isinstance(module, DualLoraLayer):
@@ -408,11 +408,11 @@ def main():
                 # #         evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
                 # #     else:
                     if data_info['type'] == 'open-ended':
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
                     elif data_info['type'] == 'multi-choice':
-                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
                     else:
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
                     server_eval_key.append(data_info['data_name'])
 
 def get_datalists(args, scenario_num):

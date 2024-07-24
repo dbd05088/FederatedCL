@@ -62,11 +62,11 @@ for idx in range(total_len):
     new_item['conversations'] = [
         {
             "from": "human",
-            "value": meta_data['task_instruction'][item['task_instruction_id']] + question + f'\nChoice list:[{choice_string}]. Your answer is:'
+            "value": meta_data['task_instruction'][item['task_instruction_id']] + question + f'\nChoice list:[{choice_string}]. Answer with the option\'s letter from the given choices directly. Your answer is:'
         },
         {
             "from": "gpt",
-            "value": f"{alphabet[answer_idx]}: {item['response']}"
+            "value": f"{alphabet[answer_idx]}"
         }
     ]
     
