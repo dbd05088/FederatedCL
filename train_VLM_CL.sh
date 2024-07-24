@@ -1,7 +1,7 @@
-#/bin/bash
+#!/bin/bash
 # CIL CONFIG
-NOTE="dap_100_4_1024_nomem_sc20_lr1e-2_4tasks_5rounds_itr125" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="dap"
+NOTE="l2p_text_20_5_10_nomem_sc20_lr1e-2_4tasks_5rounds_itr125" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="l2p_text"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 RND_SEED=1
 
@@ -16,7 +16,7 @@ MEMORY_SIZE=100000
 IS_STREAMONLY=True
 
 LORA_ENABLE=False
-PROMPT_NUM=100
+PROMPT_NUM=20
 
 
 BATCHSIZE=4
@@ -54,7 +54,9 @@ else
     exit 1
 fi
 # --master_port 29500
-CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port 29500 \
+# --num_gpus=4
+deepspeed --master_port 29500 \
+    --include localhost:0,1,2,3 \
     train_VLM_CL.py \
     --deepspeed ./deepspeed_script/zero2.json \
     --model_name_or_path $MODEL_NAME \
@@ -92,7 +94,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port 29500 \
     --is_streamonly $IS_STREAMONLY \
     --prompt_num $PROMPT_NUM \
     --lora_enable $LORA_ENABLE \
-    --output_dir "./results/test/" > ./nohup/dap_100_4_1024_nomem_sc20_lr1e-2_4tasks_5rounds_itr125.log 2>&1 &
+    --output_dir "./results/test/" > ./nohup/l2p_text_20_5_10_nomem_sc20_lr1e-2_4tasks_5rounds_itr125.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD
 # lr_scheduler_type
