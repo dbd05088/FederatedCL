@@ -22,6 +22,7 @@ from models.llava.dap_model import LlavaLlamaDAPForCausalLM
 from models.llava.l2p_layerwise_text_model import LlavaLlamaL2PtextForCausalLM
 from models.llava.l2p_text_model import Llava_L2Ptext
 from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
+from models.llava.l2p_attn_model import LlavaLlamaL2PATTNForCausalLM
 
 import copy
 ACCESS_TOKEN = "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"
@@ -172,7 +173,18 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-            print('load dap')
+            print('load dap attn')
+        elif training_args.mode == 'layer_l2p_attn':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaL2PATTNForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load layer l2p attn')
         elif training_args.mode == 'fedsim' and training_args.is_eval:
             assert model_args.model_type != 'mpt'
             model = FEDSIMLlavaLlamaForCausalLM.from_pretrained(

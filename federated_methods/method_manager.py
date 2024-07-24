@@ -59,7 +59,7 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
     elif mode =='l2p' or mode =='layer_l2p' or mode =='dap' or mode =='layer_l2p_text' or mode =='l2p_text':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, pfedpg_create_trainer, fedavg_aggregate_state_dict
         # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, pfedpg_create_trainer, fedavg_aggregate_state_dict
-    elif mode =='dap_attn':
+    elif mode =='dap_attn' or mode == 'layer_l2p_attn':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, dap_attn_create_trainer, fedavg_aggregate_state_dict
     else:
         raise NotImplementedError(mode)

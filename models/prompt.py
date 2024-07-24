@@ -45,7 +45,7 @@ class Prompt(nn.Module):
         x_inv_norm = torch.rsqrt(torch.maximum(square_sum, torch.tensor(epsilon, device=x.device)))
         return x * x_inv_norm
     
-    def forward(self, x_embed, prompt_mask=None, cls_features=None):
+    def forward(self, x_embed, task_id=None):
         # x_embed = img encoder output
         # improvement - add text embedding to choose keys
         out = dict()
@@ -69,7 +69,7 @@ class Prompt(nn.Module):
 
             similarity = torch.matmul(x_embed_norm, prompt_norm.t()) # B, Pool_size
             
-            if prompt_mask is None:
+            if task_id is None:
                 _, idx = torch.topk(similarity, k=self.top_k, dim=1) # B, top_k
                 if self.batchwise_prompt:
                     prompt_id, id_counts = torch.unique(idx, return_counts=True, sorted=True)
@@ -84,7 +84,14 @@ class Prompt(nn.Module):
                     # expand to batch
                     idx = major_prompt_id.expand(x_embed.shape[0], -1) # B, top_k
             else:
-                idx = prompt_mask # B, top_k
+                start = task_id * self.top_k
+                end = (task_id + 1) * self.top_k
+                prompt_mask = torch.arange(start, end).cuda()
+                if end > self.pool_size:
+                    prompt_mask = None
+            
+                if prompt_mask is not None:
+                    idx = prompt_mask.expand(x_embed.shape[0], -1)
 
             batched_prompt_raw = self.prompt[idx] # B, top_k, length, C
             batch_size, top_k, length, c = batched_prompt_raw.shape
