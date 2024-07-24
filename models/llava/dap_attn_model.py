@@ -384,7 +384,7 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.pool_size = 4
         self.prompt_dim = 4096
         self.task_id_size = 64
-        val = math.sqrt(6. / float(3 * reduce(mul, (576,), 1) + self.prompt_dim))
+        val = math.sqrt(6. / float(3 * reduce(mul, (4096,), 1) + self.prompt_dim))
         self.lang_prompt_dap_key_embeddings = nn.Parameter(torch.zeros(self.pool_size, self.prompt_dim))
         nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
         self.lang_prompt_dap_emb = torch.nn.Embedding(self.pool_size, self.task_id_size)
