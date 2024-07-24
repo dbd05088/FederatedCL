@@ -131,6 +131,8 @@ def main():
             sub_dataset = train_datalists[client_id][curr_round]['datalist']
             num_iterations = train_datalists[client_id][curr_round]['num_iter']
             
+            task_id = train_datalists[client_id][curr_round]['task_id']
+            
             iteration = 0
             datalist = []
             iter_ratio = num_iterations / len(sub_dataset)
@@ -169,6 +171,8 @@ def main():
             # ===== Train local model on the client side =====
             extra_state_dict_dict['client_id'] = client_id
             extra_state_dict_dict['curr_round'] = curr_round
+            if training_args.use_task_id:
+                extra_state_dict_dict['task_id'] = task_id
             trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
 
             results = trainer.train()
@@ -250,7 +254,7 @@ def get_datalists(args, scenario_num):
         train_datalist = []
         test_datalist = []
         eval_cnt = 0
-        for data in client_data['datasets']:
+        for task_id, data in enumerate(client_data['datasets']):
             with open(f"./dataset/{data['dataset']}/train/dataset-{str(data['subset_id'])}.json") as fp:
                 datalist = json.load(fp)
             random.shuffle(datalist)
@@ -259,7 +263,8 @@ def get_datalists(args, scenario_num):
             for i in range(rounds_per_task):
                 train_datalist.append(
                     {'datalist':datalist[i*samplenum_per_rounds:(i+1)*samplenum_per_rounds],
-                     'num_iter': num_iter})
+                     'num_iter': num_iter,
+                     'task_id': task_id})
             with open(f"./dataset/{data['dataset']}/test/dataset-{str(data['subset_id'])}.json") as fp:
                 datalist = json.load(fp)
             test_datalist.append({
