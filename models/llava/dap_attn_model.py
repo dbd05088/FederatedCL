@@ -389,7 +389,7 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
         self.lang_prompt_dap_emb = torch.nn.Embedding(self.pool_size, self.task_id_size)
         self.top_k = 1
-        self.input_feature_embedding = prefix_attention()
+        self.lang_prompt_feature_embedding = prefix_attention()
         self.prompt_num = prompt_num
         
     def get_model(self):
@@ -735,7 +735,7 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             position_ids = None
             
          # key selection
-        input_features = self.input_feature_embedding(hidden_states=new_input_embeds, attention_mask=attention_mask)[:,0,:]
+        input_features = self.lang_prompt_feature_embedding(hidden_states=new_input_embeds, attention_mask=attention_mask)[:,0,:]
         dap_prompt_key_norm = F.normalize(self.lang_prompt_dap_key_embeddings, dim=-1)
         x_embed_norm = F.normalize(input_features, dim=-1)
         sim = torch.matmul(dap_prompt_key_norm,
