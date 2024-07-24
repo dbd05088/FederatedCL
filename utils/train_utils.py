@@ -21,6 +21,7 @@ from models.llava.l2p_layerwise_model import LlavaLlamaL2PForCausalLM
 from models.llava.dap_model import LlavaLlamaDAPForCausalLM
 from models.llava.l2p_layerwise_text_model import LlavaLlamaL2PtextForCausalLM
 from models.llava.l2p_text_model import Llava_L2Ptext
+from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
 
 import copy
 ACCESS_TOKEN = "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"
@@ -30,7 +31,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     attn_implementation = "flash_attention_2"
     assert model_args.vision_tower is not None
     
-    if training_args.mode == 'pfedpg' or training_args.mode == 'fedadapter' or training_args.mode == 'dap' or 'l2p' in training_args.mode:
+    if training_args.mode == 'pfedpg' or training_args.mode == 'fedadapter' or 'dap' in training_args.mode or 'l2p' in training_args.mode:
         assert training_args.lora_enable == False, "no lora in pFedPG and feddat  and fedadapter"
     if training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
         assert training_args.gradient_accumulation_steps == 1
@@ -153,6 +154,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         elif training_args.mode == 'dap':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaDAPForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load dap')
+        elif training_args.mode == 'dap_attn':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaDAPATTNForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
@@ -327,7 +339,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
     # FIXME: freeze mm_projector for feddat or not?
-    if training_args.mode == 'pfedpg' or training_args.mode == 'dap' or 'l2p' in training_args.mode:
+    if training_args.mode == 'pfedpg' or 'dap' in training_args.mode or 'l2p' in training_args.mode:
         # for p in model.get_model().mm_projector.parameters():
         #     p.requires_grad = False
         # model.lm_head.requires_grad_(False)
