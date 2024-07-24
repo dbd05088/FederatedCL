@@ -14,6 +14,7 @@ from federated_methods.pfedme import pfedme_set_state_dict, pfedme_create_traine
 from federated_methods.fedsim import fedsim_set_state_dict, fedsim_create_trainer
 from federated_methods.ditto import ditto_create_trainer
 from federated_methods.apfl import apfl_create_trainer
+from federated_methods.dap_attn import dap_attn_create_trainer
 
 def dummy_function(*args):
     return {}
@@ -55,9 +56,11 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedsim_set_state_dict, fedper_load_state_dict, ditto_create_trainer, fedavg_aggregate_state_dict
     elif mode =='apfl':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedsim_set_state_dict, fedper_load_state_dict, apfl_create_trainer, fedavg_aggregate_state_dict
-    elif mode =='l2p' or mode =='layer_l2p' or mode =='dap' or mode =='layer_l2p_text' or mode =='l2p_text' or mode =='dap_attn':
+    elif mode =='l2p' or mode =='layer_l2p' or mode =='dap' or mode =='layer_l2p_text' or mode =='l2p_text':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, pfedpg_create_trainer, fedavg_aggregate_state_dict
         # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, pfedpg_create_trainer, fedavg_aggregate_state_dict
+    elif mode =='dap_attn':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, dap_attn_create_trainer, fedavg_aggregate_state_dict
     else:
         raise NotImplementedError(mode)
     return set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules

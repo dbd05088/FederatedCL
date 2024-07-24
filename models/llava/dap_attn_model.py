@@ -410,6 +410,7 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         image_sizes: Optional[List[List[int]]] = None,
         return_dict: Optional[bool] = None,
         cache_position=None,
+        task_id=None,
         task_id_estimated_emb=None
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         
@@ -429,7 +430,7 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 labels,
                 images,
-                image_sizes
+                task_id=task_id
             )
             if task_id_estimated_emb is not None:
                 task_id_estimated_emb, reduce_sim = task_id_estimated_emb
@@ -484,7 +485,6 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 None,
                 None,
                 images,
-                image_sizes=image_sizes
             )
             task_id_estimated_emb, reduce_sim = task_id_estimated_emb
             kwargs["task_id_estimated_emb"] = task_id_estimated_emb

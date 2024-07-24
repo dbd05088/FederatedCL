@@ -67,6 +67,7 @@ class TrainingArguments(transformers.TrainingArguments):
     # continual learning
     memory_size: int = 100000
     is_streamonly: bool = True
+    use_task_id: bool = False
     
     # prompt tuning args
     prompt_num: int = field(default=100)
