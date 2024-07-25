@@ -23,6 +23,7 @@ from models.llava.l2p_layerwise_text_model import LlavaLlamaL2PtextForCausalLM
 from models.llava.l2p_text_model import Llava_L2Ptext
 from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
 from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
+from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
 
 import copy
 ACCESS_TOKEN = "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"
@@ -185,6 +186,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load layer l2p attn')
+        elif training_args.mode == 'layer_l2p_attn2':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaL2PATTNForCausalLM2.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load layer l2p attn2')
         elif training_args.mode == 'fedsim' and training_args.is_eval:
             assert model_args.model_type != 'mpt'
             model = FEDSIMLlavaLlamaForCausalLM.from_pretrained(
@@ -405,7 +417,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             model.lm_head.requires_grad_(False)
     else:
         for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = True
+            p.requires_grad = False
         model.lm_head.requires_grad_(False)
         # for n, p in model.named_parameters():
         #     if 'vision_model' not in n:
