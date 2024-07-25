@@ -103,7 +103,7 @@ class LLaVATrainerDAPATTN(LLaVATrainerFEDAVG):
                     },
                     {
                         "params": [
-                            p for n, p in opt_model.named_parameters() if ('_prompt' in n and p.requires_grad)
+                            p for n, p in opt_model.named_parameters() if ('_prompt' in n and p.requires_grad and 'lang_prompt_feature_embedding' not in n)
                         ],
                         "weight_decay": self.args.weight_decay,
                         
@@ -113,7 +113,7 @@ class LLaVATrainerDAPATTN(LLaVATrainerFEDAVG):
                 optimizer_grouped_parameters = [
                     {
                         "params": [
-                            p for n, p in opt_model.named_parameters() if ('_prompt' in n and p.requires_grad)
+                            p for n, p in opt_model.named_parameters() if ('_prompt' in n and p.requires_grad and 'lang_prompt_feature_embedding' not in n)
                         ],
                         "weight_decay": self.args.weight_decay,
                     },

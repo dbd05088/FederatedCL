@@ -388,7 +388,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         # Initialize weights and apply final processing
         self.post_init()
         
-        self.feature_embedding = prefix_attention()
+        self.lang_prompt_feature_embedding = prefix_attention()
         
     def get_model(self):
         return self.model
@@ -631,6 +631,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         new_input_embeds = []
         new_labels = []
         cur_image_idx = 0
+        image_feature_indices = []
         
         for batch_idx, cur_input_ids in enumerate(input_ids):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
@@ -640,6 +641,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 # cur_input_embeds = torch.cat([cur_input_embeds_1, cur_image_features[0:0]], dim=0)
                 new_input_embeds.append(cur_input_embeds)
                 new_labels.append(labels[batch_idx])
+                image_feature_indices.append([])
                 cur_image_idx += 1
                 continue
 
@@ -655,16 +657,19 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)        
             cur_new_input_embeds = []
             cur_new_labels = []
-            
+            cur_image_feature_indices = []  # To store indices for this item
+            current_length = 0
             for i in range(num_images + 1):
                 cur_new_input_embeds.append(cur_input_embeds_no_im[i])
                 cur_new_labels.append(cur_labels_noim[i])
-                
+                current_length += cur_input_embeds_no_im[i].shape[0]
                 if i < num_images:
                     cur_image_features = image_features[batch_idx][i] #[cur_image_idx]
                     # cur_image_idx += 1
                     cur_new_input_embeds.append(cur_image_features)
                     cur_new_labels.append(torch.full((cur_image_features.shape[0],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype))
+                    cur_image_feature_indices.extend(list(range(current_length, current_length + cur_image_features.shape[0])))
+                    current_length += cur_image_features.shape[0]
                     
             cur_new_input_embeds = [x.to(self.device) for x in cur_new_input_embeds]
             cur_new_input_embeds = torch.cat(cur_new_input_embeds)
@@ -672,6 +677,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
 
             new_input_embeds.append(cur_new_input_embeds)
             new_labels.append(cur_new_labels)
+            image_feature_indices.append(cur_image_feature_indices)
 
         # Truncate sequences to max length as image embeddings can make the sequence longer
         tokenizer_model_max_length = getattr(self.config, 'tokenizer_model_max_length', None)
@@ -725,10 +731,26 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             position_ids = None
         
         # key selection
-        if new_labels is not None:
+        if new_labels is not None and attention_mask is not None:
             new_attention_mask = attention_mask & (new_labels == IGNORE_INDEX)
-        else:
+        elif attention_mask is not None:
             new_attention_mask = attention_mask
-        input_features = self.feature_embedding(hidden_states=new_input_embeds, attention_mask=new_attention_mask)[:,0,:]
+        elif new_labels is not None:
+            new_attention_mask = (new_labels == IGNORE_INDEX)
+        else:
+            new_attention_mask = torch.full((new_input_embeds.shape), True).to(new_input_embeds.device)
+        input_features = self.lang_prompt_feature_embedding(hidden_states=new_input_embeds, attention_mask=new_attention_mask)[:,0,:]
+        # input_features = []
+        # for i in range(new_input_embeds.shape[0]):
+        #     img_feat = new_input_embeds[i,image_feature_indices[i], :].mean(dim=0)
+        #     if attention_mask is not None:
+        #         total_length = attention_mask[i].sum().item()
+        #     elif new_labels is not None:
+        #         total_length = (new_labels[i]==IGNORE_INDEX).sum().item()
+        #     else:
+        #         total_length = new_input_embeds[i].shape[0]
+        #     text_feat = new_input_embeds[i, list(set(range(total_length)) - set(image_feature_indices[i])), :].mean(dim=0)
+        #     input_features.append(torch.concat((img_feat, text_feat)))
+        # input_features = torch.stack(input_features)
 
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, input_features
