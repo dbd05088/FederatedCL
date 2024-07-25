@@ -20,8 +20,10 @@ class Prompt2(nn.Module):
             if prompt_init == 'zero':
                 self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
             elif prompt_init == 'uniform':
-                self.prompt = nn.Parameter(torch.randn(prompt_pool_shape))
-                nn.init.uniform_(self.prompt, -1, 1)
+                self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
+                # nn.init.uniform_(self.prompt, -1, 1)
+                with torch.no_grad():
+                    self.prompt.uniform_(-1, 1)
     
     def l2_normalize(self, x, dim=None, epsilon=1e-12):
         """Normalizes a given vector or matrix."""
@@ -45,7 +47,8 @@ class Prompt2(nn.Module):
                 self.prompt = nn.Parameter(torch.zeros(self.length, self.embed_dim))
             elif self.prompt_init == 'uniform':
                 self.prompt = nn.Parameter(torch.randn(self.length, self.embed_dim))
-                nn.init.uniform_(self.prompt)
+                with torch.no_grad():
+                    self.prompt.uniform_(-1, 1)
             batched_prompt = self.prompt.unsqueeze(0).expand(prompt_mask.shape[0], -1, -1)
         
         # The input with the prompt concatenated to the front. [B, prompt+token, C]

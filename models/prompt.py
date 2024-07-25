@@ -23,7 +23,9 @@ class Prompt(nn.Module):
                 self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
             elif prompt_init == 'uniform':
                 self.prompt = nn.Parameter(torch.randn(prompt_pool_shape))
-                nn.init.uniform_(self.prompt, -1, 1)
+                # nn.init.uniform_(self.prompt, -1, 1)
+                with torch.no_grad():
+                    self.prompt.uniform_(-1, 1)
         
         # if using learnable prompt keys
         if prompt_key:
@@ -32,7 +34,9 @@ class Prompt(nn.Module):
                 self.prompt_key = nn.Parameter(torch.zeros(key_shape))
             elif prompt_key_init == 'uniform':
                 self.prompt_key = nn.Parameter(torch.randn(key_shape))
-                nn.init.uniform_(self.prompt_key, -1, 1)
+                # nn.init.uniform_(self.prompt, -1, 1)
+                with torch.no_grad():
+                    self.prompt_key.uniform_(-1, 1)
         else:
             # else use mean of prompt as key
             # only compatible with prompt, not prefix
@@ -117,7 +121,8 @@ class Prompt(nn.Module):
                 self.prompt = nn.Parameter(torch.zeros(self.length, self.embed_dim))
             elif self.prompt_init == 'uniform':
                 self.prompt = nn.Parameter(torch.randn(self.length, self.embed_dim))
-                nn.init.uniform_(self.prompt)
+                with torch.no_grad():
+                    self.prompt.uniform_(-1, 1)
             batched_prompt = self.prompt.unsqueeze(0).expand(x_embed.shape[0], -1, -1)
         
         # The input with the prompt concatenated to the front. [B, prompt+token, C]

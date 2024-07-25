@@ -17,7 +17,7 @@ _CONFIG_FOR_DOC = "LlamaConfig"
 
 
 class prefix_attention(LlamaFlashAttention2):
-    def __init__(self, prefix_num=1, hidden_size=4096, head_dim=128, attn_dropout=0.0, attn_bias=False):
+    def __init__(self, prefix_num=1, hidden_size=4096, head_dim=256, attn_dropout=0.0, attn_bias=False):
         (nn.Module).__init__(self)
 
         self.attention_dropout = attn_dropout
@@ -38,7 +38,9 @@ class prefix_attention(LlamaFlashAttention2):
         self.prefix_num = prefix_num
         self.prefix_embedding = nn.Parameter(torch.zeros(self.prefix_num, self.hidden_size))
         val = math.sqrt(6. / float(3 * reduce(mul, (hidden_size,), 1)))
-        nn.init.uniform_(self.prefix_embedding.data, -val, val)
+        # nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
+        with torch.no_grad():
+            self.prefix_embedding.uniform_(-val, val)
     
     def forward(
         self,

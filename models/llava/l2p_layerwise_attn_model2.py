@@ -384,9 +384,12 @@ class LlavaLlamaL2PATTNForCausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.top_k = 5
         self.prompt_dim = config.hidden_size*2
         self.task_id_size = 64
-        val = math.sqrt(6. / float(3 * reduce(mul, (config.hidden_size,), 1) + self.prompt_dim))
+        # val = math.sqrt(6. / float(3 * reduce(mul, (config.hidden_size,), 1)))
+        val = math.sqrt(6. / self.prompt_dim)
         self.lang_prompt_dap_key_embeddings = nn.Parameter(torch.zeros(self.pool_size, self.prompt_dim))
-        nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
+        # nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
+        with torch.no_grad():
+            self.lang_prompt_dap_key_embeddings.uniform_(-val, val)
         self.prompt_num = prompt_num*self.top_k
         
     def get_model(self):
@@ -426,7 +429,8 @@ class LlavaLlamaL2PATTNForCausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 past_key_values,
                 labels,
-                images
+                images,
+                task_id=task_id
             )
             if task_id_estimated_emb is not None:
                 task_id_estimated_emb, reduce_sim = task_id_estimated_emb
@@ -449,9 +453,8 @@ class LlavaLlamaL2PATTNForCausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         )
         
         if 'loss' in outputs and outputs['loss'] is not None:
-            breakpoint()
             outputs['loss'] -= 0.1*reduce_sim
-        
+
         return outputs
 
     @torch.no_grad()
@@ -761,7 +764,6 @@ class LlavaLlamaL2PATTNForCausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             text_feat = new_input_embeds[i, list(set(range(total_length)) - set(image_feature_indices[i])), :].mean(dim=0)
             input_features.append(torch.concat((img_feat, text_feat)))
         input_features = torch.stack(input_features)
-        
         dap_prompt_key_norm = F.normalize(self.lang_prompt_dap_key_embeddings, dim=-1)
         x_embed_norm = F.normalize(input_features, dim=-1)
         sim = torch.matmul(dap_prompt_key_norm,
@@ -790,12 +792,9 @@ class LlavaLlamaL2PATTNForCausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 idx = expand_to_batch(idx, input_features.shape[0]).squeeze(dim=-1)
         i = torch.arange(bsz).reshape(bsz, 1, 1)
         l = torch.arange(self.prompt_dim).reshape(1, 1, self.prompt_dim)
-
         selected_prompt_key = dap_prompt_key_norm.repeat(bsz, 1, 1)[
             i, idx.unsqueeze(-1), l]
-        
         x_embed_norm = x_embed_norm.unsqueeze(1)
         sim_pull = selected_prompt_key * x_embed_norm
         reduce_sim = torch.sum(sim_pull) / bsz
-
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (idx,reduce_sim)
