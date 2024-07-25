@@ -395,7 +395,7 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.post_init()
         
         self.pool_size = 4
-        self.prompt_dim = config.hidden_size
+        self.prompt_dim = config.hidden_size*2
         self.task_id_size = 64
         val = math.sqrt(6. / float(3 * reduce(mul, (config.hidden_size,), 1)))
         self.lang_prompt_dap_key_embeddings = nn.Parameter(torch.zeros(self.pool_size, self.prompt_dim))
@@ -757,28 +757,28 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             position_ids = None
             
         # key selection
-        if new_labels is not None and attention_mask is not None:
-            new_attention_mask = attention_mask & (new_labels == IGNORE_INDEX)
-        elif attention_mask is not None:
-            new_attention_mask = attention_mask
-        elif new_labels is not None:
-            new_attention_mask = (new_labels == IGNORE_INDEX)
-        else:
-            new_attention_mask = torch.full((new_input_embeds.shape), True).to(new_input_embeds.device)
-        input_features = self.lang_prompt_feature_embedding(hidden_states=new_input_embeds, attention_mask=new_attention_mask)[:,0,:]
+        # if new_labels is not None and attention_mask is not None:
+        #     new_attention_mask = attention_mask & (new_labels == IGNORE_INDEX)
+        # elif attention_mask is not None:
+        #     new_attention_mask = attention_mask
+        # elif new_labels is not None:
+        #     new_attention_mask = (new_labels == IGNORE_INDEX)
+        # else:
+        #     new_attention_mask = torch.full((new_input_embeds.shape), True).to(new_input_embeds.device)
+        # input_features = self.lang_prompt_feature_embedding(hidden_states=new_input_embeds, attention_mask=new_attention_mask)[:,0,:]
         
-        # input_features = []
-        # for i in range(new_input_embeds.shape[0]):
-        #     img_feat = new_input_embeds[i,image_feature_indices[i], :].mean(dim=0)
-        #     if attention_mask is not None:
-        #         total_length = attention_mask[i].sum().item()
-        #     elif new_labels is not None:
-        #         total_length = (new_labels[i]==IGNORE_INDEX).sum().item()
-        #     else:
-        #         total_length = new_input_embeds[i].shape[0]
-        #     text_feat = new_input_embeds[i, list(set(range(total_length)) - set(image_feature_indices[i])), :].mean(dim=0)
-        #     input_features.append(torch.concat((img_feat, text_feat)))
-        # input_features = torch.stack(input_features)
+        input_features = []
+        for i in range(new_input_embeds.shape[0]):
+            img_feat = new_input_embeds[i,image_feature_indices[i], :].mean(dim=0)
+            if attention_mask is not None:
+                total_length = attention_mask[i].sum().item()
+            elif new_labels is not None:
+                total_length = (new_labels[i]==IGNORE_INDEX).sum().item()
+            else:
+                total_length = new_input_embeds[i].shape[0]
+            text_feat = new_input_embeds[i, list(set(range(total_length)) - set(image_feature_indices[i])), :].mean(dim=0)
+            input_features.append(torch.concat((img_feat, text_feat)))
+        input_features = torch.stack(input_features)
         
         dap_prompt_key_norm = F.normalize(self.lang_prompt_dap_key_embeddings, dim=-1)
         x_embed_norm = F.normalize(input_features, dim=-1)

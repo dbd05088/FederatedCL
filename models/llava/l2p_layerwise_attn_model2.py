@@ -383,7 +383,6 @@ class LlavaLlamaL2PATTNForCausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.pool_size = 20
         self.top_k = 5
         self.prompt_dim = config.hidden_size*2
-        self.task_id_size = 64
         # val = math.sqrt(6. / float(3 * reduce(mul, (config.hidden_size,), 1)))
         val = math.sqrt(6. / self.prompt_dim)
         self.lang_prompt_dap_key_embeddings = nn.Parameter(torch.zeros(self.pool_size, self.prompt_dim))
