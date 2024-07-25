@@ -22,7 +22,7 @@ from models.llava.dap_model import LlavaLlamaDAPForCausalLM
 from models.llava.l2p_layerwise_text_model import LlavaLlamaL2PtextForCausalLM
 from models.llava.l2p_text_model import Llava_L2Ptext
 from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
-from models.llava.l2p_attn_model import LlavaLlamaL2PATTNForCausalLM
+from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
 
 import copy
 ACCESS_TOKEN = "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"

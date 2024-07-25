@@ -66,6 +66,7 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         task_id_estimated_emb=None,
+        labels=None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -90,8 +91,12 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         # add prompt
         bsz = hidden_states.shape[0]
         if task_id_estimated_emb is not None:
+            if labels is not None:
+                label_attention_mask = attention_mask & (labels == IGNORE_INDEX)
+            else:
+                label_attention_mask = attention_mask
             lang_prompt_norm = self.lang_prompt_norm(hidden_states)
-            down = self.lang_prompt_downsample(lang_prompt_norm, attention_mask)
+            down = self.lang_prompt_downsample(lang_prompt_norm, label_attention_mask)
             
             
             film = self.lang_prompt_film(task_id_estimated_emb)
@@ -179,6 +184,7 @@ class LlamaDAPModel(LlamaModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         task_id_estimated_emb=None,
+        labels=None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -242,6 +248,7 @@ class LlamaDAPModel(LlamaModel):
                     use_cache,
                     cache_position,
                     task_id_estimated_emb,
+                    labels,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -253,6 +260,7 @@ class LlamaDAPModel(LlamaModel):
                     use_cache=use_cache,
                     cache_position=cache_position,
                     task_id_estimated_emb=task_id_estimated_emb,
+                    labels=labels
                 )
 
             hidden_states = layer_outputs[0]
@@ -330,6 +338,7 @@ class LlamaDAPForCausalLM(LlamaForCausalLM):
             return_dict=return_dict,
             cache_position=cache_position,
             task_id_estimated_emb=task_id_estimated_emb,
+            labels=labels,
         )
 
         hidden_states = outputs[0]
@@ -389,7 +398,7 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
         self.lang_prompt_dap_emb = torch.nn.Embedding(self.pool_size, self.task_id_size)
         self.top_k = 1
-        self.lang_prompt_feature_embedding = prefix_attention()
+        self.feature_embedding = prefix_attention()
         self.prompt_num = prompt_num
         
     def get_model(self):
@@ -734,8 +743,12 @@ class LlavaLlamaDAPATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         if _position_ids is None:
             position_ids = None
             
-         # key selection
-        input_features = self.lang_prompt_feature_embedding(hidden_states=new_input_embeds, attention_mask=attention_mask)[:,0,:]
+        # key selection
+        if new_labels is not None:
+            new_attention_mask = attention_mask & (new_labels == IGNORE_INDEX)
+        else:
+            new_attention_mask = attention_mask
+        input_features = self.feature_embedding(hidden_states=new_input_embeds, attention_mask=new_attention_mask)[:,0,:]
         dap_prompt_key_norm = F.normalize(self.lang_prompt_dap_key_embeddings, dim=-1)
         x_embed_norm = F.normalize(input_features, dim=-1)
         sim = torch.matmul(dap_prompt_key_norm,

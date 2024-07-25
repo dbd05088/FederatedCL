@@ -53,8 +53,8 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__(config, layer_idx)
         
-        self.lang_prompt_downsample = prefix_attention(prefix_num=1)
-        self.lang_prompt_norm = nn.LayerNorm(config.hidden_size, eps=1e-6)
+        # self.lang_prompt_downsample = prefix_attention(prefix_num=1)
+        # self.lang_prompt_norm = nn.LayerNorm(config.hidden_size, eps=1e-6)
         self.lang_prompt = Prompt(length=config.prompt_num, top_k=5, pool_size=20, embed_dim=config.hidden_size, key_dim=config.hidden_size)
 
     def forward(
@@ -66,6 +66,7 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
+        task_id_estimated_emb=None,
         task_id=None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
@@ -91,10 +92,8 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         # add prompt
         bsz = hidden_states.shape[0]
         if hidden_states.shape[1] > 1:
-            lang_prompt_norm = self.lang_prompt_norm(hidden_states)
-            query_embed = self.lang_prompt_downsample(lang_prompt_norm, attention_mask)[:,0,:]
             
-            prompt_pool_output = self.lang_prompt(query_embed, task_id)
+            prompt_pool_output = self.lang_prompt(task_id_estimated_emb,task_id=task_id)
             selected_prompts = prompt_pool_output['batched_prompt']
             
             
@@ -175,6 +174,7 @@ class LlamaDAPModel(LlamaModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        task_id_estimated_emb=None,
         task_id=None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -239,6 +239,7 @@ class LlamaDAPModel(LlamaModel):
                     output_attentions,
                     use_cache,
                     cache_position,
+                    task_id_estimated_emb,
                     task_id,
                 )
             else:
@@ -250,6 +251,7 @@ class LlamaDAPModel(LlamaModel):
                     output_attentions=output_attentions,
                     use_cache=use_cache,
                     cache_position=cache_position,
+                    task_id_estimated_emb=task_id_estimated_emb,
                     task_id_emb=task_id,
                 )
 
@@ -310,6 +312,7 @@ class LlamaDAPForCausalLM(LlamaForCausalLM):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        task_id_estimated_emb=None,
         task_id=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -330,6 +333,7 @@ class LlamaDAPForCausalLM(LlamaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             cache_position=cache_position,
+            task_id_estimated_emb=task_id_estimated_emb,
             task_id=task_id,
         )
 
@@ -384,6 +388,8 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         # Initialize weights and apply final processing
         self.post_init()
         
+        self.feature_embedding = prefix_attention()
+        
     def get_model(self):
         return self.model
     
@@ -402,6 +408,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         image_sizes: Optional[List[List[int]]] = None,
         return_dict: Optional[bool] = None,
         cache_position=None,
+        task_id_estimated_emb=None,
         task_id=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         
@@ -413,6 +420,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 inputs_embeds,
                 labels,
+                task_id_estimated_emb
             ) = self.prepare_inputs_labels_for_multimodal(
                 input_ids,
                 position_ids,
@@ -433,6 +441,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            task_id_estimated_emb=task_id_estimated_emb,
             task_id=task_id
         )
         
@@ -458,7 +467,8 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 _,
                 inputs_embeds,
-                _
+                _,
+                task_id_estimated_emb
             ) = self.prepare_inputs_labels_for_multimodal(
                 inputs,
                 position_ids,
@@ -467,6 +477,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 None,
                 images,
             )
+            kwargs["task_id_estimated_emb"] = task_id_estimated_emb
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
@@ -478,7 +489,7 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         )
     
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, attention_mask=None,
-                                      inputs_embeds=None, cache_position=None, **kwargs):
+                                      inputs_embeds=None, task_id_estimated_emb=None, cache_position=None, **kwargs):
         images = kwargs.pop("images", None)
         image_sizes = kwargs.pop("image_sizes", None)
         
@@ -568,6 +579,8 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             inputs['images'] = images
         if image_sizes is not None:
             inputs['image_sizes'] = image_sizes
+        if task_id_estimated_emb is not None:
+            inputs['task_id_estimated_emb'] = task_id_estimated_emb
         return inputs
     
     def prepare_inputs_labels_for_multimodal(
@@ -710,5 +723,12 @@ class LlavaLlamaL2PATTNForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
 
         if _position_ids is None:
             position_ids = None
+        
+        # key selection
+        if new_labels is not None:
+            new_attention_mask = attention_mask & (new_labels == IGNORE_INDEX)
+        else:
+            new_attention_mask = attention_mask
+        input_features = self.feature_embedding(hidden_states=new_input_embeds, attention_mask=new_attention_mask)[:,0,:]
 
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, input_features
