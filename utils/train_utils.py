@@ -24,6 +24,7 @@ from models.llava.l2p_text_model import Llava_L2Ptext
 from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
 from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
 from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
+from models.llava.llava_ia3 import LlavaLlamaForIA3PoolCausalLM
 
 import copy
 ACCESS_TOKEN = "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"
@@ -37,6 +38,9 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         assert training_args.lora_enable == False, "no lora in pFedPG and feddat  and fedadapter"
     if training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
         assert training_args.gradient_accumulation_steps == 1
+    
+    if "ia3" in training_args.mode:
+        assert training_args.ia3_enable == True
     
     # load tokenizer
     # for llava
@@ -197,6 +201,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load layer l2p attn2')
+        elif training_args.mode == 'ia3_pool':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaForIA3PoolCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load ia3 pool')    
+        
         elif training_args.mode == 'fedsim' and training_args.is_eval:
             assert model_args.model_type != 'mpt'
             model = FEDSIMLlavaLlamaForCausalLM.from_pretrained(
@@ -324,6 +339,24 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         
         # rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
+    
+    elif training_args.ia3_enable:
+        from peft import IA3Config, get_peft_model
+        ia3_config = IA3Config(
+            target_modules=["k_proj", "v_proj", "down_proj"], 
+            feedforward_modules=["down_proj"],
+            task_type="CAUSAL_LM",
+        )
+        
+        
+        # create pool
+        from models.ia3pool.ia3poolmodel import IA3PoolModel
+        from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+        PEFT_TYPE_TO_MODEL_MAPPING['IA3POOL'] = IA3PoolModel
+        ia3_config.peft_type = 'IA3POOL'
+        
+        model = get_peft_model(model, ia3_config)
+        
 
     if 'llava' in model_args.model_name_or_path.lower():
         if model_args.version in conversation_lib_llava.conv_templates:
@@ -415,6 +448,14 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                     module.set_state('lora1')
                     module.activate_all()
             model.lm_head.requires_grad_(False)
+    
+    elif 'ia3' in training_args.mode:
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = False
+        model.lm_head.requires_grad_(False)
+        for n, p in model.named_parameters():
+            if 'lang_prompt' in n :
+                p.requires_grad_(True)
     else:
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
@@ -450,10 +491,9 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     total_count = 0
     for n, p in model.named_parameters():
         if p.requires_grad:
-            print(n)
+            print(n, p.shape)
             total_count += p.numel()
     print(total_count)
-    # breakpoint()
     
     return model, tokenizer, data_args
 

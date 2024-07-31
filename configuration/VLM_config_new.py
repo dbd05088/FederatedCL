@@ -113,3 +113,5 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = 2e-5
     group_by_modality_length: bool = field(default=True)
+    
+    ia3_enable: bool = False
