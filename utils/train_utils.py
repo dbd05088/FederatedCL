@@ -350,10 +350,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         
         
         # create pool
-        from models.ia3pool.ia3poolmodel import IA3PoolModel
-        from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
-        PEFT_TYPE_TO_MODEL_MAPPING['IA3POOL'] = IA3PoolModel
-        ia3_config.peft_type = 'IA3POOL'
+        if training_args.mode == 'ia3_pool':
+            from models.ia3pool.ia3poolmodel import IA3PoolModel
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['IA3POOL'] = IA3PoolModel
+            ia3_config.peft_type = 'IA3POOL'
         
         model = get_peft_model(model, ia3_config)
         
