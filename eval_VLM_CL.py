@@ -76,7 +76,7 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
     cnt = 0
     with torch.no_grad():
         # for i, (inputs, imgs, golds, prompts, img_files) in enumerate(tqdm(dataloader)):
-        for i, batch in enumerate(tqdm(dataloader)):
+        for i, batch in enumerate((dataloader)): #tqdm
             inputs, imgs, golds, prompts, img_files = batch['input_ids'], batch['images'], batch['gold'], batch['prompt'], batch['image_file']
             attention_mask = batch['attention_mask'].to(device=device)
             
@@ -102,7 +102,8 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
                     max_new_tokens=model_args.max_new_tokens,#args.max_new_tokens,
                     use_cache=True,
                     pad_token_id=tokenizer.eos_token_id,
-                    stopping_criteria = stopping_criteria
+                    stopping_criteria = stopping_criteria,
+                    prompt=prompts,
                 )
             # if 'bunny' in model_args.model_name_or_path.lower():
             #     input_token_len = inputs.shape[1]
@@ -160,7 +161,7 @@ def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_a
     total = 0
     with torch.no_grad():
         # for i, (inputs, imgs, golds, prompts, img_files) in enumerate(tqdm(dataloader)):
-        for i, batch in enumerate(tqdm(dataloader)):
+        for i, batch in enumerate((dataloader)): #tqdm
             inputs, imgs, golds, prompts, img_files = batch['input_ids'], batch['images'], batch['gold'], batch['prompt'], batch['image_file']
             attention_mask = batch['attention_mask'].to(device=device)
             
@@ -186,7 +187,8 @@ def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_a
                     max_new_tokens=model_args.max_new_tokens,#args.max_new_tokens,
                     use_cache=False,
                     pad_token_id=tokenizer.eos_token_id,
-                    stopping_criteria = stopping_criteria
+                    stopping_criteria = stopping_criteria,
+                    prompt=prompts,
                 )
             
             pred_sentences = tokenizer.batch_decode(output_ids, skip_special_tokens=True)#[0].strip()

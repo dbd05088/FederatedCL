@@ -14,7 +14,7 @@ from transformers import Trainer
 import bitsandbytes
 import os
 from transformers.trainer import unwrap_model, _is_peft_model, MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
-
+from models.ia3pool.ia3poollayer import IA3Layer
     
 def task_id_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
     task_id = extra_state_dict_dict['task_id'] if 'task_id' in extra_state_dict_dict else None
@@ -34,6 +34,18 @@ class LLaVATrainerTaskId(LLaVATrainerFEDAVG):
         super(LLaVATrainerTaskId, self).__init__(**kwargs)
         
         self.task_id = task_id
+    
+    def _inner_training_loop(
+        self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
+    ):
+        output = super()._inner_training_loop(batch_size=batch_size, args=args,resume_from_checkpoint=resume_from_checkpoint,ignore_keys_for_eval=ignore_keys_for_eval)
+        
+        # for name, module in self.model.named_modules():
+        #     if isinstance(module, IA3Layer):
+        #         module.init_next_ia3(self.task_id)
+    
+        return output
+    
     def compute_loss(self, model, inputs, return_outputs=False):
         """
         How the loss is computed by Trainer. By default, all models return the loss in the first element.
@@ -44,7 +56,12 @@ class LLaVATrainerTaskId(LLaVATrainerFEDAVG):
             labels = inputs.pop("labels")
         else:
             labels = None
-        outputs = model(**inputs, task_id=self.task_id)
+        
+        if 'prompt' in inputs:
+            text_prompt = inputs.pop('prompt')
+        else:
+            text_prompt = None
+        outputs = model(**inputs, task_id=self.task_id, prompt=text_prompt) if text_prompt else model(**inputs, task_id=self.task_id)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:

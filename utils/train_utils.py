@@ -5,7 +5,7 @@ import transformers
 from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.language_model.llava_mpt import LlavaMptForCausalLM
 from models.bunny import BunnyPhiForCausalLM, BunnyStableLMForCausalLM, BunnyQwen2ForCausalLM, BunnyMiniCPMForCausalLM, BunnyLlamaForCausalLM
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, CLIPTextModel, CLIPProcessor
 import models.llava.conversation as conversation_lib_llava
 import models.bunny.conversation as conversation_lib_bunny
 from transformers import Trainer
@@ -381,8 +381,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-    if training_args.mode == 'l2p' or training_args.mode == 'dap':
+    if training_args.mode == 'l2p' or training_args.mode == 'dap' or training_args.mode == 'ia3_pool':
         vision_tower.select_feature = 'cls_patch'
+        model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
+        model.base_model.model.clipprocessor = CLIPProcessor.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipprocessor/")
+        model.base_model.model.text_encoder.requires_grad_(False)
     # if not training_args.is_eval:
     #     data_args.img_mean = vision_tower.image_processor.image_mean
     #     data_args.img_std = vision_tower.image_processor.image_std
@@ -495,7 +498,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             print(n, p.shape)
             total_count += p.numel()
     print(total_count)
-    
     return model, tokenizer, data_args
 
 def find_all_linear_names(model):

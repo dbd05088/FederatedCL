@@ -52,8 +52,8 @@ class IA3Layer(BaseTunerLayer):
         self.out_features = out_features
         
         # FIXME: top_k and pool size
-        self.pool_size = 12
-        self.top_k = 3
+        self.pool_size = 8
+        self.top_k = 2
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # This code works for linear layers, override for other layer types
@@ -158,6 +158,13 @@ class Linear(nn.Module, IA3Layer):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
                     base_layer.bias.data = torch.div(base_layer.bias.data, scaling.data + 1e-8)
 
+    def init_next_ia3(self, task_id):
+        if (task_id+1)*self.top_k < self.pool_size:
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.ia3_l.keys():
+                    continue
+                self.ia3_l[active_adapter][(task_id+1)*self.top_k:(task_id+2)*self.top_k,:,:].data = self.ia3_l[active_adapter][task_id*self.top_k:(task_id+1)*self.top_k,:,:]
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         dtype = previous_dtype = x.dtype
 
@@ -174,13 +181,11 @@ class Linear(nn.Module, IA3Layer):
                 if active_adapter not in self.ia3_l.keys():
                     continue
                 dtype = self.ia3_l[active_adapter].dtype
-                
-                
+
                 if idx is not None:
                     # choose by top_k
                     ia3s = self.ia3_l[active_adapter][idx[0]]
-                    mean_ia3 = ia3s.mean(dim=0)
-                    
+                    mean_ia3 = ia3s.mean(dim=0) if len(ia3s.shape) > 2 else ia3s
                     ia3_scaling *= mean_ia3.flatten()
                     
                     self.prev_ia3_scaling = ia3_scaling.clone()

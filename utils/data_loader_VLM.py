@@ -168,6 +168,10 @@ class LazySupervisedDataset(Dataset):
 
     def __getitem__(self, i):
         sources = self.datalist[i]
+        
+        if self.data_args.get_prompt:
+            prompt = sources["conversations"][0]['value']
+        
         if isinstance(i, int):
             sources = [sources]
         assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
@@ -223,6 +227,9 @@ class LazySupervisedDataset(Dataset):
         # image exist in the data
         # if 'image' in self.datalist[i]:
         data_dict['image'] = image
+        
+        if self.data_args.get_prompt:
+            data_dict['prompt'] = prompt
         return data_dict
 
 @dataclass
@@ -269,6 +276,9 @@ class DataCollatorForSupervisedDataset(object):
             else:
                 # batch['images'] = [self.transform(x.to(device=self.device)).to(dtype=torch.bfloat16) if x.shape[0] != 0 else x.to(torch.bfloat16) for x in images]
                 batch['images'] = [x.to(dtype=torch.bfloat16) for x in images]
+
+        if 'prompt' in instances[0]:
+            batch['prompt'] = [instance['prompt'] for instance in instances]
 
         return batch
 

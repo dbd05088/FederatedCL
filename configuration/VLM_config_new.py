@@ -29,6 +29,8 @@ class DataArguments:
     image_folder: Optional[str] = field(default=None)
     image_aspect_ratio: str = 'pad'
     model_name_for_dataarg: Optional[str] = field(default=None)
+    
+    get_prompt: bool = False
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):

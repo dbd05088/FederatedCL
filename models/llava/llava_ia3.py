@@ -41,6 +41,9 @@ from models.ia3pool.ia3_attn import Llamaia3Attention
 from models.ia3pool.ia3_mlp import LlamaIA3MLP
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
 
+from transformers import CLIPTextModel, CLIPProcessor
+
+
 from operator import mul
 import math
 from functools import reduce
@@ -356,10 +359,10 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         # Initialize weights and apply final processing
         self.post_init()
         
-        self.lang_prompt_feature_embedding = prefix_attention()
-        self.pool_size = 12
-        self.top_k = 3
-        self.prompt_dim = config.hidden_size*2
+        # self.lang_prompt_feature_embedding = prefix_attention()
+        self.pool_size = 8
+        self.top_k = 2
+        self.prompt_dim = 1792#config.hidden_size + 1024#config.hidden_size*2 1792
         # val = math.sqrt(6. / float(3 * reduce(mul, (config.hidden_size,), 1)))
         val = math.sqrt(6. / self.prompt_dim)
         self.lang_prompt_dap_key_embeddings = nn.Parameter(torch.zeros(self.pool_size, self.prompt_dim))
@@ -368,6 +371,7 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             self.lang_prompt_dap_key_embeddings.uniform_(-val, val)
         self.lang_prompt_dap_key_embeddings.requires_grad_(True)
         
+        # clip text encoder
         
     def get_model(self):
         return self.model
@@ -389,6 +393,7 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         cache_position=None,
         task_id_estimated_emb=None,
         task_id=None,
+        prompt=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         
         if inputs_embeds is None:
@@ -407,7 +412,8 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 labels,
                 images,
-                task_id=task_id
+                task_id=task_id,
+                prompt=prompt
             )
             if task_id_estimated_emb is not None:
                 task_id_estimated_emb, reduce_sim = task_id_estimated_emb
@@ -428,7 +434,7 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         )
         
         if 'loss' in outputs and outputs['loss'] is not None:
-            outputs['loss'] -= 0.1*reduce_sim
+            outputs['loss'] -= 1.0*reduce_sim
 
         return outputs
 
@@ -438,6 +444,7 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         inputs: Optional[torch.Tensor] = None,
         images: Optional[torch.Tensor] = None,
         image_sizes: Optional[torch.Tensor] = None,
+        prompt=None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         position_ids = kwargs.pop("position_ids", None)
@@ -461,6 +468,7 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 None,
                 None,
                 images,
+                prompt=prompt
             )
             task_id_estimated_emb, reduce_sim = task_id_estimated_emb
             kwargs["task_id_estimated_emb"] = task_id_estimated_emb
@@ -566,9 +574,17 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             inputs['task_id_estimated_emb'] = task_id_estimated_emb
         return inputs
     
+    
+    def encode_images(self, images):
+        image_features = self.get_model().get_vision_tower()(images)
+        cls_feature = image_features[:, 0]
+        image_features = image_features[:, 1:]
+        image_features = self.get_model().mm_projector(image_features)
+        return image_features, cls_feature
+    
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
-        images, task_id=None
+        images, task_id=None, prompt=None
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1 or all(img.shape[0] == 0 for img in images):
@@ -578,13 +594,18 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             if type(images) is list:
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
             concat_images = torch.cat([image for image in images], dim=0)
-            image_features = self.encode_images(concat_images)
+            # image_features = self.encode_images(concat_images)
+            # split_sizes = [image.shape[0] for image in images]
+            # image_features = torch.split(image_features, split_sizes, dim=0)
+            image_features, cls_features = self.encode_images(concat_images)
             split_sizes = [image.shape[0] for image in images]
             image_features = torch.split(image_features, split_sizes, dim=0)
+            cls_features = torch.split(cls_features, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
             image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
         else:
-            image_features = self.encode_images(images)
+            # image_features = self.encode_images(images)
+            image_features, cls_features = self.encode_images(images)
 
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(self.config, 'mm_use_im_start_end', False):
@@ -725,16 +746,37 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         # input_features = self.lang_prompt_feature_embedding(hidden_states=new_input_embeds, attention_mask=new_attention_mask)[:,0,:]
         
         input_features = []
+        assert prompt is not None
         for i in range(new_input_embeds.shape[0]):
-            img_feat = new_input_embeds[i,image_feature_indices[i], :].mean(dim=0)
-            if attention_mask is not None:
-                total_length = attention_mask[i].sum().item()
-            elif new_labels is not None:
-                total_length = (new_labels[i]==IGNORE_INDEX).sum().item()
-            else:
-                total_length = new_input_embeds[i].shape[0]
-            text_feat = new_input_embeds[i, list(set(range(total_length)) - set(image_feature_indices[i])), :].mean(dim=0)
+            # img_feat = new_input_embeds[i,image_feature_indices[i], :].mean(dim=0)
+            # if attention_mask is not None:
+            #     total_length = attention_mask[i].sum().item()
+            # elif new_labels is not None:
+            #     total_length = (new_labels[i]==IGNORE_INDEX).sum().item()
+            # else:
+            #     total_length = new_input_embeds[i].shape[0]
+            # text_feat = new_input_embeds[i, list(set(range(total_length)) - set(image_feature_indices[i])), :].mean(dim=0)
+            
+            img_feat = cls_features[batch_idx].mean(dim=0)
+            text_ids = input_ids[batch_idx]
+            text = prompt[batch_idx]
+            text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
+            text_ids['input_ids'] = text_ids['input_ids'].cuda()
+            text_ids['attention_mask'] = text_ids['attention_mask'].cuda()
+            text_ids['input_ids'] = text_ids['input_ids'][:,-77:] if len(text_ids['input_ids'][0]) > 77 else text_ids['input_ids']
+            text_ids['attention_mask'] = text_ids['attention_mask'][:,-77:] if len(text_ids['attention_mask'][0]) > 77 else text_ids['attention_mask']
+            text_feat = self.text_encoder(**text_ids)[1][0].to(torch.bfloat16)
+            
+            # if attention_mask is not None:
+                # total_length = attention_mask[i].sum().item()
+            # elif new_labels is not None:
+                # total_length = (new_labels[i]==IGNORE_INDEX).sum().item()
+            # else:
+                # total_length = new_input_embeds[i].shape[0]
+            # text_feat = new_input_embeds[i, list(set(range(total_length)) - set(image_feature_indices[i])), :][34:].mean(dim=0)
+            
             input_features.append(torch.concat((img_feat, text_feat)))
+            
         input_features = torch.stack(input_features)
         dap_prompt_key_norm = F.normalize(self.lang_prompt_dap_key_embeddings, dim=-1)
         x_embed_norm = F.normalize(input_features, dim=-1)
@@ -769,4 +811,7 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         x_embed_norm = x_embed_norm.unsqueeze(1)
         sim_pull = selected_prompt_key * x_embed_norm
         reduce_sim = torch.sum(sim_pull) / bsz
+        
+        # breakpoint()
+        print("idx", idx[0].detach().cpu().numpy().tolist())
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (idx,reduce_sim)
