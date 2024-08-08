@@ -23,7 +23,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils import transpose
 import copy
 
-class IA3Layer(BaseTunerLayer):
+class DualIA3Layer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("ia3_l_1","ia3_l_2")
 
@@ -52,7 +52,7 @@ class IA3Layer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
         
-        self.active_state = 'ia3_1'
+        self.active_state = 'lora1'
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # This code works for linear layers, override for other layer types
@@ -79,7 +79,7 @@ class IA3Layer(BaseTunerLayer):
             self.ia3_l_2[adapter_name].weight.data.copy_(init_weight)
 
     def set_state(self, state):
-        assert state in ['ia3_1', 'ia3_2', 'gate'], state
+        assert state in ['lora1', 'lora2', 'gate'], state
         self.active_state = state
 
     def activate_all(self):
@@ -88,19 +88,19 @@ class IA3Layer(BaseTunerLayer):
         for p in self.ia3_l_2.parameters():
             p.requires_grad = True
 
-    def activate_1(self):
+    def activate_lora1(self):
         for p in self.ia3_l_1.parameters():
             p.requires_grad = True
         for p in self.ia3_l_2.parameters():
             p.requires_grad = False
     
-    def activate_2(self):
+    def activate_lora2(self):
         for p in self.ia3_l_1.parameters():
             p.requires_grad = False
         for p in self.ia3_l_2.parameters():
             p.requires_grad = True
 
-class Linear(nn.Module, IA3Layer):
+class Linear(nn.Module, DualIA3Layer):
     # (IA)^3 implemented in a dense layer
     def __init__(
         self,
@@ -113,7 +113,7 @@ class Linear(nn.Module, IA3Layer):
         **kwargs,
     ) -> None:
         super().__init__()
-        IA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
+        DualIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
         self.fan_in_fan_out = fan_in_fan_out
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name
@@ -212,9 +212,9 @@ class Linear(nn.Module, IA3Layer):
                 ia3_1 = self.ia3_l_1[active_adapter]
                 ia3_2 = self.ia3_l_2[active_adapter]
                 
-                if self.active_state == 'ia3_1':
+                if self.active_state == 'lora1':
                     ia3_scaling *= ia3_1.flatten()
-                elif self.active_state == 'ia3_2':
+                elif self.active_state == 'lora2':
                     ia3_scaling *= ia3_2.flatten()
                 elif self.active_state == 'gate':
                     ia3_scaling *= ((ia3_1+ia3_2)/2).flatten()

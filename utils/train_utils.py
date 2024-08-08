@@ -14,6 +14,7 @@ from models.bunny.prompt_tuning_model import Bunny_PT
 from models.llava.prompt_tuning_model import Llava_PT
 from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
 from models.duallora.dualloralayer import DualLoraLayer
+from models.dual_ia3.dual_ia3_layer import DualIA3Layer
 from models.feddat_lora.tripleloralayer import TripleLoraLayer
 from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
 from models.llava.l2p_model import Llava_L2P
@@ -355,6 +356,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['IA3POOL'] = IA3PoolModel
             ia3_config.peft_type = 'IA3POOL'
+        elif training_args.mode in ['fedsim', 'apfl', 'ditto'] or training_args.mode =='feddat':
+            from models.dual_ia3.dual_ia3_model import DualIA3Model
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['DUALIA3'] = DualIA3Model
+            lora_config.peft_type = 'DUALIA3'
         
         model = get_peft_model(model, ia3_config)
         
@@ -413,13 +419,13 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         if training_args.is_eval:
             for name, module in model.named_modules():
                 # if isinstance(module, TripleLoraLayer):
-                if isinstance(module, DualLoraLayer):
+                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                     module.set_state('gate')
                     module.activate_all()
         else:
             for name, module in model.named_modules():
                 # if isinstance(module, TripleLoraLayer):
-                if isinstance(module, DualLoraLayer):
+                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                     module.set_state('lora1')
                     module.activate_all()
             model.lm_head.requires_grad_(False)
@@ -444,11 +450,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         
         if training_args.is_eval:
             for name, module in model.named_modules():
-                if isinstance(module, DualLoraLayer):
+                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                     module.set_state('lora2')
         else:
             for name, module in model.named_modules():
-                if isinstance(module, DualLoraLayer):
+                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                     module.set_state('lora1')
                     module.activate_all()
             model.lm_head.requires_grad_(False)

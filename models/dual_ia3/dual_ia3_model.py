@@ -33,10 +33,10 @@ from peft.utils import (
 )
 
 from peft.tuners.ia3.layer import Conv2d
-from models.dual_ia3.dual_ia3_layer import IA3Layer, Linear
+from models.dual_ia3.dual_ia3_layer import DualIA3Layer, Linear
 
 
-class IA3PoolModel(BaseTuner):
+class DualIA3Model(BaseTuner):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
     transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638
@@ -173,7 +173,7 @@ class IA3PoolModel(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
 
-        if isinstance(target, IA3Layer):
+        if isinstance(target, DualIA3Layer):
             target.update_layer(
                 adapter_name,
                 ia3_config.init_ia3_weights,
@@ -240,7 +240,7 @@ class IA3PoolModel(BaseTuner):
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
-            if isinstance(module, (IA3Layer, ModulesToSaveWrapper)):
+            if isinstance(module, (DualIA3Layer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:
@@ -273,7 +273,7 @@ class IA3PoolModel(BaseTuner):
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
         for module in self.model.modules():
-            if isinstance(module, IA3Layer):
+            if isinstance(module, DualIA3Layer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -387,7 +387,7 @@ class IA3PoolModel(BaseTuner):
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, IA3Layer):
+            if isinstance(target, DualIA3Layer):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]
