@@ -73,10 +73,10 @@ class DualIA3Layer(BaseTunerLayer):
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l_1.keys():
             # initialize learned vector with torch.ones
-            init_weight = torch.empty_like(self.ia3_l_1[adapter_name].weight)
+            init_weight = torch.empty_like(self.ia3_l_1[adapter_name].data)
             nn.init.constant_(init_weight, 1.0)
-            self.ia3_l_1[adapter_name].weight.data.copy_(init_weight)
-            self.ia3_l_2[adapter_name].weight.data.copy_(init_weight)
+            self.ia3_l_1[adapter_name].data.copy_(init_weight)
+            self.ia3_l_2[adapter_name].data.copy_(init_weight)
 
     def set_state(self, state):
         assert state in ['lora1', 'lora2', 'gate'], state
