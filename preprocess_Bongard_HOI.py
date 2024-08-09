@@ -52,8 +52,8 @@ def save_dataset(dataset_name, output_folder, subset_name, max_samples):
             other_actions = list(set(action_classes[num_per_set:]) - set(choice_list))  # Exclude the positive actions and gt_action
             num_additional_choices = min(3, len(other_actions))
             choice_list.extend(random.sample(other_actions, num_additional_choices))
-            random.shuffle(choice_list)
-            
+            # random.shuffle(choice_list)
+            choice_list = sorted(choice_list)
             # Structure for LLaVA JSON
             json_data = {
                 "id": f"{type_name}-{IIDEX}",
