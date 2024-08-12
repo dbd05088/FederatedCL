@@ -28,6 +28,7 @@ from models.llava.mm_utils import KeywordsStoppingCriteria
 from models.llava import conversation as conversation_lib_llava
 from models.bunny import conversation as conversation_lib_bunny
 from models.duallora.dualloralayer import DualLoraLayer
+from models.dual_ia3.dual_ia3_layer import DualIA3Layer
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -388,9 +389,9 @@ def main():
                 # model.load_state_dict(server_state_dict, strict=False)
                 if training_args.mode in ['apfl', 'ditto']:
                     for name, module in model.named_modules():
-                        if isinstance(module, DualLoraLayer):
+                        if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                             module.set_state('lora2')
-                    model.base_model.model.model.mm_projector = model.base_model.model.model.local_mm_projector
+                    # model.base_model.model.model.mm_projector = model.base_model.model.model.local_mm_projector
                 dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
                 
                 if training_args.mode not in ['fedsim', 'feddat']:
@@ -406,9 +407,9 @@ def main():
                         model.load_state_dict(server_state_dict, strict=False)
                     if training_args.mode in ['apfl', 'ditto']:
                         for name, module in model.named_modules():
-                            if isinstance(module, DualLoraLayer):
+                            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                                 module.set_state('lora1')
-                        model.base_model.model.model.mm_projector = model.base_model.model.model.global_mm_projector
+                        # model.base_model.model.model.mm_projector = model.base_model.model.model.global_mm_projector
                 # #     if data_info['data_name'] in CHOICE_DATA: 
                 # #         evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
                 # #     else:

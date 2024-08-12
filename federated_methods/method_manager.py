@@ -65,6 +65,8 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
     
     elif mode =='ia3_pool':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
+    elif mode =='dap_ia3':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
     else:
         raise NotImplementedError(mode)
     return set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules

@@ -15,6 +15,7 @@ from models.llava.prompt_tuning_model import Llava_PT
 from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
 from models.duallora.dualloralayer import DualLoraLayer
 from models.dual_ia3.dual_ia3_layer import DualIA3Layer
+from models.dap_ia3.dapia3layer import DAPIA3Layer
 from models.feddat_lora.tripleloralayer import TripleLoraLayer
 from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
 from models.llava.l2p_model import Llava_L2P
@@ -26,6 +27,7 @@ from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
 from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
 from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
 from models.llava.llava_ia3 import LlavaLlamaForIA3PoolCausalLM
+from models.llava.dap_ia3 import LlavaLlamaDAPIA3ForCausalLM
 
 import copy
 ACCESS_TOKEN = "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"
@@ -180,6 +182,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load dap attn')
+        elif training_args.mode == 'dap_ia3':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaDAPIA3ForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load dap attn')
         elif training_args.mode == 'layer_l2p_attn':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaL2PATTNForCausalLM.from_pretrained(
@@ -318,10 +331,13 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 model.to(torch.float16)
     if training_args.lora_enable:
         from peft import LoraConfig, get_peft_model
+        
+        target_modules = ['k_proj', 'v_proj']
+        
         lora_config = LoraConfig(
             r=training_args.lora_r,
             lora_alpha=training_args.lora_alpha,
-            target_modules=find_all_linear_names(model),
+            target_modules=target_modules,#find_all_linear_names(model),
             lora_dropout=training_args.lora_dropout,
             bias=training_args.lora_bias,
             task_type="CAUSAL_LM",
@@ -360,10 +376,15 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from models.dual_ia3.dual_ia3_model import DualIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['DUALIA3'] = DualIA3Model
-            lora_config.peft_type = 'DUALIA3'
+            ia3_config.peft_type = 'DUALIA3'
+        elif training_args.mode in ['dap_ia3']:
+            from models.dap_ia3.dapia3model import DAPIA3Model
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['DAPIA3'] = DAPIA3Model
+            ia3_config.peft_type = 'DAPIA3'
         
         model = get_peft_model(model, ia3_config)
-        
+        model = model.to(device=training_args.device, dtype=compute_dtype)
 
     if 'llava' in model_args.model_name_or_path.lower():
         if model_args.version in conversation_lib_llava.conv_templates:
@@ -387,7 +408,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-    if training_args.mode == 'l2p' or training_args.mode == 'dap' or training_args.mode == 'ia3_pool':
+    if training_args.mode == 'l2p' or training_args.mode == 'dap' or training_args.mode == 'ia3_pool' or training_args.mode =='dap_ia3':
         vision_tower.select_feature = 'cls_patch'
         model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
         model.base_model.model.clipprocessor = CLIPProcessor.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipprocessor/")
@@ -407,14 +428,14 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     
     # FIXME: freeze mm_projector for feddat or not?
     if training_args.mode == 'pfedpg' or 'dap' in training_args.mode or 'l2p' in training_args.mode:
-        # for p in model.get_model().mm_projector.parameters():
-        #     p.requires_grad = False
-        # model.lm_head.requires_grad_(False)
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = False
+        model.lm_head.requires_grad_(False)
         for n, p in model.named_parameters():
             if 'lang_prompt' in n :
                 p.requires_grad_(True)
-            else:
-                p.requires_grad_(False)
+            # else:
+            #     p.requires_grad_(False)
     elif training_args.mode == 'feddat':
         if training_args.is_eval:
             for name, module in model.named_modules():
@@ -444,9 +465,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         model.set_active_adapter('adapter_1')
     
     elif training_args.mode in [ 'fedsim', 'ditto', 'apfl']:
-        model.get_model().global_mm_projector = model.get_model().mm_projector
-        model.get_model().local_mm_projector = copy.deepcopy(model.get_model().mm_projector)
-        model.get_model().mm_projector = None
+        # model.get_model().global_mm_projector = model.get_model().mm_projector
+        # model.get_model().local_mm_projector = copy.deepcopy(model.get_model().mm_projector)
+        # model.get_model().mm_projector = None
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = False
         
         if training_args.is_eval:
             for name, module in model.named_modules():
