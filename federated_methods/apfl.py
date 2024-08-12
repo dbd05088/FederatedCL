@@ -49,6 +49,7 @@ if is_accelerate_available():
         DATA_SAMPLERS += [SeedableRandomSampler]
 
 from models.duallora.dualloralayer import DualLoraLayer
+from models.dual_ia3.dual_ia3_layer import DualIA3Layer
 from collections import OrderedDict
 import numpy as np
 
@@ -72,19 +73,19 @@ class LLaVATrainerAPFL(LLaVATrainer):
         
         # global forward
         for name, module in model.module.named_modules():
-            if isinstance(module, DualLoraLayer):
+            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                 module.set_state('lora1')
-        model.module.base_model.model.model.mm_projector = model.module.base_model.model.model.global_mm_projector
+        # model.module.base_model.model.model.mm_projector = model.module.base_model.model.model.global_mm_projector
         loss_global, outputs = super(LLaVATrainerAPFL, self).compute_loss(model, inputs, return_outputs=True)     
         # local forward
         for name, module in model.module.named_modules():
-            if isinstance(module, DualLoraLayer):
+            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                 module.set_state('lora2')
-        model.module.base_model.model.model.mm_projector = model.module.base_model.model.model.local_mm_projector
+        # model.module.base_model.model.model.mm_projector = model.module.base_model.model.model.local_mm_projector
         loss_local, local_outputs = super(LLaVATrainerAPFL, self).compute_loss(model, inputs, return_outputs=True) 
         
         loss = loss_global + loss_local
-        model.module.base_model.model.model.mm_projector = None
+        # model.module.base_model.model.model.mm_projector = None
         return (loss, outputs) if return_outputs else loss
 
     def _inner_training_loop(
@@ -507,6 +508,8 @@ class LLaVATrainerAPFL(LLaVATrainer):
                             target_name = name.replace('local_mm_projector', 'global_mm_projector')
                         elif 'lora2' in name:
                             target_name = name.replace('lora2', 'lora1')
+                        elif 'ia3_l_2' in name:
+                            target_name = name.replace('ia3_l_2', 'ia3_l_1')
                         dif = param.data - model_param[target_name].data
                         grad = self.alpha * param.grad.data + (1-self.alpha) * model_param[target_name].grad.data
                         grad_alpha += dif.view(-1).T.dot(grad.view(-1))
@@ -623,6 +626,9 @@ class LLaVATrainerAPFL(LLaVATrainer):
                 param.data = self.alpha * param + (1-self.alpha)*model_param[target_name]
             elif 'lora2' in name:
                 target_name = name.replace('lora2', 'lora1')
+                param.data = self.alpha * param + (1-self.alpha)*model_param[target_name]
+            elif 'ia3_l_2' in name:
+                target_name = name.replace('ia3_l_2', 'ia3_l_1')
                 param.data = self.alpha * param + (1-self.alpha)*model_param[target_name]
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
