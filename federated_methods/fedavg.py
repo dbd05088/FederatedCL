@@ -68,6 +68,8 @@ def fedavg_create_trainer(model, tokenizer, training_args, data_module, extra_st
         args=training_args,
         packing=True,
         max_seq_length=training_args.model_max_length,
+        client_id = extra_state_dict_dict['client_id'],
+        curr_round = extra_state_dict_dict['curr_round'],
         **data_module,
         )
     return trainer
@@ -87,6 +89,11 @@ def fedavg_aggregate_state_dict(global_state_dict, local_state_dict_list, select
 
 
 class LLaVATrainerFEDAVG(LLaVATrainer):
+    def __init__(self, client_id, curr_round, **kwargs):
+        super(LLaVATrainerFEDAVG, self).__init__(**kwargs)
+        self.client_id = client_id
+        self.curr_round = curr_round
+    
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
     ):
@@ -262,7 +269,11 @@ class LLaVATrainerFEDAVG(LLaVATrainer):
 
         # Check if saved optimizer or scheduler states exist
         self._load_optimizer_and_scheduler(resume_from_checkpoint)
-
+        
+        # FIXME
+        if self.args.save_optim and self.curr_round > 0:
+            output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
+            self._load_optimizer_and_scheduler(output_dir)
         # important: at this point:
         # self.model         is the Transformers Model
         # self.model_wrapped is DDP(Transformers Model), Deepspeed(Transformers Model),
@@ -596,5 +607,9 @@ class LLaVATrainerFEDAVG(LLaVATrainer):
         # for the embedding layer by removing the forward post hook.
         if self.neftune_noise_alpha is not None:
             self._deactivate_neftune(self.model)
+
+        if self.args.save_optim:
+            output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
+            self._save_optimizer_and_scheduler(output_dir)
 
         return TrainOutput(self.state.global_step, train_loss, metrics)

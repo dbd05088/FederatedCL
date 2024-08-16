@@ -12,6 +12,11 @@ pip install bitsandbytes
 pip install pandas kornia opencv-python timm torch_optimizer easydict pycocoevalcap sentencepiece protobuf
 pip install trl==0.8.6
 pip install deepspeed==0.14.0
+pip install loguru captum
+```
+
+```
+conda install -c conda-forge cudatoolkit-dev -y
 ```
 
 # Dataset Preparation

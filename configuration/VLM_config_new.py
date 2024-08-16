@@ -77,6 +77,7 @@ class TrainingArguments(transformers.TrainingArguments):
     optim: str = field(default="adamw_torch")
     is_wsd: str = field(default=None)
     decay_ratio: float = field(default=1.0)
+    save_optim: bool = field(default=False)
     
     temp_batchsize: int = field(default=2)
 

@@ -76,14 +76,13 @@ class PromptMLP(nn.Module):
 
         return out
 
-class DAPIA3Layer(BaseTunerLayer):
+class EVOIA3Layer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
-    adapter_layer_names = ("ia3_generator","lang_prompt_film",)
+    adapter_layer_names = ("ia3_generator",)
 
     def __init__(self, base_layer: nn.Module, is_feedforward: bool, **kwargs) -> None:
         self.base_layer = base_layer
         self.ia3_generator = nn.ParameterDict({})
-        self.lang_prompt_film = nn.ParameterDict({})
 
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -110,7 +109,6 @@ class DAPIA3Layer(BaseTunerLayer):
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
         self.ia3_generator[adapter_name] = PromptMLP(1792,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
-        self.lang_prompt_film[adapter_name] = nn.Linear(64, self.in_features*2)
         
         self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
@@ -121,7 +119,7 @@ class DAPIA3Layer(BaseTunerLayer):
             nn.init.constant_(self.ia3_l[adapter_name], 1.0)
 
 
-class Linear(nn.Module, DAPIA3Layer):
+class Linear(nn.Module, EVOIA3Layer):
     # (IA)^3 implemented in a dense layer
     def __init__(
         self,
@@ -134,7 +132,7 @@ class Linear(nn.Module, DAPIA3Layer):
         **kwargs,
     ) -> None:
         super().__init__()
-        DAPIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
+        EVOIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
         self.fan_in_fan_out = fan_in_fan_out
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name
@@ -213,7 +211,6 @@ class Linear(nn.Module, DAPIA3Layer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            task_id_estimated_emb = kwargs['idx'] if 'idx' in kwargs.keys() else None
             query_embeds = kwargs['query_embeds'] if 'query_embeds' in kwargs.keys() else None
             ia3_scaling = 1
             for active_adapter in self.active_adapters:
@@ -222,48 +219,12 @@ class Linear(nn.Module, DAPIA3Layer):
                 dtype = self.ia3_generator[active_adapter].block[0].weight.dtype
 
                 bs = x.shape[0]
-                if task_id_estimated_emb is not None:
-                    # if labels is not None and attention_mask is not None:
-                    #     new_attention_mask = attention_mask & (labels == IGNORE_INDEX)
-                    # elif attention_mask is not None:
-                    #     new_attention_mask = attention_mask
-                    # elif labels is not None:
-                    #     new_attention_mask = (labels == IGNORE_INDEX)
-                    # else:
-                    #     new_attention_mask = torch.full((x.shape[:-1]), True).to(x.device)
-                    # lang_prompt_norm = self.lang_prompt_norm[active_adapter](x)
-                    # down = self.lang_prompt_downsample[active_adapter](lang_prompt_norm, new_attention_mask)
-                    # film = self.lang_prompt_film[active_adapter](task_id_estimated_emb)
-                    # gamma4 = film[:, :self.in_features]
-                    # beta4 = film[:, self.in_features:]
-                    # gamma_norm = gamma4.norm(p=2, dim=1, keepdim=True).detach()
-                    # beta_norm = beta4.norm(p=2, dim=1, keepdim=True).detach()
-
-                    # gamma4 = gamma4.div(gamma_norm).view(film.size(0), -1, 1)
-                    # beta4 = beta4.div(beta_norm).view(film.size(0), -1, 1)
-                    # down = gamma4 * torch.transpose(down, 2, 1) + beta4
-                    # ia3_delta = torch.transpose(down, 2, 1)
-                    
-                    down = self.ia3_generator[active_adapter](query_embeds)
-                    film = self.lang_prompt_film[active_adapter](task_id_estimated_emb)
-                    gamma4 = film[:, :self.in_features]
-                    beta4 = film[:, self.in_features:]
-                    gamma_norm = gamma4.norm(p=2, dim=1, keepdim=True).detach()
-                    beta_norm = beta4.norm(p=2, dim=1, keepdim=True).detach()
-
-                    gamma4 = gamma4.div(gamma_norm).view(film.size(0), -1, 1)
-                    beta4 = beta4.div(beta_norm).view(film.size(0), -1, 1)
-                    
-                    if self.is_feedforward:
-                        down = gamma4 * torch.transpose(down, 2, 1) + beta4
-                        ia3_delta = torch.transpose(down, 2, 1)
-                    else:
-                        ia3_delta = gamma4 * down + beta4
-                    
+                if query_embeds is not None:
+                    ia3_delta = self.ia3_generator[active_adapter](query_embeds)
                     if self.is_feedforward:
                         weight = torch.ones((bs,1, self.in_features)).to(x.device)
                     else:
-                        weight = torch.ones((bs,self.out_features, 1)).to(x.device)
+                        weight = torch.ones((bs,self.in_features, 1)).to(x.device)
                     
                     ia3 = weight + ia3_delta
                     

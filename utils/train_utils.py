@@ -28,6 +28,7 @@ from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
 from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
 from models.llava.llava_ia3 import LlavaLlamaForIA3PoolCausalLM
 from models.llava.dap_ia3 import LlavaLlamaDAPIA3ForCausalLM
+from models.llava.evoprompt_ia3 import LlavaLlamaEVOIA3ForCausalLM
 
 import copy
 ACCESS_TOKEN = "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"
@@ -192,7 +193,18 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-            print('load dap attn')
+            print('load dap ia3')
+        elif training_args.mode == 'evo_ia3':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaEVOIA3ForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                prompt_num=training_args.prompt_num,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load evo ia3')
         elif training_args.mode == 'layer_l2p_attn':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaL2PATTNForCausalLM.from_pretrained(
@@ -382,6 +394,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['DAPIA3'] = DAPIA3Model
             ia3_config.peft_type = 'DAPIA3'
+        elif training_args.mode in ['evo_ia3']:
+            from models.evo_ia3.evoia3model import EVOIA3Model
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['EVOIA3'] = EVOIA3Model
+            ia3_config.peft_type = 'EVOIA3'
         
         model = get_peft_model(model, ia3_config)
         model = model.to(device=training_args.device, dtype=compute_dtype)
@@ -408,10 +425,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-    if training_args.mode == 'l2p' or training_args.mode == 'dap' or training_args.mode == 'ia3_pool' or training_args.mode =='dap_ia3':
+    if training_args.mode == 'l2p' or training_args.mode == 'dap' or training_args.mode == 'ia3_pool' or training_args.mode =='dap_ia3' or training_args.mode == 'evo_ia3':
         vision_tower.select_feature = 'cls_patch'
         model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
         model.base_model.model.clipprocessor = CLIPProcessor.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipprocessor/")
+        
+        # long clip
+        model.base_model.model.text_encoder.text_model.embeddings.position_embedding = torch.nn.Embedding(248, 768).cuda()
+        model.base_model.model.text_encoder.text_model.embeddings.register_buffer(
+            "position_ids", torch.arange(248).expand((1, -1)), persistent=False
+        )
+        model.base_model.model.text_encoder.load_state_dict(torch.load("/home/vision/thkim/FederatedCL/models/clip_models/longclip_L_text.pt", map_location=training_args.device))
         model.base_model.model.text_encoder.requires_grad_(False)
     # if not training_args.is_eval:
     #     data_args.img_mean = vision_tower.image_processor.image_mean
