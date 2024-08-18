@@ -49,11 +49,12 @@ class PromptMLP(nn.Module):
         self.len = 1
         self.is_forward = is_forward
 
-        non_linearity = nn.ReLU(inplace=True)
-        if activation == "sigmoid":
-            non_linearity = nn.Sigmoid()
-        elif activation == "attention":
-            non_linearity = nn.Softmax(dim=-1)
+        # non_linearity = nn.ReLU(inplace=True)
+        # if activation == "sigmoid":
+        #     non_linearity = nn.Sigmoid()
+        # elif activation == "attention":
+        #     non_linearity = nn.Softmax(dim=-1)
+        non_linearity = nn.SiLU(inplace=True)
 
         self.block = nn.Sequential(
             nn.Linear(self.in_features, self.hidden_features, bias=bias),

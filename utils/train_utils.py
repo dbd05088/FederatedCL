@@ -433,9 +433,10 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         # long clip
         model.base_model.model.text_encoder.text_model.embeddings.position_embedding = torch.nn.Embedding(248, 768).cuda()
         model.base_model.model.text_encoder.text_model.embeddings.register_buffer(
-            "position_ids", torch.arange(248).expand((1, -1)), persistent=False
+            "position_ids", torch.arange(248).expand((1, -1)).cuda(), persistent=False
         )
         model.base_model.model.text_encoder.load_state_dict(torch.load("/home/vision/thkim/FederatedCL/models/clip_models/longclip_L_text.pt", map_location=training_args.device))
+        
         model.base_model.model.text_encoder.requires_grad_(False)
     # if not training_args.is_eval:
     #     data_args.img_mean = vision_tower.image_processor.image_mean
