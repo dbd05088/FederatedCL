@@ -15,6 +15,7 @@ from models.llava.prompt_tuning_model import Llava_PT
 from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
 from models.duallora.dualloralayer import DualLoraLayer
 from models.dual_ia3.dual_ia3_layer import DualIA3Layer
+from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 from models.dap_ia3.dapia3layer import DAPIA3Layer
 from models.feddat_lora.tripleloralayer import TripleLoraLayer
 from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
@@ -29,6 +30,8 @@ from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
 from models.llava.llava_ia3 import LlavaLlamaForIA3PoolCausalLM
 from models.llava.dap_ia3 import LlavaLlamaDAPIA3ForCausalLM
 from models.llava.evoprompt_ia3 import LlavaLlamaEVOIA3ForCausalLM
+from models.llava.llava_ia3_global import LlavaLlamaForOURSIA3PoolCausalLM
+
 
 import copy
 ACCESS_TOKEN = "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"
@@ -236,7 +239,18 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-            print('load ia3 pool')    
+            print('load ia3 pool')
+        
+        elif training_args.mode == 'ours_pool':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaForOURSIA3PoolCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load ours pool')    
         
         elif training_args.mode == 'fedsim' and training_args.is_eval:
             assert model_args.model_type != 'mpt'
@@ -399,6 +413,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['EVOIA3'] = EVOIA3Model
             ia3_config.peft_type = 'EVOIA3'
+        elif training_args.mode in ['ours_pool']:
+            from models.dual_ia3pool.dual_ia3poolmodel import DualIA3PoolModel
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['OURSPOOL'] = DualIA3PoolModel
+            ia3_config.peft_type = 'OURSPOOL'
         
         model = get_peft_model(model, ia3_config)
         model = model.to(device=training_args.device, dtype=compute_dtype)
@@ -425,7 +444,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-    if training_args.mode == 'l2p' or training_args.mode == 'dap' or training_args.mode == 'ia3_pool' or training_args.mode =='dap_ia3' or training_args.mode == 'evo_ia3':
+    if training_args.mode == 'l2p' or training_args.mode == 'dap' or training_args.mode == 'ia3_pool' or training_args.mode =='dap_ia3' or training_args.mode == 'evo_ia3' or training_args.mode =='ours_pool':
         vision_tower.select_feature = 'cls_patch'
         model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
         model.base_model.model.clipprocessor = CLIPProcessor.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipprocessor/")
@@ -514,6 +533,16 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         for n, p in model.named_parameters():
             if 'lang_prompt' in n :
                 p.requires_grad_(True)
+    elif training_args.mode == 'ours_pool':
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = False
+        model.lm_head.requires_grad_(False)
+        for n, p in model.named_parameters():
+            if 'lang_prompt' in n :
+                p.requires_grad_(True)
+        model.set_state('gate')
+        model.activate_all()
+    
     else:
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False

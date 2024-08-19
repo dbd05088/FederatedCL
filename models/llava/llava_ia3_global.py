@@ -42,7 +42,7 @@ from models.ia3pool.ia3_mlp import LlamaIA3MLP
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
 
 from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer
-from models.dual_ia3pool.dual_ia3poollayer import DualIA3Layer
+from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 
 from transformers import CLIPTextModel, CLIPProcessor
 
@@ -349,7 +349,7 @@ class LlamaDAPForCausalLM(LlamaForCausalLM):
         )
 
 
-class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
+class LlavaLlamaForOURSIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
     def __init__(self, config):
@@ -385,37 +385,43 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.active_state = state
         
         for name, module in self.model.named_modules():
-            if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3Layer):
+            if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3PoolLayer):
                 module.set_state(state)
 
     def activate_all(self):
-        for p in self.lang_prompt_dap_key_embeddings_1.parameters():
-            p.requires_grad = True
-        for p in self.lang_prompt_dap_key_embeddings_2.parameters():
-            p.requires_grad = True
+        # for p in self.lang_prompt_dap_key_embeddings_1.parameters():
+        #     p.requires_grad = True
+        # for p in self.lang_prompt_dap_key_embeddings_2.parameters():
+        #     p.requires_grad = True
+        self.lang_prompt_dap_key_embeddings_1.requires_grad = True
+        self.lang_prompt_dap_key_embeddings_2.requires_grad = True
         
         for name, module in self.model.named_modules():
-            if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3Layer):
+            if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3PoolLayer):
                 module.activate_all()
 
     def activate_lora1(self):
-        for p in self.lang_prompt_dap_key_embeddings_1.parameters():
-            p.requires_grad = True
-        for p in self.lang_prompt_dap_key_embeddings_2.parameters():
-            p.requires_grad = False
+        # for p in self.lang_prompt_dap_key_embeddings_1.parameters():
+        #     p.requires_grad = True
+        # for p in self.lang_prompt_dap_key_embeddings_2.parameters():
+        #     p.requires_grad = False
+        self.lang_prompt_dap_key_embeddings_1.requires_grad = True
+        self.lang_prompt_dap_key_embeddings_2.requires_grad = False
             
         for name, module in self.model.named_modules():
-            if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3Layer):
+            if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3PoolLayer):
                 module.activate_lora1()
     
     def activate_lora2(self):
-        for p in self.lang_prompt_dap_key_embeddings_1.parameters():
-            p.requires_grad = False
-        for p in self.lang_prompt_dap_key_embeddings_2.parameters():
-            p.requires_grad = True
+        # for p in self.lang_prompt_dap_key_embeddings_1.parameters():
+        #     p.requires_grad = False
+        # for p in self.lang_prompt_dap_key_embeddings_2.parameters():
+        #     p.requires_grad = True
+        self.lang_prompt_dap_key_embeddings_1.requires_grad = False
+        self.lang_prompt_dap_key_embeddings_2.requires_grad = True
         
         for name, module in self.model.named_modules():
-            if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3Layer):
+            if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3PoolLayer):
                 module.activate_lora2()
         # clip text encoder
         
@@ -480,7 +486,7 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         )
         
         if 'loss' in outputs and outputs['loss'] is not None:
-            outputs['loss'] -= 0.1*reduce_sim
+            outputs['loss'] -= 0.5*reduce_sim
 
         return outputs
 
@@ -809,8 +815,8 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
             text_ids['input_ids'] = text_ids['input_ids'].cuda()
             text_ids['attention_mask'] = text_ids['attention_mask'].cuda()
-            text_ids['input_ids'] = text_ids['input_ids'][:,-77:] if len(text_ids['input_ids'][0]) > 77 else text_ids['input_ids']
-            text_ids['attention_mask'] = text_ids['attention_mask'][:,-77:] if len(text_ids['attention_mask'][0]) > 77 else text_ids['attention_mask']
+            text_ids['input_ids'] = text_ids['input_ids'][:,-248:] if len(text_ids['input_ids'][0]) > 248 else text_ids['input_ids']
+            text_ids['attention_mask'] = text_ids['attention_mask'][:,-248:] if len(text_ids['attention_mask'][0]) > 248 else text_ids['attention_mask']
             text_feat = self.text_encoder(**text_ids)[1][0].to(torch.bfloat16)
             
             # if attention_mask is not None:
@@ -824,19 +830,30 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             input_features.append(torch.concat((img_feat, text_feat)))
             
         input_features = torch.stack(input_features)
-        dap_prompt_key_norm = F.normalize(self.lang_prompt_dap_key_embeddings, dim=-1)
+        
+        # OURS
+        
+        dap_prompt_key_norm_1 = F.normalize(self.lang_prompt_dap_key_embeddings_1, dim=-1)
+        dap_prompt_key_norm_2 = F.normalize(self.lang_prompt_dap_key_embeddings_2, dim=-1)
         x_embed_norm = F.normalize(input_features, dim=-1)
-        sim = torch.matmul(dap_prompt_key_norm,
+        
+        sim1 = torch.matmul(dap_prompt_key_norm_1,
                         torch.transpose(x_embed_norm, 1, 0))
-        sim = torch.transpose(sim, 1, 0)
-        (sim_top_k, idx) = torch.topk(sim, self.top_k)
-        idx = idx.squeeze(dim=-1)
+        sim1 = torch.transpose(sim1, 1, 0)
+        (sim_top_k_1, idx_global) = torch.topk(sim1, self.top_k)
+        idx_global = idx_global.squeeze(dim=-1)
+        
+        sim2 = torch.matmul(dap_prompt_key_norm_2,
+                        torch.transpose(x_embed_norm, 1, 0))
+        sim2 = torch.transpose(sim2, 1, 0)
+        (sim_top_k_2, idx_local) = torch.topk(sim2, self.top_k)
+        idx_local = idx_local.squeeze(dim=-1)
 
         # batchwise key selection
-        prompt_id, id_counts = torch.unique(idx, return_counts=True)
-        _, major_idx = torch.topk(id_counts, self.top_k)
-        major_prompt_id = prompt_id[major_idx]
-        idx = expand_to_batch(major_prompt_id, input_features.shape[0]).squeeze(dim=-1)
+        # prompt_id, id_counts = torch.unique(idx, return_counts=True)
+        # _, major_idx = torch.topk(id_counts, self.top_k)
+        # major_prompt_id = prompt_id[major_idx]
+        # idx = expand_to_batch(major_prompt_id, input_features.shape[0]).squeeze(dim=-1)
         
         bsz = input_features.shape[0]
         if self.training and task_id is not None:
@@ -847,17 +864,17 @@ class LlavaLlamaForIA3PoolCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 prompt_mask = None
             
             if prompt_mask is not None:
-                idx = prompt_mask
-                task_id = idx.cpu()[0]
-                idx = expand_to_batch(idx, input_features.shape[0]).squeeze(dim=-1)
+                idx_local = prompt_mask
+                task_id = idx_local.cpu()[0]
+                idx_local = expand_to_batch(idx_local, input_features.shape[0]).squeeze(dim=-1)
         i = torch.arange(bsz).reshape(bsz, 1, 1)
         l = torch.arange(self.prompt_dim).reshape(1, 1, self.prompt_dim)
-        selected_prompt_key = dap_prompt_key_norm.repeat(bsz, 1, 1)[
-            i, idx.unsqueeze(-1), l]
+        selected_prompt_key = dap_prompt_key_norm_2.repeat(bsz, 1, 1)[
+            i, idx_local.unsqueeze(-1), l]
         x_embed_norm = x_embed_norm.unsqueeze(1)
         sim_pull = selected_prompt_key * x_embed_norm
         reduce_sim = torch.sum(sim_pull) / bsz
         
         # breakpoint()
-        print("idx", idx[0].detach().cpu().numpy().tolist())
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (idx,reduce_sim)
+        # print("idx", idx_local[0].detach().cpu().numpy().tolist())
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, ((idx_local,idx_global),reduce_sim)

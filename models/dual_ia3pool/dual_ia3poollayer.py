@@ -23,7 +23,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils import transpose
 import copy
 
-class DualIA3Layer(BaseTunerLayer):
+class DualIA3PoolLayer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("ia3_l_1","ia3_l_2")
 
@@ -104,7 +104,7 @@ class DualIA3Layer(BaseTunerLayer):
         for p in self.ia3_l_2.parameters():
             p.requires_grad = True
 
-class Linear(nn.Module, DualIA3Layer):
+class Linear(nn.Module, DualIA3PoolLayer):
     # (IA)^3 implemented in a dense layer
     def __init__(
         self,
@@ -117,7 +117,7 @@ class Linear(nn.Module, DualIA3Layer):
         **kwargs,
     ) -> None:
         super().__init__()
-        DualIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
+        DualIA3PoolLayer.__init__(self, base_layer, is_feedforward=is_feedforward)
         self.fan_in_fan_out = fan_in_fan_out
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name
@@ -187,11 +187,11 @@ class Linear(nn.Module, DualIA3Layer):
                     base_layer.bias.data = torch.div(base_layer.bias.data, scaling.data + 1e-8)
 
     def init_next_ia3(self, task_id):
-        if (task_id+1)*self.top_k < self.pool_size:
+        if task_id >= 0 and (task_id+1)*self.top_k < self.pool_size:
             for active_adapter in self.active_adapters:
-                if active_adapter not in self.ia3_l.keys():
+                if active_adapter not in self.ia3_l_1.keys():
                     continue
-                self.ia3_l[active_adapter][(task_id+1)*self.top_k:(task_id+2)*self.top_k,:,:].data = self.ia3_l[active_adapter][task_id*self.top_k:(task_id+1)*self.top_k,:,:]
+                self.ia3_l_2[active_adapter][(task_id+1)*self.top_k:(task_id+2)*self.top_k,:,:].data = self.ia3_l_1[active_adapter][task_id*self.top_k:(task_id+1)*self.top_k,:,:]
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         dtype = previous_dtype = x.dtype
@@ -211,26 +211,30 @@ class Linear(nn.Module, DualIA3Layer):
                 dtype = self.ia3_l_1[active_adapter].dtype
 
                 if idx is not None:
-                    
+                    local_idx = idx[0]
+                    global_idx = idx[1]
                     if self.active_state == 'lora1':
                         # choose by top_k
-                        ia3s = self.ia3_l_1[active_adapter][idx[0]]
+                        ia3s = self.ia3_l_1[active_adapter][global_idx[0]]
                         mean_ia3 = ia3s.mean(dim=0) if len(ia3s.shape) > 2 else ia3s
                         ia3_scaling *= mean_ia3.flatten()
                     elif self.active_state =='lora2':
                         # choose by top_k
-                        ia3s = self.ia3_l_2[active_adapter][idx[0]]
+                        ia3s = self.ia3_l_2[active_adapter][local_idx[0]]
                         mean_ia3 = ia3s.mean(dim=0) if len(ia3s.shape) > 2 else ia3s
                         ia3_scaling *= mean_ia3.flatten()
                     elif self.active_state == 'gate':
-                        ia3s_1 = self.ia3_l_1[active_adapter][idx[0]]
+                        ia3s_1 = self.ia3_l_1[active_adapter][global_idx[0]]
                         mean_ia3_1 = ia3s_1.mean(dim=0) if len(ia3s_1.shape) > 2 else ia3s_1
                         
-                        ia3s_2 = self.ia3_l_2[active_adapter][idx[0]]
+                        ia3s_2 = self.ia3_l_2[active_adapter][local_idx[0]]
                         mean_ia3_2 = ia3s_2.mean(dim=0) if len(ia3s_2.shape) > 2 else ia3s_2
                         
                         # FIXME: gumbel softmax
-                        mean_ia3 = (mean_ia3_1 + mean_ia3_2) / 2
+                        # mean_ia3 = (mean_ia3_1 + mean_ia3_2) / 2
+                        
+                        mean_ia3, gumbel_out = create_mask_gumbel(mean_ia3_1, mean_ia3_2)
+                        # mean_ia3 = mask*mean_ia3_1 + (1-mask)*mean_ia3_2
                         
                         ia3_scaling *= mean_ia3.flatten()
                     self.prev_ia3_scaling = ia3_scaling.clone()
@@ -252,3 +256,28 @@ class Linear(nn.Module, DualIA3Layer):
 
         result = result.to(previous_dtype)
         return result
+
+import torch.nn.functional as F
+def create_mask_gumbel(tensor1, tensor2, tau=2.0, hard=True):
+    # Initialize logits for each condition
+    logits = torch.zeros(tensor1.size(0), tensor1.size(1), 3).to(tensor1.device)  # 3 categories: tensor1, tensor2, average
+    
+    # Condition masks
+    both_greater_than_1 = (tensor1 >= 1) & (tensor2 >= 1)
+    both_smaller_than_1 = (tensor1 <= 1) & (tensor2 <= 1)
+    # Set logits based on conditions
+    logits[both_greater_than_1][:,0] = (tensor1[both_greater_than_1] >= tensor2[both_greater_than_1]).float()  # tensor1 is bigger
+    logits[both_greater_than_1][:,1] = (tensor2[both_greater_than_1] >= tensor1[both_greater_than_1]).float()  # tensor2 is bigger
+    
+    logits[both_smaller_than_1][:,0] = (tensor1[both_smaller_than_1] <= tensor2[both_smaller_than_1]).float()  # tensor1 is smaller
+    logits[both_smaller_than_1][:,1] = (tensor2[both_smaller_than_1] <= tensor1[both_smaller_than_1]).float()  # tensor2 is smaller
+    
+    logits[..., 2] = 1.0  # Default to average choice for all cases
+    
+    # Apply Gumbel-Softmax to get the mask
+    gumbel_out = F.gumbel_softmax(logits, tau=tau, hard=hard).to(torch.bfloat16)
+    
+    # Calculate the final result based on gumbel_out
+    result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * (0.5 * (tensor1 + tensor2))
+    
+    return result, gumbel_out
