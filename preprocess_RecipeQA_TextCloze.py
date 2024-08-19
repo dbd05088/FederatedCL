@@ -40,7 +40,7 @@ for idx in range(total_len):
     new_item = {}
     new_item['id'] = item['sample_id']
     new_item['image'] = [os.path.join(dir, 'full/images', img) for img in item['task_instance']['images_path']]
-    if len(new_item['image']) > 12:
+    if len(new_item['image']) > 11:
         continue
     # try:
     #     for img_path in new_item['image']:
