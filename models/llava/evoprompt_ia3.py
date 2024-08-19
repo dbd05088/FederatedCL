@@ -38,6 +38,8 @@ import torch.nn.functional as F
 from models.evo_ia3.evoia3_attn import LlamaEVOIA3Attention
 from models.evo_ia3.evoia3_mlp import LlamaEVOIA3MLP
 
+from models.attention_prompt_generator import prefix_attention
+
 from operator import mul
 import math
 from functools import reduce
@@ -59,6 +61,9 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         self.mlp = LlamaEVOIA3MLP(config)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        
+        self.lang_prompt_downsample = prefix_attention(prefix_num=1, output_size=512, head_dim=64)
+        self.lang_prompt_norm = nn.LayerNorm(config.hidden_size, eps=1e-6)
 
     def forward(
         self,
@@ -70,6 +75,7 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         query_embeds=None,
+        labels=None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -90,6 +96,17 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
             )
+        if query_embeds is not None:
+            if labels is not None and attention_mask is not None:
+                new_attention_mask = attention_mask & (labels == IGNORE_INDEX)
+            elif attention_mask is not None:
+                new_attention_mask = attention_mask
+            elif labels is not None:
+                new_attention_mask = (labels == IGNORE_INDEX)
+            else:
+                new_attention_mask = torch.full((hidden_states.shape[:-1]), True).to(hidden_states.device)
+            lang_prompt_norm = self.lang_prompt_norm(hidden_states)
+            new_query_embeds = self.lang_prompt_downsample(lang_prompt_norm, new_attention_mask)
             
         # add prompt
         residual = hidden_states
@@ -105,7 +122,7 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
-            query_embeds=query_embeds,
+            query_embeds=new_query_embeds,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -113,7 +130,7 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states,query_embeds=query_embeds)
+        hidden_states = self.mlp(hidden_states,query_embeds=new_query_embeds)
         hidden_states = residual + hidden_states
         
         outputs = (hidden_states,)
@@ -155,6 +172,7 @@ class LlamaEVOIA3Model(LlamaModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         query_embeds=None,
+        labels=None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -217,7 +235,8 @@ class LlamaEVOIA3Model(LlamaModel):
                     output_attentions,
                     use_cache,
                     cache_position,
-                    query_embeds
+                    query_embeds,
+                    labels,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -229,6 +248,7 @@ class LlamaEVOIA3Model(LlamaModel):
                     use_cache=use_cache,
                     cache_position=cache_position,
                     query_embeds=query_embeds,
+                    labels=labels,
                 )
 
             hidden_states = layer_outputs[0]
@@ -305,7 +325,8 @@ class LlamaEVOIA3ForCausalLM(LlamaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             cache_position=cache_position,
-            query_embeds=query_embeds
+            query_embeds=query_embeds,
+            labels=labels,
         )
 
         hidden_states = outputs[0]
@@ -720,21 +741,21 @@ class LlavaLlamaEVOIA3ForCausalLM(LlamaEVOIA3ForCausalLM, LlavaMetaForCausalLM):
             position_ids = None
             
         # key selection
-        input_features = []
-        assert prompt is not None
-        for i in range(new_input_embeds.shape[0]):
-            img_feat = cls_features[batch_idx].mean(dim=0)
-            text_ids = input_ids[batch_idx]
-            text = prompt[batch_idx]
-            text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
-            text_ids['input_ids'] = text_ids['input_ids'].cuda()
-            text_ids['attention_mask'] = text_ids['attention_mask'].cuda()
-            text_ids['input_ids'] = text_ids['input_ids'][:,-248:] if len(text_ids['input_ids'][0]) > 248 else text_ids['input_ids']
-            text_ids['attention_mask'] = text_ids['attention_mask'][:,-248:] if len(text_ids['attention_mask'][0]) > 248 else text_ids['attention_mask']
-            text_feat = self.text_encoder(**text_ids)[1][0].to(torch.bfloat16)
-            input_features.append(torch.concat((img_feat, text_feat)))
-        input_features = torch.stack(input_features)
-        
+        # input_features = []
+        # assert prompt is not None
+        # for i in range(new_input_embeds.shape[0]):
+        #     img_feat = cls_features[batch_idx].mean(dim=0)
+        #     text_ids = input_ids[batch_idx]
+        #     text = prompt[batch_idx]
+        #     text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
+        #     text_ids['input_ids'] = text_ids['input_ids'].cuda()
+        #     text_ids['attention_mask'] = text_ids['attention_mask'].cuda()
+        #     text_ids['input_ids'] = text_ids['input_ids'][:,-248:] if len(text_ids['input_ids'][0]) > 248 else text_ids['input_ids']
+        #     text_ids['attention_mask'] = text_ids['attention_mask'][:,-248:] if len(text_ids['attention_mask'][0]) > 248 else text_ids['attention_mask']
+        #     text_feat = self.text_encoder(**text_ids)[1][0].to(torch.bfloat16)
+        #     input_features.append(torch.concat((img_feat, text_feat)))
+        # input_features = torch.stack(input_features)
+        input_features = 0
         reduce_sim=0
 
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (input_features,reduce_sim)

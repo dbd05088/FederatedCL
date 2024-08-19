@@ -17,21 +17,22 @@ _CONFIG_FOR_DOC = "LlamaConfig"
 
 
 class prefix_attention(LlamaFlashAttention2):
-    def __init__(self, prefix_num=1, hidden_size=4096, head_dim=256, attn_dropout=0.0, attn_bias=False):
+    def __init__(self, prefix_num=1, hidden_size=4096, output_size=4096, head_dim=256, attn_dropout=0.0, attn_bias=False):
         (nn.Module).__init__(self)
 
         self.attention_dropout = attn_dropout
         self.hidden_size = hidden_size
+        self.output_size = output_size
         self.num_heads = 1
         self.head_dim = head_dim
         self.num_key_value_heads = 1
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.is_causal = False
 
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=attn_bias)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=attn_bias)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=attn_bias)
-        self.o_proj = nn.Linear(self.head_dim, self.hidden_size, bias=attn_bias)
+        self.qproj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=attn_bias)
+        self.kproj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=attn_bias)
+        self.vproj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=attn_bias)
+        self.oproj = nn.Linear(self.head_dim, self.output_size, bias=attn_bias)
         
         self._flash_attn_uses_top_left_mask = not is_flash_attn_greater_or_equal_2_10()
         
@@ -63,9 +64,9 @@ class prefix_attention(LlamaFlashAttention2):
         
         bsz, q_len, _ = combined.size()
 
-        query_states = self.q_proj(combined)
-        key_states = self.k_proj(combined)
-        value_states = self.v_proj(combined)
+        query_states = self.qproj(combined)
+        key_states = self.kproj(combined)
+        value_states = self.vproj(combined)
 
         # Flash attention requires the input to have the shape
         # batch_size x seq_length x head_dim x hidden_dim
@@ -113,7 +114,7 @@ class prefix_attention(LlamaFlashAttention2):
         )
 
         attn_output = attn_output.reshape(bsz, q_len, self.head_dim).contiguous()
-        attn_output = self.o_proj(attn_output)
+        attn_output = self.oproj(attn_output)
 
         return attn_output[:,:self.prefix_num,:]
 

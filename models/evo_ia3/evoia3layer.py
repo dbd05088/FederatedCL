@@ -109,7 +109,7 @@ class EVOIA3Layer(BaseTunerLayer):
     def update_layer(self, adapter_name, init_ia3_weights):
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
-        self.ia3_generator[adapter_name] = PromptMLP(1792,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
+        self.ia3_generator[adapter_name] = PromptMLP(512,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
         
         self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
