@@ -36,7 +36,7 @@ from peft.tuners.ia3.layer import Conv2d
 from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer, Linear
 
 
-class EVOIA3Model(BaseTuner):
+class DualEVOIA3Model(BaseTuner):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
     transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638

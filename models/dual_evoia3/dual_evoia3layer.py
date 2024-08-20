@@ -66,6 +66,10 @@ class PromptMLP(nn.Module):
                 lambda m, inp, out: F.dropout(out, p=dropout, training=m.training)
             )
         # self.block[0].apply(init_weights_to_zero)
+        # self.block[0].weight.data = torch.randn(self.block[0].weight.size()) * 0.01
+        
+        # Initialize fc2 to output zeros initially
+        self.block[2].weight.data.fill_(0)
 
     def forward(self, x: torch.Tensor):
         bsz = x.size(0)
@@ -111,8 +115,8 @@ class DualEVOIA3Layer(BaseTunerLayer):
     def update_layer(self, adapter_name, init_ia3_weights):
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
-        self.ia3_generator_1[adapter_name] = PromptMLP(1792,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
-        self.ia3_generator_2[adapter_name] = PromptMLP(1792,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
+        self.ia3_generator_1[adapter_name] = PromptMLP(512,self.in_features,hidden_features=32, is_forward=self.is_feedforward)
+        self.ia3_generator_2[adapter_name] = PromptMLP(512,self.in_features,hidden_features=32, is_forward=self.is_feedforward)
         
         self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
@@ -245,18 +249,19 @@ class Linear(nn.Module, DualEVOIA3Layer):
 
                 bs = x.shape[0]
                 if query_embeds is not None:
-                    
+                    query_embeds_1, query_embeds_2 = query_embeds
                     if self.active_state == 'lora1':
-                        ia3_delta = self.ia3_generator_1[active_adapter](query_embeds)
+                        ia3_delta = self.ia3_generator_1[active_adapter](query_embeds_1)
                     elif self.active_state == 'lora2':
-                        ia3_delta = self.ia3_generator_2[active_adapter](query_embeds)
+                        ia3_delta = self.ia3_generator_2[active_adapter](query_embeds_2)
                     elif self.active_state == 'gate':
-                        ia3_delta_1 = self.ia3_generator_1[active_adapter](query_embeds)
+                        ia3_delta_1 = self.ia3_generator_1[active_adapter](query_embeds_1)
 
-                        ia3_delta_2 = self.ia3_generator_2[active_adapter](query_embeds)
+                        ia3_delta_2 = self.ia3_generator_2[active_adapter](query_embeds_2)
                         
                         # FIXME: gumbel softmax combining
-                        ia3_delta = (ia3_delta_1 + ia3_delta_2)/2
+                        # ia3_delta = (ia3_delta_1 + ia3_delta_2)/2
+                        ia3_delta, gumbel_out = create_mask_gumbel(ia3_delta_1, ia3_delta_2)
                     
                     if self.is_feedforward:
                         weight = torch.ones((bs,1, self.in_features)).to(x.device)
@@ -284,3 +289,29 @@ class Linear(nn.Module, DualEVOIA3Layer):
 
         result = result.to(previous_dtype)
         return result
+
+import torch.nn.functional as F
+def create_mask_gumbel(tensor1, tensor2, tau=2.0, hard=True):
+    # Initialize logits for each condition
+    logits = torch.zeros(tensor1.size(0), tensor1.size(1), tensor2.size(2), 3).to(tensor1.device)  # 3 categories: tensor1, tensor2, average
+    
+    # Condition masks
+    both_greater_than_1 = (tensor1 >= 0) & (tensor2 >= 0)
+    both_smaller_than_1 = (tensor1 <= 0) & (tensor2 <= 0)
+    one_greater_one_smaller = (tensor1 > 0) & (tensor2 < 0) | (tensor1 < 0) & (tensor2 > 0)
+    # Set logits based on conditions
+    logits[both_greater_than_1][:,0] = (tensor1[both_greater_than_1] >= tensor2[both_greater_than_1]).float()  # tensor1 is bigger
+    logits[both_greater_than_1][:,1] = (tensor2[both_greater_than_1] >= tensor1[both_greater_than_1]).float()  # tensor2 is bigger
+    
+    logits[both_smaller_than_1][:,0] = (tensor1[both_smaller_than_1] <= tensor2[both_smaller_than_1]).float()  # tensor1 is smaller
+    logits[both_smaller_than_1][:,1] = (tensor2[both_smaller_than_1] <= tensor1[both_smaller_than_1]).float()  # tensor2 is smaller
+    
+    logits[one_greater_one_smaller][:, 2] = 1.0  # Default to average choice for all cases
+    
+    # Apply Gumbel-Softmax to get the mask
+    gumbel_out = F.gumbel_softmax(logits, tau=tau, hard=hard).to(torch.bfloat16)
+    
+    # Calculate the final result based on gumbel_out
+    result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * (0.5 * (tensor1 + tensor2))
+    
+    return result, gumbel_out

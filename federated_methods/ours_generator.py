@@ -56,48 +56,14 @@ if is_accelerate_available():
 
 from models.duallora.dualloralayer import DualLoraLayer
 from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer
-from models.dual_ia3pool.dual_ia3poollayer import DualIA3Layer
+from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 from collections import OrderedDict
 import numpy as np
 
 logger = logging.get_logger(__name__)
 
-def OURS_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
-    # personalized layer = 'lora2'
-    # shard layer = 'lora1', 'lora3'
-    keys_to_del = []
-    for k in global_state_dict.keys():
-        if 'lora2' in k or 'ia3_l_2' in k or 'ia3_generator_2' in k:
-            keys_to_del.append(k)
-    for k in keys_to_del:
-        del global_state_dict[k]
-    
-    local_keys_to_del = []
-    for k in local_state_dict_list[0].keys():
-        # if 'lora1' in k or 'lora3' in k:
-        if 'lora1' in k or 'ia3_l_1' in k or 'ia3_generator_1' in k:
-            local_keys_to_del.append(k)
-    for client_id in range(training_args.num_clients):
-        for k in local_keys_to_del:
-            del local_state_dict_list[client_id][k]
-    # for name, module in model.named_modules():
-    #     if isinstance(module, TripleLoraLayer):
-    #         module.deactivate_lora3()
-    return {'global_state':global_state_dict}
-
-@torch.no_grad()
-def OURS_aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **kwargs):
-    for key in global_state_dict.keys():
-        # global_state_dict[key] = sum([local_state_dict_list[client][key] * sample_num_list[client] / sample_this_round for client in selected_ids])
-        if 'lora1' in key or 'ia3_l_1' in key or 'ia3_generator_1' in key:
-            global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
-            # target_key = key.replace('lora1', 'lora3')
-            # global_state_dict[target_key] = global_state_dict[key].clone()
-        # elif 'mm_projector' in key:
-        #     global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
-        
-
-def OURS_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
+def OURS_GEN_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
+    task_id = extra_state_dict_dict['task_id'] if 'task_id' in extra_state_dict_dict else None
     trainer = LLaVATrainerOURS(model=model,
         tokenizer=tokenizer,
         args=training_args,
@@ -105,6 +71,7 @@ def OURS_create_trainer(model, tokenizer, training_args, data_module, extra_stat
         max_seq_length=training_args.model_max_length,
         client_id=extra_state_dict_dict['client_id'],
         curr_round=extra_state_dict_dict['curr_round'],
+        task_id = task_id,
         **data_module,
         )
     return trainer
@@ -135,9 +102,9 @@ def _compute_transport_matrix(old_prompt_weight, new_prompt_weight):
     return aligned_new_working_memory, cur_T_vars
 
 class LLaVATrainerOURS(LLaVATrainerFEDAVG):
-    def __init__(self, **kwargs):
+    def __init__(self, task_id, **kwargs):
         super(LLaVATrainerOURS, self).__init__(**kwargs)
-        
+        self.task_id = task_id
         self.old_weights = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
     
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -155,7 +122,7 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
             text_prompt = inputs.pop('prompt')
         else:
             text_prompt = None
-        outputs = model(**inputs, prompt=text_prompt) if text_prompt else model(**inputs)
+        outputs = model(**inputs, prompt=text_prompt, task_id=self.task_id) if text_prompt else model(**inputs, task_id=self.task_id)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
@@ -266,6 +233,12 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
             else:
                 debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
 
+        # OURS:
+        if self.curr_round > 0:
+            self.model.set_state('gate')
+        else:
+            self.model.set_state('lora2')
+        self.model.activate_lora2()
         delay_optimizer_creation = is_sagemaker_mp_enabled() or self.is_fsdp_xla_enabled or self.is_fsdp_enabled
 
         # We need to reset the scheduler, as its parameters may be different on subsequent calls
@@ -702,29 +675,33 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
             self._save_optimizer_and_scheduler(output_dir)
 
         # Optimal Transport Combination within client
-        cur_weights = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
-        ot_mat, cur_T_var = _compute_transport_matrix(self.old_weights, cur_weights)
-        
-        # aggregate
-        # if self._use_ot and self.attribution_aware_fusion:
-        #     self._align_attribution()
+        if self.curr_round > 0:
+            # pass
+            cur_weights = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+            # ot_mat, cur_T_var = _compute_transport_matrix(self.old_weights, cur_weights)
+            
+            # # aggregate
+            # # if self._use_ot and self.attribution_aware_fusion:
+            # #     self._align_attribution()
 
-        # if self.attribution_aware_fusion:
-        #     global_importance = self._get_global_attribution(normalize=True).type_as(
-        #         self.prev_reference_prompt_memory
-        #     )
-        #     current_importance = self._get_current_attribution(normalize=True).type_as(
-        #         self.prev_reference_prompt_memory
-        #     )
-        # fusion weight
-        alpha = 0.5
-        for key in cur_weights.keys():
-            weight = torch.ones_like(cur_weights[key]) * alpha
-            # if self.attribution_aware_fusion:
-            #     weight = (torch.ones_like(self.prev_reference_prompt_memory) * alpha) + (
-            #         (current_importance - global_importance) * alpha
-            #     )
-            cur_weights[key] = cur_weights[key] + weight * (ot_mat[key] - cur_weights[key])
-        self.model.load_state_dict(cur_weights, strict=False)
+            # # if self.attribution_aware_fusion:
+            # #     global_importance = self._get_global_attribution(normalize=True).type_as(
+            # #         self.prev_reference_prompt_memory
+            # #     )
+            # #     current_importance = self._get_current_attribution(normalize=True).type_as(
+            # #         self.prev_reference_prompt_memory
+            # #     )
+            # # fusion weight
+            alpha = 0.5
+            for key in cur_weights.keys():
+                weight = torch.ones_like(cur_weights[key]) * alpha
+                # if self.attribution_aware_fusion:
+                #     weight = (torch.ones_like(self.prev_reference_prompt_memory) * alpha) + (
+                #         (current_importance - global_importance) * alpha
+                #     )
+                cur_weights[key] = cur_weights[key] + weight * (self.old_weights[key] - cur_weights[key])
+            self.model.load_state_dict(cur_weights, strict=False)
+            
+        self.model.activate_all()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
