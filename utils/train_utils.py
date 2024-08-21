@@ -32,6 +32,7 @@ from models.llava.dap_ia3 import LlavaLlamaDAPIA3ForCausalLM
 from models.llava.evoprompt_ia3 import LlavaLlamaEVOIA3ForCausalLM
 from models.llava.llava_ia3_global import LlavaLlamaForOURSIA3PoolCausalLM
 from models.llava.evoprompt_ia3_global import LlavaLlamaOURSGENIA3ForCausalLM
+from models.llava.evoprompt_ia3_global2 import LlavaLlamaOURSGENIA3ForCausalLM2
 
 import copy
 ACCESS_TOKEN = "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"
@@ -260,7 +261,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-            print('load ours generator')   
+            print('load ours generator')
+        elif training_args.mode == 'ours_generator2':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaOURSGENIA3ForCausalLM2.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load ours generator2')   
         
         elif training_args.mode == 'fedsim' and training_args.is_eval:
             assert model_args.model_type != 'mpt'
@@ -433,6 +444,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['OURSGEN'] = DualEVOIA3Model
             ia3_config.peft_type = 'OURSGEN'
+        elif training_args.mode in ['ours_generator2']:
+            from models.dual_evoia32.dual_evoia3model2 import DualEVOIA3Model2
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['OURSGEN2'] = DualEVOIA3Model2
+            ia3_config.peft_type = 'OURSGEN2'
         
         model = get_peft_model(model, ia3_config)
         model = model.to(device=training_args.device, dtype=compute_dtype)
@@ -473,7 +489,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         
         model.base_model.model.text_encoder.requires_grad_(False)
         
-    elif training_args.mode == 'ours_generator':
+    elif training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2':
         vision_tower.select_feature = 'cls_patch'
     # if not training_args.is_eval:
     #     data_args.img_mean = vision_tower.image_processor.image_mean
@@ -560,7 +576,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 p.requires_grad_(True)
         model.set_state('gate')
         model.activate_all()
-    elif training_args.mode == 'ours_generator':
+    elif training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         model.lm_head.requires_grad_(False)

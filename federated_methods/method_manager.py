@@ -77,6 +77,8 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_create_trainer, OURS_aggregate_state_dict
     elif mode =='ours_generator':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
+    elif mode =='ours_generator2':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
     
     else:
         raise NotImplementedError(mode)
