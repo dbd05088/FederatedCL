@@ -64,9 +64,9 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
-        self.lang_prompt_downsample_1 = prefix_attention(prefix_num=1, output_size=512, head_dim=64)
+        self.lang_prompt_downsample_1 = prefix_attention(prefix_num=1, output_size=config.generator_output_size, head_dim=config.generator_hidden_dim)
         self.lang_prompt_norm_1 = nn.LayerNorm(config.hidden_size, eps=1e-6)
-        self.lang_prompt_downsample_2 = prefix_attention(prefix_num=1, output_size=512, head_dim=64)
+        self.lang_prompt_downsample_2 = prefix_attention(prefix_num=1, output_size=config.generator_output_size, head_dim=config.generator_hidden_dim)
         self.lang_prompt_norm_2 = nn.LayerNorm(config.hidden_size, eps=1e-6)
 
     def forward(
@@ -377,8 +377,10 @@ class LlamaEVOIA3ForCausalLM(LlamaForCausalLM):
 class LlavaLlamaOURSGENIA3ForCausalLM(LlamaEVOIA3ForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
-    def __init__(self, config):
+    def __init__(self, config, generator_output_size, generator_hidden_dim):
         super(LlamaForCausalLM, self).__init__(config)
+        config.generator_output_size=generator_output_size
+        config.generator_hidden_dim=generator_hidden_dim
         self.model = LlavaLlamaEVOIA3Model(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size

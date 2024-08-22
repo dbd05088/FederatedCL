@@ -126,7 +126,7 @@ class DualEVOIA3Model(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = False
-            new_module = Linear(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
+            new_module = Linear(target, adapter_name, is_feedforward=is_feedforward, generator_output_size=ia3_config.generator_output_size, generator_hidden_feature=ia3_config.generator_hidden_feature, **kwargs)
         elif isinstance(target_base_layer, Conv1D):
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(

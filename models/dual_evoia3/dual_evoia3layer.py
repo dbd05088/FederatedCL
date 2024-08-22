@@ -85,7 +85,7 @@ class DualEVOIA3Layer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("ia3_generator_1","ia3_generator_2")
 
-    def __init__(self, base_layer: nn.Module, is_feedforward: bool, **kwargs) -> None:
+    def __init__(self, base_layer: nn.Module, is_feedforward: bool, generator_output_size, generator_hidden_feature, **kwargs) -> None:
         self.base_layer = base_layer
         self.ia3_generator_1 = nn.ParameterDict({})
         self.ia3_generator_2 = nn.ParameterDict({})
@@ -111,12 +111,15 @@ class DualEVOIA3Layer(BaseTunerLayer):
         self.out_features = out_features
         
         self.active_state = 'lora1'
+        
+        self.generator_output_size=generator_output_size
+        self.generator_hidden_feature=generator_hidden_feature
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
-        self.ia3_generator_1[adapter_name] = PromptMLP(256,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
-        self.ia3_generator_2[adapter_name] = PromptMLP(256,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
+        self.ia3_generator_1[adapter_name] = PromptMLP(self.generator_output_size,self.in_features,hidden_features=self.generator_hidden_feature, is_forward=self.is_feedforward)
+        self.ia3_generator_2[adapter_name] = PromptMLP(self.generator_output_size,self.in_features,hidden_features=self.generator_hidden_feature, is_forward=self.is_feedforward)
         
         self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
@@ -154,14 +157,16 @@ class Linear(nn.Module, DualEVOIA3Layer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
+        generator_output_size, generator_hidden_feature,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_feedforward: bool = False,  # Set to True if the layer is treated as a feedforward layer
         is_target_conv_1d_layer: bool = False,  # whether target module is a conv1d layer. useful while unloading later
         init_ia3_weights: bool = True,  # whether to initialize IA3 weights
+        
         **kwargs,
     ) -> None:
         super().__init__()
-        DualEVOIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
+        DualEVOIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward,generator_output_size=generator_output_size, generator_hidden_feature=generator_hidden_feature)
         self.fan_in_fan_out = fan_in_fan_out
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name

@@ -119,3 +119,11 @@ class TrainingArguments(transformers.TrainingArguments):
     group_by_modality_length: bool = field(default=True)
     
     ia3_enable: bool = False
+    
+    
+    # generator config
+    generator_output_size: int = 256
+    generator_hidden_dim: int = 32
+    generator_hidden_feature: int = 16
+    set_state:str = 'gate'
+    

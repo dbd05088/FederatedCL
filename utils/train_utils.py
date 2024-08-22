@@ -259,6 +259,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                generator_output_size=training_args.generator_output_size,
+                generator_hidden_dim=training_args.generator_hidden_dim,
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator')
@@ -279,6 +281,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                generator_hidden_dim=training_args.generator_hidden_dim,
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator3')    
@@ -454,6 +457,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['OURSGEN'] = DualEVOIA3Model
             ia3_config.peft_type = 'OURSGEN'
+            ia3_config.generator_output_size = training_args.generator_output_size
+            ia3_config.generator_hidden_feature = training_args.generator_hidden_feature
         elif training_args.mode in ['ours_generator2', 'ours_generator3']:
             from models.dual_evoia32.dual_evoia3model2 import DualEVOIA3Model2
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
@@ -593,7 +598,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         for n, p in model.named_parameters():
             if 'lang_prompt' in n :
                 p.requires_grad_(True)
-        model.set_state('gate')
+        model.set_state(training_args.set_state)
         model.activate_all()
     else:
         for p in model.get_model().mm_projector.parameters():
