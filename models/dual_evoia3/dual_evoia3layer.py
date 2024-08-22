@@ -115,8 +115,8 @@ class DualEVOIA3Layer(BaseTunerLayer):
     def update_layer(self, adapter_name, init_ia3_weights):
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
-        self.ia3_generator_1[adapter_name] = PromptMLP(512,self.in_features,hidden_features=32, is_forward=self.is_feedforward)
-        self.ia3_generator_2[adapter_name] = PromptMLP(512,self.in_features,hidden_features=32, is_forward=self.is_feedforward)
+        self.ia3_generator_1[adapter_name] = PromptMLP(256,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
+        self.ia3_generator_2[adapter_name] = PromptMLP(256,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
         
         self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
@@ -302,13 +302,13 @@ def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=False, is_training=False)
     
     # For both_greater_than_1
     indices = both_greater_than_1.nonzero(as_tuple=True)
-    logits[indices[0], indices[1], indices[2], 0] = (tensor1[indices[0], indices[1]] >= tensor2[indices[0], indices[1]]).float()
-    logits[indices[0], indices[1], indices[2], 1] = (tensor2[indices[0], indices[1]] >= tensor1[indices[0], indices[1]]).float()
+    logits[indices[0], indices[1], indices[2], 0] = (tensor1[indices[0], indices[1], indices[2]] >= tensor2[indices[0], indices[1], indices[2]]).float()
+    logits[indices[0], indices[1], indices[2], 1] = (tensor2[indices[0], indices[1], indices[2]] >= tensor1[indices[0], indices[1], indices[2]]).float()
     
     # For both_smaller_than_1
     indices = both_smaller_than_1.nonzero(as_tuple=True)
-    logits[indices[0], indices[1], indices[2], 0] = (tensor1[indices[0], indices[1]] <= tensor2[indices[0], indices[1]]).float()
-    logits[indices[0], indices[1], indices[2], 1] = (tensor2[indices[0], indices[1]] <= tensor1[indices[0], indices[1]]).float()
+    logits[indices[0], indices[1], indices[2], 0] = (tensor1[indices[0], indices[1], indices[2]] <= tensor2[indices[0], indices[1], indices[2]]).float()
+    logits[indices[0], indices[1], indices[2], 1] = (tensor2[indices[0], indices[1], indices[2]] <= tensor1[indices[0], indices[1], indices[2]]).float()
     
     # For one_greater_one_smaller
     indices = one_greater_one_smaller.nonzero(as_tuple=True)
