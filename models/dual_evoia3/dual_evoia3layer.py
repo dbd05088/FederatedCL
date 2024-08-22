@@ -261,7 +261,7 @@ class Linear(nn.Module, DualEVOIA3Layer):
                         
                         # FIXME: gumbel softmax combining
                         # ia3_delta = (ia3_delta_1 + ia3_delta_2)/2
-                        ia3_delta, gumbel_out = create_mask_gumbel(ia3_delta_1, ia3_delta_2)
+                        ia3_delta, gumbel_out = create_mask_gumbel(ia3_delta_1, ia3_delta_2, is_training=self.training)
                     
                     if self.is_feedforward:
                         weight = torch.ones((bs,1, self.in_features)).to(x.device)
@@ -291,26 +291,35 @@ class Linear(nn.Module, DualEVOIA3Layer):
         return result
 
 import torch.nn.functional as F
-def create_mask_gumbel(tensor1, tensor2, tau=2.0, hard=True):
+def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=False, is_training=False):
     # Initialize logits for each condition
-    logits = torch.zeros(tensor1.size(0), tensor1.size(1), tensor2.size(2), 3).to(tensor1.device)  # 3 categories: tensor1, tensor2, average
+    logits = torch.zeros(tensor1.size(0), tensor1.size(1), tensor1.size(2), 3).to(tensor1.device)  # 3 categories: tensor1, tensor2, average
     
     # Condition masks
     both_greater_than_1 = (tensor1 >= 0) & (tensor2 >= 0)
     both_smaller_than_1 = (tensor1 <= 0) & (tensor2 <= 0)
     one_greater_one_smaller = (tensor1 > 0) & (tensor2 < 0) | (tensor1 < 0) & (tensor2 > 0)
-    # Set logits based on conditions
-    logits[both_greater_than_1][:,0] = (tensor1[both_greater_than_1] >= tensor2[both_greater_than_1]).float()  # tensor1 is bigger
-    logits[both_greater_than_1][:,1] = (tensor2[both_greater_than_1] >= tensor1[both_greater_than_1]).float()  # tensor2 is bigger
     
-    logits[both_smaller_than_1][:,0] = (tensor1[both_smaller_than_1] <= tensor2[both_smaller_than_1]).float()  # tensor1 is smaller
-    logits[both_smaller_than_1][:,1] = (tensor2[both_smaller_than_1] <= tensor1[both_smaller_than_1]).float()  # tensor2 is smaller
+    # For both_greater_than_1
+    indices = both_greater_than_1.nonzero(as_tuple=True)
+    logits[indices[0], indices[1], indices[2], 0] = (tensor1[indices[0], indices[1]] >= tensor2[indices[0], indices[1]]).float()
+    logits[indices[0], indices[1], indices[2], 1] = (tensor2[indices[0], indices[1]] >= tensor1[indices[0], indices[1]]).float()
     
-    logits[one_greater_one_smaller][:, 2] = 1.0  # Default to average choice for all cases
+    # For both_smaller_than_1
+    indices = both_smaller_than_1.nonzero(as_tuple=True)
+    logits[indices[0], indices[1], indices[2], 0] = (tensor1[indices[0], indices[1]] <= tensor2[indices[0], indices[1]]).float()
+    logits[indices[0], indices[1], indices[2], 1] = (tensor2[indices[0], indices[1]] <= tensor1[indices[0], indices[1]]).float()
+    
+    # For one_greater_one_smaller
+    indices = one_greater_one_smaller.nonzero(as_tuple=True)
+    logits[indices[0], indices[1], indices[2], 2] = 1.0  # Average choice for mixed cases
+    # logits[..., 2] = 1.0
     
     # Apply Gumbel-Softmax to get the mask
-    gumbel_out = F.gumbel_softmax(logits, tau=tau, hard=hard).to(torch.bfloat16)
-    
+    if is_training:
+        gumbel_out = F.gumbel_softmax(logits.to(torch.bfloat16), tau=tau, hard=hard)#.to(torch.bfloat16)
+    else:
+        gumbel_out = logits.to(torch.bfloat16)
     # Calculate the final result based on gumbel_out
     result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * (0.5 * (tensor1 + tensor2))
     

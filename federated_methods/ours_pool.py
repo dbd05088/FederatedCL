@@ -59,6 +59,7 @@ from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer
 from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 from collections import OrderedDict
 import numpy as np
+from sklearn.cluster import KMeans
 
 logger = logging.get_logger(__name__)
 
@@ -67,19 +68,19 @@ def OURS_set_state_dict(model, global_state_dict, local_state_dict_list, trainin
     # shard layer = 'lora1', 'lora3'
     keys_to_del = []
     for k in global_state_dict.keys():
-        if 'lora2' in k or 'ia3_l_2' in k or 'ia3_generator_2' in k or 'lang_prompt_dap_key_embeddings_2' in k:
+        if 'lora2' in k or 'ia3_l_2' in k or 'ia3_generator_2' in k or 'lang_prompt_dap_key_embeddings_2' in k or 'lang_prompt_downsample_2' in k or 'lang_prompt_norm_2' in k or 'lang_prompt_downsample_kv_2' in k or 'lang_prompt_downsample_mlp_2' in k:
             keys_to_del.append(k)
     for k in keys_to_del:
         del global_state_dict[k]
     
-    local_keys_to_del = []
-    for k in local_state_dict_list[0].keys():
-        # if 'lora1' in k or 'lora3' in k:
-        if 'lora1' in k or 'ia3_l_1' in k or 'ia3_generator_1' in k or 'lang_prompt_dap_key_embeddings_1' in k:
-            local_keys_to_del.append(k)
-    for client_id in range(training_args.num_clients):
-        for k in local_keys_to_del:
-            del local_state_dict_list[client_id][k]
+    # local_keys_to_del = []
+    # for k in local_state_dict_list[0].keys():
+    #     # if 'lora1' in k or 'lora3' in k:
+    #     if 'lora1' in k or 'ia3_l_1' in k or 'ia3_generator_1' in k or 'lang_prompt_dap_key_embeddings_1' in k:
+    #         local_keys_to_del.append(k)
+    # for client_id in range(training_args.num_clients):
+    #     for k in local_keys_to_del:
+    #         del local_state_dict_list[client_id][k]
     # for name, module in model.named_modules():
     #     if isinstance(module, TripleLoraLayer):
     #         module.deactivate_lora3()
@@ -103,24 +104,44 @@ def OURS_aggregate_state_dict(global_state_dict, local_state_dict_list, selected
         elif 'lang_prompt_dap_key_embeddings_1' in key:
             target_key = key.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
             global_state_dict[key] = sum([local_state_dict_list[client][target_key] / num_selection for client in selected_ids])
+        elif 'lang_prompt_downsample_1' in key:
+            target_key = key.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
+            global_state_dict[key] = sum([local_state_dict_list[client][target_key] / num_selection for client in selected_ids])
+        elif 'lang_prompt_norm_1' in key:
+            target_key = key.replace('lang_prompt_norm_1', 'lang_prompt_norm_2')
+            global_state_dict[key] = sum([local_state_dict_list[client][target_key] / num_selection for client in selected_ids]) 
+    # k-means
+    # task_id = kwargs['task_id']
+    # top_k = 3
+    # total_pool = 12
+    
+    # key = 'base_model.model.lang_prompt_dap_key_embeddings_1'
+    # target_key = key.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
+    
+    # local_pools = {client:local_state_dict_list[client][target_key][:(task_id+1)*top_k] for client in selected_ids}
+    # local_pools = torch.cat([local_pools[client] for client in selected_ids], dim=0)
+
+    # local_pools = local_pools.detach().cpu().float().numpy()
+    # kmeans = KMeans(n_clusters=total_pool, random_state=0)
+    # kmeans.fit(local_pools)
+    # # Get the cluster assignments for each vector
+    # cluster_labels = kmeans.labels_
+
+    # # Get the cluster centers (centroids)
+    # cluster_centers = kmeans.cluster_centers_
+
+    # global_state_dict[key].data.copy_(torch.from_numpy(cluster_centers).to(torch.bfloat16))
+    
+    # for key in global_state_dict.keys():
+    #     if 'ia3_l_1' in key:
+    #         target_key = key.replace('ia3_l_1', 'ia3_l_2')
+    #         local_pools = {client:local_state_dict_list[client][target_key][:(task_id+1)*top_k] for client in selected_ids}
+    
+    #         local_pools = torch.cat([local_pools[client] for client in selected_ids], dim=0)
             
-        # k-means
-        # task_id = kwargs['task_id']
-        # top_k = 2
-        # total_pool = 8
-        # if 'ia3_l_1' in key:
-        #     target_key = key.replace('ia3_l_1', 'ia3_l_2')
+    #         local_pools = torch.stack([local_pools[cluster_labels==i].mean(dim=0) for i in range(total_pool)], dim=0)
             
-        #     local_pools = {client:local_state_dict_list[client][target_key][:task_id*top_k] for client in selected_ids}
-            
-            
-            
-            
-        #     global_state_dict[key] = sum([local_state_dict_list[client][target_key] / num_selection for client in selected_ids])
-        # elif 'lang_prompt_dap_key_embeddings_1' in key:
-        #     target_key = key.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
-        #     global_state_dict[key] = sum([local_state_dict_list[client][target_key] / num_selection for client in selected_ids])
-            
+    #         global_state_dict[key].data.copy_(local_pools)
         
 
 def OURS_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
@@ -299,6 +320,10 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
             if isinstance(module, DualIA3PoolLayer):
                 module.init_next_ia3(self.task_id - 1)
         
+        if self.curr_round > 0:
+            self.model.set_state('gate')
+        else:
+            self.model.set_state('lora2')
         self.model.activate_lora2()
 
         delay_optimizer_creation = is_sagemaker_mp_enabled() or self.is_fsdp_xla_enabled or self.is_fsdp_enabled

@@ -4,15 +4,15 @@
 conda create -n fcl python=3.10
 conda activate fcl
 pip install transformers==4.40.0
-pip install torch torchvision xformers --index-url https://download.pytorch.org/whl/cu118
+pip install torch==2.2.1 torchvision xformers==0.0.25 --index-url https://download.pytorch.org/whl/cu118
 pip install packaging
-pip install flash-attn --no-build-isolation
+pip install flash-attn==2.5.7 --no-build-isolation
 pip install peft
 pip install bitsandbytes
 pip install pandas kornia opencv-python timm torch_optimizer easydict pycocoevalcap sentencepiece protobuf
 pip install trl==0.8.6
 pip install deepspeed==0.14.0
-pip install loguru captum
+pip install loguru captum POT
 ```
 
 ```

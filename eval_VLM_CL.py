@@ -104,7 +104,7 @@ def evaluate(dataset, dataname, round, model, tokenizer, device, model_args, tra
                     use_cache=True,
                     pad_token_id=tokenizer.eos_token_id,
                     stopping_criteria = stopping_criteria,
-                    prompt=prompts,
+                    prompt=prompts if training_args.is_prompt else None,
                 )
             # if 'bunny' in model_args.model_name_or_path.lower():
             #     input_token_len = inputs.shape[1]
@@ -189,7 +189,7 @@ def evaluate_choices(dataset, dataname, round, model, tokenizer, device, model_a
                     use_cache=False,
                     pad_token_id=tokenizer.eos_token_id,
                     stopping_criteria = stopping_criteria,
-                    prompt=prompts,
+                    prompt=prompts if training_args.is_prompt else None,
                 )
             
             pred_sentences = tokenizer.batch_decode(output_ids, skip_special_tokens=True)#[0].strip()
@@ -362,13 +362,13 @@ def main():
     
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     
-    batch_size = 1 if 'l2p' in training_args.mode or 'dap' in training_args.mode else 2
+    batch_size = 1 #if 'l2p' in training_args.mode or 'dap' in training_args.mode else 2
     
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     
     server_eval_key = []
     
-    if not training_args.zeroshot and not training_args.eval_server:
+    if not training_args.zeroshot and training_args.eval_server:
         logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
         server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
     for client_id in range(training_args.num_clients):
@@ -393,16 +393,17 @@ def main():
                             module.set_state('lora2')
                     # model.base_model.model.model.mm_projector = model.base_model.model.model.local_mm_projector
                 dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
-                
-                if training_args.mode not in ['fedsim', 'feddat']:
-                    
-                    if data_info['type'] == 'open-ended':
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
-                    elif data_info['type'] == 'multi-choice':
-                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
-                    else:
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+                if not training_args.eval_server:
+                    if training_args.mode not in ['fedsim', 'feddat']:
+                        
+                        if data_info['type'] == 'open-ended':
+                            evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+                        elif data_info['type'] == 'multi-choice':
+                            evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+                        else:
+                            evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
                 if training_args.eval_server and data_info['data_name'] not in server_eval_key:
+                    breakpoint()
                     if not training_args.zeroshot:
                         model.load_state_dict(server_state_dict, strict=False)
                     if training_args.mode in ['apfl', 'ditto']:

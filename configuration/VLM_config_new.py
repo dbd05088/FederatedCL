@@ -35,6 +35,7 @@ class DataArguments:
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
     is_eval: bool = False
+    is_prompt: bool = False
     round_to_eval: int = None
     eval_temp: float = 0.2
     eval_server: bool = True
