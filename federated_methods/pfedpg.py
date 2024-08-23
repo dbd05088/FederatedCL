@@ -14,10 +14,8 @@ from transformers import Trainer
 import bitsandbytes
 import os
 
-PROMPT_NUM = 200
-
 def pfedpg_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
-    prompt_generator = Prompt_Generator(512, PROMPT_NUM, model.base_model.mm_projector[-1].out_features, training_args.num_clients).cuda()
+    prompt_generator = Prompt_Generator(512, training_args.prompt_num, model.base_model.mm_projector[-1].out_features, training_args.num_clients).cuda()
     # pgen_optim = torch.optim.SGD(prompt_generator.parameters(), lr=0.005)
     # return {
     #     'prompt_generator': prompt_generator,
@@ -33,7 +31,7 @@ def pfedpg_set_state_dict(model, global_state_dict, local_state_dict_list, train
     # keys_to_del = ['lang_prompt']
     # for k in keys_to_del:
     #     del global_state_dict[k]
-    
+    del prompt_generator
     return {}
 
 def pfedpg_aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **kwargs):

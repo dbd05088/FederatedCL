@@ -10,7 +10,7 @@ from configuration.VLM_config_new import ModelArguments, DataArguments, Training
 import transformers
 from utils.train_utils import get_VLMmodel
 
-from utils.method_manager_VLM import select_method
+# from utils.method_manager_VLM import select_method
 # from torch.utils.tensorboard import SummaryWriter
 
 from torch import multiprocessing

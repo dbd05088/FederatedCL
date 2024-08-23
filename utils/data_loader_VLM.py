@@ -12,7 +12,7 @@ from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAG
 from models.llava import conversation as conversation_lib_llava
 from models.bunny import conversation as conversation_lib_bunny
 from packaging import version
-from utils.augment import DataAugmentation
+# from utils.augment import DataAugmentation
 # IS_TOKENIZER_GREATER_THAN_0_14 = version.parse(tokenizers.__version__) >= version.parse('0.14')
 IS_TOKENIZER_GREATER_THAN_0_14 = True
 Image.MAX_IMAGE_PIXELS = None
