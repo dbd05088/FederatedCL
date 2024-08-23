@@ -126,4 +126,4 @@ class TrainingArguments(transformers.TrainingArguments):
     generator_hidden_dim: int = 32
     generator_hidden_feature: int = 16
     set_state:str = 'gate'
-    
+    ema_ratio:float = 0.996
