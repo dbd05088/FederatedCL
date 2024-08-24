@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class Pool2(nn.Module):
-    def __init__(self, length=1, embed_dim=1024, key_dim=1024, embedding_key='cls', prompt_init='uniform', prompt_pool=True, 
+    def __init__(self, length=1, embed_dim=1024, key_dim=1024, embedding_key='cls', prompt_init='one', prompt_pool=True, 
                  prompt_key=True, pool_size=10, top_k=5, batchwise_prompt=True, prompt_key_init='uniform',):
         super().__init__()
 
@@ -19,6 +19,9 @@ class Pool2(nn.Module):
             prompt_pool_shape = (pool_size, length, embed_dim)
             if prompt_init == 'zero':
                 self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
+            elif prompt_init == 'one':
+                self.prompt = nn.Parameter(torch.ones(prompt_pool_shape))
+                # print(self.prompt)
             elif prompt_init == 'uniform':
                 self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
                 # nn.init.uniform_(self.prompt, -1, 1)
