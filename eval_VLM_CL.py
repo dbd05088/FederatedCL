@@ -362,7 +362,7 @@ def main():
     
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     
-    batch_size = 1 #if 'l2p' in training_args.mode or 'dap' in training_args.mode else 2
+    batch_size = 1 if 'l2p' in training_args.mode or 'dap' in training_args.mode else 2
     
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     
@@ -403,7 +403,6 @@ def main():
                         else:
                             evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
                 if training_args.eval_server and data_info['data_name'] not in server_eval_key:
-                    breakpoint()
                     if not training_args.zeroshot:
                         model.load_state_dict(server_state_dict, strict=False)
                     if training_args.mode in ['apfl', 'ditto']:

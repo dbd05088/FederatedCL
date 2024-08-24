@@ -24,67 +24,14 @@ from peft.utils import transpose
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 import torch.nn.functional as F
 
-def init_weights_to_zero(m):
-    if isinstance(m, nn.Linear):
-        nn.init.zeros_(m.weight)
-        if m.bias is not None:
-            nn.init.zeros_(m.bias)
-
-class PromptMLP(nn.Module):
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        hidden_features: int = 8,
-        bias: bool = False,
-        dropout: float = 0.0,
-        activation: str = "relu",
-        is_forward: bool = False,
-    ) -> None:
-        super().__init__()
-
-        self.in_features = in_features
-        self.out_features = out_features
-        self.hidden_features = hidden_features
-        self.len = 1
-        self.is_forward = is_forward
-
-        # non_linearity = nn.ReLU(inplace=True)
-        # if activation == "sigmoid":
-        #     non_linearity = nn.Sigmoid()
-        # elif activation == "attention":
-        #     non_linearity = nn.Softmax(dim=-1)
-        non_linearity = nn.SiLU(inplace=True)
-
-        self.block = nn.Sequential(
-            nn.Linear(self.in_features, self.hidden_features, bias=bias),
-            non_linearity,
-            nn.Linear(self.hidden_features, self.out_features * self.len, bias=bias),
-        )
-        if dropout > 0.0:
-            self.block[1].register_forward_hook(
-                lambda m, inp, out: F.dropout(out, p=dropout, training=m.training)
-            )
-        self.block[2].weight.data.fill_(0)
-
-    def forward(self, x: torch.Tensor):
-        bsz = x.size(0)
-        out = self.block(x)
-        if self.is_forward:
-            out = out.reshape(bsz, self.len, self.out_features)
-        else:
-            out = out.reshape(bsz, self.out_features, self.len)
-
-        return out
-
-class EVOIA3Layer(BaseTunerLayer):
+class EmptyIA3Layer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
-    adapter_layer_names = ("ia3_generator",)
+    adapter_layer_names = ("ia3_generator_1","ia3_generator_2")
 
-    def __init__(self, base_layer: nn.Module, is_feedforward: bool, generator_output_size, generator_hidden_feature, **kwargs) -> None:
+    def __init__(self, base_layer: nn.Module, is_feedforward: bool, **kwargs) -> None:
         self.base_layer = base_layer
-        self.ia3_generator = nn.ParameterDict({})
-
+        self.ia3_generator_1 = nn.ParameterDict({})
+        self.ia3_generator_2 = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -106,31 +53,51 @@ class EVOIA3Layer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
         
-        self.generator_output_size=generator_output_size
-        self.generator_hidden_feature=generator_hidden_feature
+        self.active_state = 'lora1'
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
-        self.ia3_generator[adapter_name] = PromptMLP(self.generator_output_size, self.in_features, hidden_features=self.generator_hidden_feature, is_forward=self.is_feedforward)
+        # self.ia3_generator_1[adapter_name] = PromptMLP(512,self.in_features,hidden_features=32, is_forward=self.is_feedforward)
+        # self.ia3_generator_2[adapter_name] = PromptMLP(512,self.in_features,hidden_features=32, is_forward=self.is_feedforward)
         
-        self.to(self.get_base_layer().weight.device)
-        self.set_adapter(self.active_adapters)
+        # self.to(self.get_base_layer().weight.device)
+        # self.set_adapter(self.active_adapters)
+        pass
 
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l.keys():
             # initialize learned vector with torch.ones
             nn.init.constant_(self.ia3_l[adapter_name], 1.0)
 
+    def set_state(self, state):
+        assert state in ['lora1', 'lora2', 'gate'], state
+        self.active_state = state
 
-class Linear(nn.Module, EVOIA3Layer):
+    def activate_all(self):
+        for p in self.ia3_generator_1.parameters():
+            p.requires_grad = True
+        for p in self.ia3_generator_2.parameters():
+            p.requires_grad = True
+
+    def activate_lora1(self):
+        for p in self.ia3_generator_1.parameters():
+            p.requires_grad = True
+        for p in self.ia3_generator_2.parameters():
+            p.requires_grad = False
+    
+    def activate_lora2(self):
+        for p in self.ia3_generator_1.parameters():
+            p.requires_grad = False
+        for p in self.ia3_generator_2.parameters():
+            p.requires_grad = True
+
+class Linear(nn.Module, EmptyIA3Layer):
     # (IA)^3 implemented in a dense layer
     def __init__(
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        generator_output_size,
-        generator_hidden_feature,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_feedforward: bool = False,  # Set to True if the layer is treated as a feedforward layer
         is_target_conv_1d_layer: bool = False,  # whether target module is a conv1d layer. useful while unloading later
@@ -138,7 +105,7 @@ class Linear(nn.Module, EVOIA3Layer):
         **kwargs,
     ) -> None:
         super().__init__()
-        EVOIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward,generator_output_size=generator_output_size,generator_hidden_feature=generator_hidden_feature)
+        EmptyIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
         self.fan_in_fan_out = fan_in_fan_out
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name
@@ -219,37 +186,31 @@ class Linear(nn.Module, EVOIA3Layer):
         else:
             query_embeds = kwargs['query_embeds'] if 'query_embeds' in kwargs.keys() else None
             ia3_scaling = 1
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.ia3_generator.keys():
-                    continue
-                dtype = self.ia3_generator[active_adapter].block[0].weight.dtype
+            # for active_adapter in self.active_adapters:
+            #     if active_adapter not in self.ia3_generator_1.keys():
+            #         continue
+                # dtype = self.ia3_generator_1[active_adapter].block[0].weight.dtype
 
-                bs = x.shape[0]
-                if query_embeds is not None:
-                    ia3_delta = self.ia3_generator[active_adapter](query_embeds)
-                    if self.is_feedforward:
-                        weight = torch.ones((bs,1, self.in_features)).to(x.device)
-                    else:
-                        weight = torch.ones((bs,self.in_features, 1)).to(x.device)
-                    
-                    ia3 = weight + ia3_delta
-                    
-                    ia3_scaling *= ia3.reshape(bs, -1)
-                    
-                    self.prev_ia3_scaling = ia3_scaling.clone()
-                else:
-                    ia3_scaling = self.prev_ia3_scaling
-                    # self.prev_ia3_scaling = None
-
-            if self.is_feedforward:
-                x = x.to(dtype)
-                # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
-                # e.g. bf16 vs fp32. Is that okay?
-                interm = (x * ia3_scaling.unsqueeze(1)).to(self.get_base_layer().weight.dtype)
-                result = self.base_layer(interm)
+            bs = x.shape[0]
+            if query_embeds is not None:
+                ia3 = query_embeds
+                
+                ia3_scaling *= ia3.reshape(bs, -1)
+                
+                self.prev_ia3_scaling = ia3_scaling.clone()
             else:
-                result = self.base_layer(x)
-                result = result.to(dtype) * ia3_scaling.unsqueeze(1)
+                ia3_scaling = self.prev_ia3_scaling
+                # self.prev_ia3_scaling = None
+
+        if self.is_feedforward:
+            x = x.to(dtype)
+            # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
+            # e.g. bf16 vs fp32. Is that okay?
+            interm = (x * ia3_scaling.unsqueeze(1)).to(self.get_base_layer().weight.dtype)
+            result = self.base_layer(interm)
+        else:
+            result = self.base_layer(x)
+            result = result.to(dtype) * ia3_scaling.unsqueeze(1)
 
         result = result.to(previous_dtype)
         return result

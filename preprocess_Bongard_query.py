@@ -64,9 +64,14 @@ def save_dataset(dataset_name, output_folder, subset_name):
                     ]
                 }
                 json_data_list.append(json_data)
+                positive_queryfile = np.random.choice(positive_files[:num_per_set+idx])
                 
-                imgs = np.random.choice(positive_files, size=num_per_set, replace=False).tolist() + np.random.choice(negative_files, size=num_per_set, replace=False).tolist()
-                
+                if idx == 0:
+                    imgs = np.random.choice(positive_files, size=num_per_set, replace=False).tolist() + np.random.choice(negative_files, size=num_per_set, replace=False).tolist()
+                else:
+                    neg_imgs = np.random.choice(negative_files, size=num_per_set+1, replace=False).tolist()
+                    imgs = np.random.choice(positive_files, size=num_per_set, replace=False).tolist() + neg_imgs[:-1]
+                    negative_queryfile = neg_imgs[-1]
                 # breakpoint()
                 json_data = {
                     "id": item['uid'] + "-" + str(idx),
@@ -84,6 +89,7 @@ def save_dataset(dataset_name, output_folder, subset_name):
                     ]
                 }
                 json_data_list.append(json_data)
+                
     # Save the JSON data list to a file
     json_output_path = os.path.join(output_folder, subset_name, f'dataset-1.json')
     print(len(json_data_list))

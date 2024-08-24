@@ -33,10 +33,10 @@ from peft.utils import (
 )
 
 from peft.tuners.ia3.layer import Conv2d
-from models.evo_ia3.evoia3layer import EVOIA3Layer, Linear
+from models.empty_ia3.empty_ia3_layer import EmptyIA3Layer, Linear
 
 
-class EVOIA3Model(BaseTuner):
+class EmptyIA3Model(BaseTuner):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
     transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638
@@ -126,7 +126,7 @@ class EVOIA3Model(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = False
-            new_module = Linear(target, adapter_name, is_feedforward=is_feedforward, generator_output_size=ia3_config.generator_output_size, generator_hidden_feature=ia3_config.generator_hidden_feature, **kwargs)
+            new_module = Linear(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target_base_layer, Conv1D):
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(
@@ -173,7 +173,7 @@ class EVOIA3Model(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
 
-        if isinstance(target, EVOIA3Layer):
+        if isinstance(target, EmptyIA3Layer):
             target.update_layer(
                 adapter_name,
                 ia3_config.init_ia3_weights,
@@ -240,7 +240,7 @@ class EVOIA3Model(BaseTuner):
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
-            if isinstance(module, (EVOIA3Layer, ModulesToSaveWrapper)):
+            if isinstance(module, (EmptyIA3Layer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:
@@ -273,7 +273,7 @@ class EVOIA3Model(BaseTuner):
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
         for module in self.model.modules():
-            if isinstance(module, EVOIA3Layer):
+            if isinstance(module, EmptyIA3Layer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -387,7 +387,7 @@ class EVOIA3Model(BaseTuner):
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, EVOIA3Layer):
+            if isinstance(target, EmptyIA3Layer):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]

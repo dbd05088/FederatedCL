@@ -30,6 +30,40 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
     elif mode == 'fedavg':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
+    
+    elif mode == 'L2P' or mode == 'L2P_T' or mode == 'DAP' or mode == 'DAP_T':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
+    
+    elif mode =='EvoPrompt' or mode == 'EvoPrompt_T':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, OT_create_trainer, fedavg_aggregate_state_dict
+    
+    elif mode =='ours_pool':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_create_trainer, OURS_aggregate_state_dict
+    elif mode =='ours_generator':
+        # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_create_trainer, OURS_aggregate_state_dict
+    elif mode =='ours_generator2' or mode == 'ours_generator3':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
+    
+    else:
+        raise NotImplementedError(mode)
+    return set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules
+
+
+'''
+elif mode =='l2p' or mode =='layer_l2p' or mode =='dap' or mode =='layer_l2p_text' or mode =='l2p_text':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, pfedpg_create_trainer, fedavg_aggregate_state_dict
+        # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, pfedpg_create_trainer, fedavg_aggregate_state_dict
+    elif mode =='dap_attn' or mode == 'layer_l2p_attn' or mode =='layer_l2p_attn2':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, dap_attn_create_trainer, fedavg_aggregate_state_dict
+    
+    elif mode =='ia3_pool':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
+    elif mode =='dap_ia3':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
+    elif mode =='evo_ia3':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, OT_create_trainer, fedavg_aggregate_state_dict
+    
     elif mode == 'fedper':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedper_set_state_dict, fedper_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
     elif mode == 'fedper_half':
@@ -61,27 +95,5 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedsim_set_state_dict, fedper_load_state_dict, ditto_create_trainer, fedavg_aggregate_state_dict
     elif mode =='apfl':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedsim_set_state_dict, fedper_load_state_dict, apfl_create_trainer, fedavg_aggregate_state_dict
-    elif mode =='l2p' or mode =='layer_l2p' or mode =='dap' or mode =='layer_l2p_text' or mode =='l2p_text':
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, pfedpg_create_trainer, fedavg_aggregate_state_dict
-        # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, pfedpg_create_trainer, fedavg_aggregate_state_dict
-    elif mode =='dap_attn' or mode == 'layer_l2p_attn' or mode =='layer_l2p_attn2':
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, dap_attn_create_trainer, fedavg_aggregate_state_dict
     
-    elif mode =='ia3_pool':
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
-    elif mode =='dap_ia3':
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
-    elif mode =='evo_ia3':
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, OT_create_trainer, fedavg_aggregate_state_dict
-        
-    elif mode =='ours_pool':
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_create_trainer, OURS_aggregate_state_dict
-    elif mode =='ours_generator':
-        # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_create_trainer, OURS_aggregate_state_dict
-    elif mode =='ours_generator2' or mode == 'ours_generator3':
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
-    
-    else:
-        raise NotImplementedError(mode)
-    return set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules
+'''

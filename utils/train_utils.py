@@ -10,30 +10,40 @@ import models.llava.conversation as conversation_lib_llava
 import models.bunny.conversation as conversation_lib_bunny
 from transformers import Trainer
 from peft.tuners.lora import LoraLayer
-from models.bunny.prompt_tuning_model import Bunny_PT
+# from models.bunny.prompt_tuning_model import Bunny_PT
 from models.llava.prompt_tuning_model import Llava_PT
-from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
+# from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
 from models.duallora.dualloralayer import DualLoraLayer
 from models.dual_ia3.dual_ia3_layer import DualIA3Layer
 from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 from models.dap_ia3.dapia3layer import DAPIA3Layer
 from models.feddat_lora.tripleloralayer import TripleLoraLayer
-from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
-from models.llava.l2p_model import Llava_L2P
-from models.llava.l2p_layerwise_model import LlavaLlamaL2PForCausalLM
-from models.llava.dap_model import LlavaLlamaDAPForCausalLM
-from models.llava.l2p_layerwise_text_model import LlavaLlamaL2PtextForCausalLM
-from models.llava.l2p_text_model import Llava_L2Ptext
-from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
-from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
-from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
+# from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
+# from models.llava.l2p_model import Llava_L2P
+# from models.llava.l2p_layerwise_model import LlavaLlamaL2PForCausalLM
+# from models.llava.dap_model import LlavaLlamaDAPForCausalLM
+# from models.llava.l2p_layerwise_text_model import LlavaLlamaL2PtextForCausalLM
+# from models.llava.l2p_text_model import Llava_L2Ptext
+# from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
+# from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
+# from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
 from models.llava.llava_ia3 import LlavaLlamaForIA3PoolCausalLM
-from models.llava.dap_ia3 import LlavaLlamaDAPIA3ForCausalLM
-from models.llava.evoprompt_ia3 import LlavaLlamaEVOIA3ForCausalLM
+# from models.llava.dap_ia3 import LlavaLlamaDAPIA3ForCausalLM
+# from models.llava.evoprompt_ia3 import LlavaLlamaEVOIA3ForCausalLM
 from models.llava.llava_ia3_global import LlavaLlamaForOURSIA3PoolCausalLM
 from models.llava.evoprompt_ia3_global import LlavaLlamaOURSGENIA3ForCausalLM
-from models.llava.evoprompt_ia3_global2 import LlavaLlamaOURSGENIA3ForCausalLM2
+# from models.llava.evoprompt_ia3_global2 import LlavaLlamaOURSGENIA3ForCausalLM2
 from models.llava.evoprompt_ia3_global3 import LlavaLlamaOURSGENIA3ForCausalLM3
+
+from models.llava.L2P import LlavaLlamaForL2PIA3CausalLM
+from models.llava.L2P_T import LlavaLlamaForL2PTIA3CausalLM
+
+from models.llava.DAP import LlavaLlamaDAPForCausalLM
+from models.llava.DAP_T import LlavaLlamaDAPTForCausalLM
+
+from models.llava.EvoPrompt import LlavaLlamaEVOIA3ForCausalLM
+from models.llava.EvoPrompt_T import LlavaLlamaEVOTIA3ForCausalLM
+
 import copy
 ACCESS_TOKEN = "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"
 
@@ -121,116 +131,71 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load pfedpg')
-        elif training_args.mode == 'l2p':
+        
+        elif training_args.mode == 'L2P':
             assert model_args.model_type != 'mpt'
-            model = Llava_L2P.from_pretrained(
+            model = LlavaLlamaForL2PIA3CausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-            print('load l2p')
-        elif training_args.mode == 'layer_l2p':
+            print('load L2P-IA3')
+        elif training_args.mode == 'L2P_T':
             assert model_args.model_type != 'mpt'
-            model = LlavaLlamaL2PForCausalLM.from_pretrained(
+            model = LlavaLlamaForL2PTIA3CausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-            print('load layerwise l2p')
-        elif training_args.mode == 'layer_l2p_text':
-            assert model_args.model_type != 'mpt'
-            model = LlavaLlamaL2PtextForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-            print('load layerwise l2p text')
-        elif training_args.mode == 'l2p_text':
-            assert model_args.model_type != 'mpt'
-            model = Llava_L2Ptext.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-            print('load l2p text')
-        elif training_args.mode == 'dap':
+            print('load L2P_T-IA3')
+        
+        elif training_args.mode == 'DAP':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaDAPForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                key_embed_size=training_args.key_embed_size
                 **bnb_model_from_pretrained_args
             )
-            print('load dap')
-        elif training_args.mode == 'dap_attn':
+            print('load DAP-IA3')
+        elif training_args.mode == 'DAP_T':
             assert model_args.model_type != 'mpt'
-            model = LlavaLlamaDAPATTNForCausalLM.from_pretrained(
+            model = LlavaLlamaDAPTForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                key_embed_size=training_args.key_embed_size
                 **bnb_model_from_pretrained_args
             )
-            print('load dap attn')
-        elif training_args.mode == 'dap_ia3':
-            assert model_args.model_type != 'mpt'
-            model = LlavaLlamaDAPIA3ForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-            print('load dap ia3')
-        elif training_args.mode == 'evo_ia3':
+            print('load DAP_T-IA3')
+        elif training_args.mode == 'EvoPrompt':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaEVOIA3ForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-            print('load evo ia3')
-        elif training_args.mode == 'layer_l2p_attn':
+            print('load EvoPrompt-IA3')
+        elif training_args.mode == 'EvoPrompt_T':
             assert model_args.model_type != 'mpt'
-            model = LlavaLlamaL2PATTNForCausalLM.from_pretrained(
+            model = LlavaLlamaEVOTIA3ForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
-            print('load layer l2p attn')
-        elif training_args.mode == 'layer_l2p_attn2':
-            assert model_args.model_type != 'mpt'
-            model = LlavaLlamaL2PATTNForCausalLM2.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-            print('load layer l2p attn2')
+            print('load EvoPrompt_T-IA3')
+        
         elif training_args.mode == 'ia3_pool':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaForIA3PoolCausalLM.from_pretrained(
@@ -264,16 +229,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator')
-        elif training_args.mode == 'ours_generator2':
-            assert model_args.model_type != 'mpt'
-            model = LlavaLlamaOURSGENIA3ForCausalLM2.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-            print('load ours generator2')  
         elif training_args.mode == 'ours_generator3':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaOURSGENIA3ForCausalLM3.from_pretrained(
@@ -284,17 +239,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 generator_hidden_dim=training_args.generator_hidden_dim,
                 **bnb_model_from_pretrained_args
             )
-            print('load ours generator3')    
+            print('load ours generator3')
         
-        elif training_args.mode == 'fedsim' and training_args.is_eval:
-            assert model_args.model_type != 'mpt'
-            model = FEDSIMLlavaLlamaForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
         elif 'mpt' == model_args.model_type:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
             config.attn_config['attn_impl'] = training_args.mpt_attn_impl
@@ -314,18 +260,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             )
     
     elif 'bunny' in model_args.model_name_or_path.lower():
-        # prompt tuning
-        if training_args.mode == 'pfedpg':
-            assert model_args.model_type == 'phi-2'
-            model = Bunny_PT.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                bos_token_id=tokenizer.bos_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                **bnb_model_from_pretrained_args
-            )
-            print('load pfedpg')
-        elif model_args.model_type == 'phi-1.5' or model_args.model_type == 'phi-2':
+        if model_args.model_type == 'phi-1.5' or model_args.model_type == 'phi-2':
             model = BunnyPhiForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
@@ -425,7 +360,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             task_type="CAUSAL_LM",
         )
         
-        
         # create pool
         if training_args.mode == 'ia3_pool':
             from models.ia3pool.ia3poolmodel import IA3PoolModel
@@ -437,16 +371,27 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['DUALIA3'] = DualIA3Model
             ia3_config.peft_type = 'DUALIA3'
-        elif training_args.mode in ['dap_ia3']:
-            from models.dap_ia3.dapia3model import DAPIA3Model
+        
+        elif training_args.mode in ['L2P', 'L2P_T', 'DAP', 'DAP_T']:
+            from models.empty_ia3.empty_ia3_model import EmptyIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
-            PEFT_TYPE_TO_MODEL_MAPPING['DAPIA3'] = DAPIA3Model
-            ia3_config.peft_type = 'DAPIA3'
-        elif training_args.mode in ['evo_ia3']:
+            PEFT_TYPE_TO_MODEL_MAPPING['EMPTYIA3'] = EmptyIA3Model
+            ia3_config.peft_type = 'EMPTYIA3'
+        
+        elif training_args.mode in ['EvoPrompt']:
             from models.evo_ia3.evoia3model import EVOIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['EVOIA3'] = EVOIA3Model
             ia3_config.peft_type = 'EVOIA3'
+            ia3_config.generator_output_size = 1024
+            ia3_config.generator_hidden_feature = training_args.generator_hidden_feature
+        elif training_args.mode in ['EvoPrompt_T']:
+            from models.evo_ia3.evoia3model import EVOIA3Model
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['EVOIA3'] = EVOIA3Model
+            ia3_config.peft_type = 'EVOIA3'
+            ia3_config.generator_output_size = 1792
+            ia3_config.generator_hidden_feature = training_args.generator_hidden_feature
         elif training_args.mode in ['ours_pool']:
             from models.dual_ia3pool.dual_ia3poolmodel import DualIA3PoolModel
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
@@ -490,11 +435,12 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-    if training_args.mode == 'l2p' or training_args.mode == 'dap' or training_args.mode == 'ia3_pool' or training_args.mode =='dap_ia3' or training_args.mode == 'evo_ia3' or training_args.mode =='ours_pool':
+    if training_args.mode == 'L2P' or training_args.mode == 'DAP' or training_args.mode == 'EvoPrompt' or training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2':
+        vision_tower.select_feature = 'cls_patch'
+    elif training_args.mode == 'L2P_T' or training_args.mode == 'DAP_T' or training_args.mode == 'EvoPrompt_T' or training_args.mode =='ours_pool':
         vision_tower.select_feature = 'cls_patch'
         model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
         model.base_model.model.clipprocessor = CLIPProcessor.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipprocessor/")
-        
         # long clip
         model.base_model.model.text_encoder.text_model.embeddings.position_embedding = torch.nn.Embedding(248, 768).cuda()
         model.base_model.model.text_encoder.text_model.embeddings.register_buffer(
@@ -503,9 +449,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         model.base_model.model.text_encoder.load_state_dict(torch.load("/home/vision/thkim/FederatedCL/models/clip_models/longclip_L_text.pt", map_location=training_args.device))
         
         model.base_model.model.text_encoder.requires_grad_(False)
-        
-    elif training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2':
-        vision_tower.select_feature = 'cls_patch'
+
     # if not training_args.is_eval:
     #     data_args.img_mean = vision_tower.image_processor.image_mean
     #     data_args.img_std = vision_tower.image_processor.image_std
@@ -519,16 +463,18 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
-    # FIXME: freeze mm_projector for feddat or not?
-    if training_args.mode == 'pfedpg' or 'dap' in training_args.mode or 'l2p' in training_args.mode:
+    if training_args.mode == 'L2P' or training_args.mode == 'L2P_T' or training_args.mode == 'EvoPrompt' or training_args.mode == 'EvoPrompt_T':
+        for p in model.get_model().mm_projector.parameters():
+            p.requires_grad = False
+        model.lm_head.requires_grad_(False)
+    elif training_args.mode == 'DAP' or training_args.mode == 'DAP_T':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         model.lm_head.requires_grad_(False)
         for n, p in model.named_parameters():
             if 'lang_prompt' in n :
                 p.requires_grad_(True)
-            # else:
-            #     p.requires_grad_(False)
+    
     elif training_args.mode == 'feddat':
         if training_args.is_eval:
             for name, module in model.named_modules():
