@@ -65,9 +65,12 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
         self.lang_prompt_downsample = prefix_attention(prefix_num=1, output_size=4096+4096+11008, head_dim=config.generator_hidden_dim)
-        nn.init.zeros_(self.lang_prompt_downsample.weight)
-        nn.init.zeros_(self.lang_prompt_downsample.bias)
-        self.lang_prompt_film = nn.Linear(config.key_embed_size, (4096+4096+11008) * 2)
+        # self.lang_prompt_film = nn.Linear(config.key_embed_size, (4096+4096+11008) * 2)
+        self.lang_prompt_film = nn.Sequential(
+            nn.Linear(config.key_embed_size, config.generator_hidden_feature, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, (4096+4096+11008) * 2, bias=False),
+        )
         self.lang_prompt_norm = nn.LayerNorm(config.hidden_size, eps=1e-6)
 
     def forward(
@@ -117,8 +120,8 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
             down = self.lang_prompt_downsample(lang_prompt_norm, new_attention_mask)
             
             film = self.lang_prompt_film(task_id_estimated_emb)
-            gamma4 = film[:, :self.hidden_size]
-            beta4 = film[:, self.hidden_size:]
+            gamma4 = film[:, :19200]
+            beta4 = film[:, 19200:]
             gamma_norm = gamma4.norm(p=2, dim=1, keepdim=True).detach()
             beta_norm = beta4.norm(p=2, dim=1, keepdim=True).detach()
 
@@ -127,9 +130,9 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
             down = gamma4 * torch.transpose(down, 2, 1) + beta4
             selected_prompts = torch.transpose(down, 2, 1)
             
-            new_query_embeds_k = selected_prompts[:,0]
-            new_query_embeds_v = selected_prompts[:,1]
-            new_query_embeds_mlp = selected_prompts[:,2]
+            new_query_embeds_k = selected_prompts[:,:,:4096]
+            new_query_embeds_v = selected_prompts[:,:,4096:8192]
+            new_query_embeds_mlp = selected_prompts[:,:,8192:]
         else:
             new_query_embeds_k = None
             new_query_embeds_v = None
@@ -393,10 +396,11 @@ class LlamaDAPForCausalLM(LlamaForCausalLM):
 class LlavaLlamaDAPTForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
-    def __init__(self, config, key_embed_size, generator_hidden_dim):
+    def __init__(self, config, key_embed_size, generator_hidden_dim,generator_hidden_feature):
         super(LlamaForCausalLM, self).__init__(config)
         config.key_embed_size = key_embed_size
         config.generator_hidden_dim = generator_hidden_dim
+        config.generator_hidden_feature=generator_hidden_feature
         self.model = LlavaLlamaDAPModel(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
@@ -433,6 +437,7 @@ class LlavaLlamaDAPTForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         image_sizes: Optional[List[List[int]]] = None,
         return_dict: Optional[bool] = None,
         cache_position=None,
+        task_id=None,
         prompt=None,
         task_id_estimated_emb=None
     ) -> Union[Tuple, CausalLMOutputWithPast]:
@@ -454,7 +459,8 @@ class LlavaLlamaDAPTForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 labels,
                 images,
                 image_sizes,
-                prompt=prompt
+                prompt=prompt,
+                task_id=task_id,
             )
             if task_id_estimated_emb is not None:
                 task_id_estimated_emb, reduce_sim = task_id_estimated_emb
@@ -551,7 +557,7 @@ class LlavaLlamaDAPTForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
     
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
-        images, image_sizes=None, prompt=None,
+        images, image_sizes=None, prompt=None,task_id=None
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1 or all(img.shape[0] == 0 for img in images):
@@ -727,6 +733,19 @@ class LlavaLlamaDAPTForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         _, major_idx = torch.topk(id_counts, self.top_k)
         major_prompt_id = prompt_id[major_idx]
         idx = expand_to_batch(major_prompt_id, input_features.shape[0]).squeeze(dim=-1)
+
+        bsz = input_features.shape[0]
+        if self.training and task_id is not None:
+            start = task_id * self.top_k
+            end = (task_id + 1) * self.top_k
+            prompt_mask = torch.arange(start, end).cuda()
+            if end > self.pool_size:
+                prompt_mask = None
+            
+            if prompt_mask is not None:
+                idx = prompt_mask
+                task_id = idx.cpu()[0]
+                idx = expand_to_batch(idx, input_features.shape[0]).squeeze(dim=-1)
 
         task_id_estimated_emb = self.lang_prompt_dap_emb(idx)
         i = torch.arange(bsz).reshape(bsz, 1, 1)

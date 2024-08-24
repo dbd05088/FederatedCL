@@ -50,7 +50,7 @@ class LlamaDecoderIA3PoolLayer(LlamaDecoderLayer):
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
-        self.ia3_pool = Pool(1,4096+4096+11008,1024,pool_size=12,top_k=3)
+        self.lang_prompt_ia3_pool = Pool(1,4096+4096+11008,1024,pool_size=config.pool_size,top_k=config.prompt_top_k)
         # 4096 + 4096 + 11008
 
     def forward(
@@ -86,10 +86,11 @@ class LlamaDecoderIA3PoolLayer(LlamaDecoderLayer):
             )
             
         if query_embeds is not None:
-            new_query_embeds, reduce_sim, _ = self.ia3_pool(query_embeds, task_id)
-            new_query_embeds_k = new_query_embeds[:,:4096]
-            new_query_embeds_v = new_query_embeds[:,4096:8192]
-            new_query_embeds_mlp = new_query_embeds[:,8192:]
+            new_query_embeds, reduce_sim, _ = self.lang_prompt_ia3_pool(query_embeds, task_id)
+            
+            new_query_embeds_k = new_query_embeds[:,:,:4096].mean(dim=1)
+            new_query_embeds_v = new_query_embeds[:,:,4096:8192].mean(dim=1)
+            new_query_embeds_mlp = new_query_embeds[:,:,8192:].mean(dim=1)
         else:
             new_query_embeds_k = None
             new_query_embeds_v = None
@@ -127,7 +128,7 @@ class LlamaDecoderIA3PoolLayer(LlamaDecoderLayer):
         if use_cache:
             outputs += (present_key_value,)
         
-        if query_embeds > 1:
+        if query_embeds is not None:
             outputs += (reduce_sim,)
 
         return outputs
@@ -251,7 +252,7 @@ class LlamaDAPModel(LlamaModel):
                 
             if self.training and query_embeds is not None:
                 l2p_key_losses += layer_outputs[-1]
-        l2p_key_losses /= len(self.layers)
+        # l2p_key_losses /= len(self.layers)
             
         hidden_states = self.norm(hidden_states)
 
@@ -346,7 +347,7 @@ class LlamaDAPForCausalLM(LlamaForCausalLM):
             shift_labels = shift_labels.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
             
-            loss -= 1.0*l2p_key_losses
+            loss -= 0.1*l2p_key_losses
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -364,8 +365,10 @@ class LlamaDAPForCausalLM(LlamaForCausalLM):
 class LlavaLlamaForL2PIA3CausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
-    def __init__(self, config):
+    def __init__(self, config, pool_size, prompt_top_k):
         super(LlamaForCausalLM, self).__init__(config)
+        config.pool_size=pool_size
+        config.prompt_top_k=prompt_top_k
         self.model = LlavaLlamaDAPModel(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
@@ -656,5 +659,5 @@ class LlavaLlamaForL2PIA3CausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
 
             img_feat = cls_features[batch_idx].mean(dim=0)
             input_features.append(img_feat)
-
+        input_features = torch.stack(input_features)
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, input_features

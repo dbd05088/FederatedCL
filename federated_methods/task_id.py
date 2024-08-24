@@ -24,7 +24,9 @@ def task_id_create_trainer(model, tokenizer, training_args, data_module, extra_s
         packing=True,
         max_seq_length=training_args.model_max_length,
         **data_module,
-        task_id=task_id
+        task_id=task_id,
+        client_id = extra_state_dict_dict['client_id'],
+        curr_round = extra_state_dict_dict['curr_round'],
         )
     return trainer
 

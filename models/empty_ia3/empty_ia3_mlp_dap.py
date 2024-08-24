@@ -17,7 +17,12 @@ class LlamaEmptyIA3DAPMLP(nn.Module):
         self.lang_prompt_downsample = nn.Linear(576, 1)
         nn.init.zeros_(self.lang_prompt_downsample.weight)
         nn.init.zeros_(self.lang_prompt_downsample.bias)
-        self.lang_prompt_film = nn.Linear(config.key_embed_size, self.intermediate_size * 2)
+        # self.lang_prompt_film = nn.Linear(config.key_embed_size, self.intermediate_size * 2)
+        self.lang_prompt_film = nn.Sequential(
+            nn.Linear(config.key_embed_size, config.generator_hidden_feature, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, self.intermediate_size*2, bias=False),
+        )
         self.lang_prompt_norm = nn.LayerNorm(self.intermediate_size, eps=1e-6)
 
     def forward(self, x, image_feature_indices=None, task_id_estimated_emb=None):
@@ -46,7 +51,6 @@ class LlamaEmptyIA3DAPMLP(nn.Module):
             beta4 = beta4.div(beta_norm).view(film.size(0), -1, 1)
             down = gamma4 * down + beta4
             query_embeds = torch.transpose(down, 2, 1)
-            breakpoint()
         else:
             query_embeds = None
         down_proj = self.down_proj(x, query_embeds=query_embeds)

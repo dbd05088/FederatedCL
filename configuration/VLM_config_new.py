@@ -128,3 +128,5 @@ class TrainingArguments(transformers.TrainingArguments):
     set_state:str = 'gate'
     ema_ratio:float = 0.996
     key_embed_size:int = 64
+    pool_size:int = 4
+    prompt_top_k:int = 1

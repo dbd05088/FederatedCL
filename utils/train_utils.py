@@ -139,6 +139,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                pool_size = training_args.pool_size,
+                prompt_top_k = training_args.prompt_top_k,
                 **bnb_model_from_pretrained_args
             )
             print('load L2P-IA3')
@@ -149,6 +151,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                pool_size = training_args.pool_size,
+                prompt_top_k = training_args.prompt_top_k,
                 **bnb_model_from_pretrained_args
             )
             print('load L2P_T-IA3')
@@ -160,7 +164,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                key_embed_size=training_args.key_embed_size
+                key_embed_size=training_args.key_embed_size,
+                generator_hidden_feature=training_args.generator_hidden_feature,
                 **bnb_model_from_pretrained_args
             )
             print('load DAP-IA3')
@@ -171,7 +176,9 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                key_embed_size=training_args.key_embed_size
+                key_embed_size=training_args.key_embed_size,
+                generator_hidden_dim=training_args.generator_hidden_dim,
+                generator_hidden_feature=training_args.generator_hidden_feature,
                 **bnb_model_from_pretrained_args
             )
             print('load DAP_T-IA3')
@@ -463,11 +470,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
-    if training_args.mode == 'L2P' or training_args.mode == 'L2P_T' or training_args.mode == 'EvoPrompt' or training_args.mode == 'EvoPrompt_T':
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = False
-        model.lm_head.requires_grad_(False)
-    elif training_args.mode == 'DAP' or training_args.mode == 'DAP_T':
+    if training_args.mode == 'L2P' or training_args.mode == 'L2P_T' or training_args.mode == 'DAP' or training_args.mode == 'DAP_T' or training_args.mode == 'EvoPrompt' or training_args.mode == 'EvoPrompt_T':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         model.lm_head.requires_grad_(False)

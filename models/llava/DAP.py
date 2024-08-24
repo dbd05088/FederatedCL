@@ -46,6 +46,33 @@ from functools import reduce
 
 logger = logging.get_logger(__name__)
 
+class PromptMLP(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        hidden_features: int = 8,
+        bias: bool = False,
+        dropout: float = 0.0,
+        activation: str = "relu",
+        is_forward: bool = False,
+    ) -> None:
+        super().__init__()
+
+        self.in_features = in_features
+        self.out_features = out_features
+        self.hidden_features = hidden_features
+        self.len = 1
+        self.is_forward = is_forward
+
+        # non_linearity = nn.ReLU(inplace=True)
+        # if activation == "sigmoid":
+        #     non_linearity = nn.Sigmoid()
+        # elif activation == "attention":
+        #     non_linearity = nn.Softmax(dim=-1)
+        non_linearity = nn.SiLU(inplace=True)
+
+
 def expand_to_batch(x, batch_size, dim=0):
     shape = [1 for _ in x.shape]
     shape.insert(dim, batch_size)
@@ -64,7 +91,12 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         self.lang_prompt_downsample = nn.Linear(576, 2)
         nn.init.zeros_(self.lang_prompt_downsample.weight)
         nn.init.zeros_(self.lang_prompt_downsample.bias)
-        self.lang_prompt_film = nn.Linear(config.key_embed_size, config.hidden_size * 2)
+        # self.lang_prompt_film = nn.Linear(config.key_embed_size, config.hidden_size * 2)
+        self.lang_prompt_film = nn.Sequential(
+            nn.Linear(config.key_embed_size, config.generator_hidden_feature, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, config.hidden_size*2, bias=False),
+        )
         self.lang_prompt_norm = nn.LayerNorm(config.hidden_size, eps=1e-6)
 
     def forward(
@@ -389,9 +421,10 @@ class LlamaDAPForCausalLM(LlamaForCausalLM):
 class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
-    def __init__(self, config, key_embed_size):
+    def __init__(self, config, key_embed_size,generator_hidden_feature):
         super(LlamaForCausalLM, self).__init__(config)
         config.key_embed_size = key_embed_size
+        config.generator_hidden_feature = generator_hidden_feature
         self.model = LlavaLlamaDAPModel(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
@@ -428,6 +461,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         image_sizes: Optional[List[List[int]]] = None,
         return_dict: Optional[bool] = None,
         cache_position=None,
+        task_id=None,
         image_feature_indices=None,
         task_id_estimated_emb=None
     ) -> Union[Tuple, CausalLMOutputWithPast]:
@@ -448,7 +482,8 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 labels,
                 images,
-                image_sizes
+                image_sizes,
+                task_id=task_id
             )
             if image_feature_indices is not None:
                 image_feature_indices, task_id_estimated_emb, reduce_sim = image_feature_indices
@@ -547,7 +582,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
     
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
-        images, image_sizes=None
+        images, image_sizes=None, task_id=None,
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1 or all(img.shape[0] == 0 for img in images):
@@ -585,6 +620,19 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         _, major_idx = torch.topk(id_counts, self.top_k)
         major_prompt_id = prompt_id[major_idx]
         idx = expand_to_batch(major_prompt_id, mean_cls_features.shape[0]).squeeze(dim=-1)
+
+        bsz = mean_cls_features.shape[0]
+        if self.training and task_id is not None:
+            start = task_id * self.top_k
+            end = (task_id + 1) * self.top_k
+            prompt_mask = torch.arange(start, end).cuda()
+            if end > self.pool_size:
+                prompt_mask = None
+            
+            if prompt_mask is not None:
+                idx = prompt_mask
+                task_id = idx.cpu()[0]
+                idx = expand_to_batch(idx, mean_cls_features.shape[0]).squeeze(dim=-1)
 
         task_id_estimated_emb = self.lang_prompt_dap_emb(idx)
         i = torch.arange(bsz).reshape(bsz, 1, 1)
