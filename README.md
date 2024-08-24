@@ -142,3 +142,20 @@ python preprocess_AESOP.py
             - num_rounds: round to eval
         - The results will be saved in `results.csv`
         
+# Baseline list
+
+- L2P (layerwise, visual feature only) -> done
+- CODA_Prompt
+- DAP                                   -> done
+- EvoPrompt                             -> done
+- L2P_T (concat visual + text feature) -> done
+- CODA_Prompt_T
+- DAP_T                                 -> done
+- EvoPrompt_T                           -> done
+- ...
+- Federated methods combined version
+    - FedAvg, Ditto, Feddat, ...
+- L2P_FedAvg / L2P_T_FedAvg
+- CODA_Prompt_FedAvg / CODA_Prompt_T_FedAvg
+- DAP_FedAvg / DAP_T_FedAvg
+- 
