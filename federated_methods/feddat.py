@@ -5,7 +5,9 @@ from torch.utils.data import RandomSampler
 from packaging import version
 from torch import nn
 from utils.train_utils import load_deepspeed
-from models.llava.llava_trainer import LLaVATrainer
+# from models.llava.llava_trainer import LLaVATrainer
+from federated_methods.fedavg import LLaVATrainerFEDAVG
+from federated_methods.task_id import LLaVATrainerTaskId
 from transformers.utils import logging
 import sys, os, time, shutil
 import math
@@ -62,7 +64,7 @@ def feddat_set_state_dict(model, global_state_dict, local_state_dict_list, train
     # shard layer = 'lora1', 'lora3'
     keys_to_del = []
     for k in global_state_dict.keys():
-        if 'lora2' in k or 'ia3_l_2' in k:
+        if 'lora2' in k or 'ia3_l_2' in k or 'lang_prompt_ia3_pool_2' in k:
             keys_to_del.append(k)
     for k in keys_to_del:
         del global_state_dict[k]
@@ -70,7 +72,7 @@ def feddat_set_state_dict(model, global_state_dict, local_state_dict_list, train
     local_keys_to_del = []
     for k in local_state_dict_list[0].keys():
         # if 'lora1' in k or 'lora3' in k:
-        if 'lora1' in k or 'ia3_l_1' in k:
+        if 'lora1' in k or 'ia3_l_1' in k or 'lang_prompt_ia3_pool_1' in k:
             local_keys_to_del.append(k)
     for client_id in range(training_args.num_clients):
         for k in local_keys_to_del:
@@ -84,7 +86,7 @@ def feddat_set_state_dict(model, global_state_dict, local_state_dict_list, train
 def feddat_aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **kwargs):
     for key in global_state_dict.keys():
         # global_state_dict[key] = sum([local_state_dict_list[client][key] * sample_num_list[client] / sample_this_round for client in selected_ids])
-        if 'lora1' in key or 'ia3_l_1' in key:
+        if 'lora1' in key or 'ia3_l_1' in key or 'lang_prompt_ia3_pool_1' in key:
             global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
             # target_key = key.replace('lora1', 'lora3')
             # global_state_dict[target_key] = global_state_dict[key].clone()
@@ -98,7 +100,10 @@ def feddat_create_trainer(model, tokenizer, training_args, data_module, extra_st
         packing=True,
         max_seq_length=training_args.model_max_length,
         **data_module,
-        global_state=extra_state_dict_dict['global_state']
+        client_id = extra_state_dict_dict['client_id'],
+        curr_round = extra_state_dict_dict['curr_round'],
+        global_state=extra_state_dict_dict['global_state'],
+        task_id = extra_state_dict_dict['task_id'] if 'task_id' in extra_state_dict_dict else None
         )
     return trainer
 
@@ -114,10 +119,11 @@ def kl_loss(output, target, temp=3):
     l_kl = l_kl * temp**2
     return l_kl
 
-class LLaVATrainerFEDDAT(LLaVATrainer):
-    def __init__(self, global_state, **kwargs):
+class LLaVATrainerFEDDAT(LLaVATrainerTaskId):
+    def __init__(self, global_state, task_id, **kwargs):
         super(LLaVATrainerFEDDAT, self).__init__(**kwargs)
         self.global_state = global_state
+        self.task_id = task_id
         self.current_global = copy.deepcopy(global_state)
     
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], update_adapter) -> torch.Tensor:
@@ -147,10 +153,7 @@ class LLaVATrainerFEDDAT(LLaVATrainer):
         if update_adapter == 'lora1':
             # get logits of all adapters
             with torch.no_grad():
-                for name, module in model.module.named_modules():
-                    # if isinstance(module, TripleLoraLayer):
-                    if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                        module.set_state('gate')
+                model.module.set_state('gate')
                 _, outputs = super(LLaVATrainerFEDDAT, self).compute_loss(
                         model, inputs, return_outputs=True
                     )
@@ -158,25 +161,20 @@ class LLaVATrainerFEDDAT(LLaVATrainer):
                 
             #update only server adapter
             model.module.load_state_dict(self.current_global, strict=False)
-            for name, module in model.module.named_modules():
-                # if isinstance(module, TripleLoraLayer):
-                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    module.set_state('lora1')
-                    module.activate_lora1()
+            
+            model.module.set_state('lora1')
+            model.module.activate_lora1()
             
         elif update_adapter == 'lora2':
             current_global = OrderedDict(model.module.named_parameters())
             for k in current_global.keys():
                 if k in self.current_global:
-                    self.current_global[k].data = current_global[k].detach().cpu()
+                    self.current_global[k].clone_(current_global[k].detach().cpu())
             
             outputs_target = self.outputs_1
             model.module.load_state_dict(self.global_state, strict=False)
-            for name, module in model.module.named_modules():
-                # if isinstance(module, TripleLoraLayer):
-                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    module.set_state('gate')
-                    module.activate_lora2()
+            model.module.set_state('gate')
+            model.module.activeate_lora2()
         
         loss, outputs = super(LLaVATrainerFEDDAT, self).compute_loss(model, inputs, return_outputs=True)
         
@@ -776,10 +774,10 @@ class LLaVATrainerFEDDAT(LLaVATrainer):
             self._deactivate_neftune(self.model)
             
         # feddat: make adapter_2 frozen
-        for name, module in self.model.named_modules():
-            # if isinstance(module, TripleLoraLayer):
-            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                module.activate_all()
+        # for name, module in self.model.named_modules():
+        #     # if isinstance(module, TripleLoraLayer):
+        #     if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
+        #         module.activate_all()
                 # module.deactivate_lora3()
-
+        self.model.activate_all()
         return TrainOutput(self.state.global_step, train_loss, metrics)

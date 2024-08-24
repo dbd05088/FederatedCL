@@ -265,8 +265,8 @@ class Linear(nn.Module, DualEVOIA3Layer):
                         ia3_delta_2 = self.ia3_generator_2[active_adapter](query_embeds_2)
                         
                         # FIXME: gumbel softmax combining
-                        # ia3_delta = (ia3_delta_1 + ia3_delta_2)/2
-                        ia3_delta, gumbel_out = create_mask_gumbel(ia3_delta_1, ia3_delta_2, is_training=self.training)
+                        ia3_delta = (ia3_delta_1 + ia3_delta_2)/2
+                        # ia3_delta, gumbel_out = create_mask_gumbel(ia3_delta_1, ia3_delta_2, is_training=self.training)
                     
                     if self.is_feedforward:
                         weight = torch.ones((bs,1, self.in_features)).to(x.device)
