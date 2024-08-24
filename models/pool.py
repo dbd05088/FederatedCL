@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class Pool(nn.Module):
-    def __init__(self, length=1, embed_dim=1024, key_dim=1024, embedding_key='cls', prompt_init='uniform', prompt_pool=True, 
+    def __init__(self, length=1, embed_dim=1024, key_dim=1024, embedding_key='cls', prompt_init='one', prompt_pool=True, 
                  prompt_key=True, pool_size=10, top_k=5, batchwise_prompt=True, prompt_key_init='uniform',):
         super().__init__()
 
@@ -21,6 +21,8 @@ class Pool(nn.Module):
             prompt_pool_shape = (pool_size, length, embed_dim)
             if prompt_init == 'zero':
                 self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
+            elif prompt_init == 'one':
+                self.prompt = nn.Parameter(torch.ones(prompt_pool_shape))
             elif prompt_init == 'uniform':
                 self.prompt = nn.Parameter(torch.randn(prompt_pool_shape))
                 # nn.init.uniform_(self.prompt, -1, 1)
@@ -101,6 +103,8 @@ class Pool(nn.Module):
             out['selected_key'] = batched_key_norm
             x_embed_norm = x_embed_norm.unsqueeze(1) # B, 1, C
             sim = batched_key_norm * x_embed_norm # B, top_k, C
+            
+            # FIXME: 1-sim or sim
             reduce_sim = torch.sum(sim) / x_embed.shape[0] # Scalar
 
             out['reduce_sim'] = reduce_sim
