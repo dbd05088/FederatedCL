@@ -133,7 +133,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             )
             print('load pfedpg')
         
-        elif training_args.mode == 'L2P' or training_arg.mode == 'L2P_FedAvg':
+        elif training_args.mode == 'L2P' or training_args.mode == 'L2P_FedAvg':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaForL2PIA3CausalLM.from_pretrained(
                 model_args.model_name_or_path,
@@ -457,7 +457,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     # vision_tower.requires_grad_(True)
     if training_args.mode == 'L2P' or training_args.mode == 'L2P_FedAvg' or training_args.mode == 'L2P_FedDAT'or training_args.mode == 'DAP' or training_args.mode == 'EvoPrompt' or training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2':
         vision_tower.select_feature = 'cls_patch'
-    elif training_args.mode == 'L2P_T' or training_args.mode == 'DAP_T' or training_args.mode == 'EvoPrompt_T' or training_args.mode =='ours_pool':
+    elif training_args.mode == 'L2P_T' or training_args.mode == 'L2P_T_FedAvg' or training_args.mode == 'DAP_T' or training_args.mode == 'EvoPrompt_T' or training_args.mode =='ours_pool':
         vision_tower.select_feature = 'cls_patch'
         model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
         model.base_model.model.clipprocessor = CLIPProcessor.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipprocessor/")
@@ -483,7 +483,9 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
-    if training_args.mode == 'L2P' or training_args.mode == 'L2P_T' or training_args.mode == 'DAP' or training_args.mode == 'DAP_T' or training_args.mode == 'EvoPrompt' or training_args.mode == 'EvoPrompt_T':
+    if training_args.mode == 'L2P' or training_args.mode == 'L2P_T' or training_args.mode == 'DAP' or training_args.mode == 'DAP_T' or training_args.mode == 'EvoPrompt' or training_args.mode == 'EvoPrompt_T' \
+        or training_args.mode == 'L2P_FedAvg' or training_args.mode == 'L2P_T_FedAvg' or training_args.mode == 'L2P_FedDAT':
+        
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         model.lm_head.requires_grad_(False)

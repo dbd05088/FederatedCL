@@ -169,12 +169,12 @@ class LLaVATrainerFEDDAT(LLaVATrainerTaskId):
             current_global = OrderedDict(model.module.named_parameters())
             for k in current_global.keys():
                 if k in self.current_global:
-                    self.current_global[k].clone_(current_global[k].detach().cpu())
+                    self.current_global[k].copy_(current_global[k].detach().cpu())
             
             outputs_target = self.outputs_1
             model.module.load_state_dict(self.global_state, strict=False)
             model.module.set_state('gate')
-            model.module.activeate_lora2()
+            model.module.activate_lora2()
         
         loss, outputs = super(LLaVATrainerFEDDAT, self).compute_loss(model, inputs, return_outputs=True)
         
