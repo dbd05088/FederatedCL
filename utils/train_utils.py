@@ -27,7 +27,6 @@ from models.feddat_lora.tripleloralayer import TripleLoraLayer
 # from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
 # from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
 # from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
-from models.llava.llava_ia3 import LlavaLlamaForIA3PoolCausalLM
 # from models.llava.dap_ia3 import LlavaLlamaDAPIA3ForCausalLM
 # from models.llava.evoprompt_ia3 import LlavaLlamaEVOIA3ForCausalLM
 from models.llava.llava_ia3_global import LlavaLlamaForOURSIA3PoolCausalLM
@@ -37,6 +36,7 @@ from models.llava.evoprompt_ia3_global3 import LlavaLlamaOURSGENIA3ForCausalLM3
 
 from models.llava.L2P import LlavaLlamaForL2PIA3CausalLM
 from models.llava.L2P_T import LlavaLlamaForL2PTIA3CausalLM
+from models.llava.L2P_T2 import LlavaLlamaForL2PTIA3CausalLM2
 from models.llava.L2P_Dual import LlavaLlamaForL2PIA3DualCausalLM
 
 from models.llava.DAP import LlavaLlamaDAPForCausalLM
@@ -157,6 +157,18 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load L2P_T-IA3')
+        elif training_args.mode == 'L2P_T2':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaForL2PTIA3CausalLM2.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                pool_size = training_args.pool_size,
+                prompt_top_k = training_args.prompt_top_k,
+                **bnb_model_from_pretrained_args
+            )
+            print('load L2P_T-IA3')
         elif training_args.mode == 'L2P_FedDAT':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaForL2PIA3DualCausalLM.from_pretrained(
@@ -215,17 +227,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load EvoPrompt_T-IA3')
-        
-        elif training_args.mode == 'ia3_pool':
-            assert model_args.model_type != 'mpt'
-            model = LlavaLlamaForIA3PoolCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-            print('load ia3 pool')
         
         elif training_args.mode == 'ours_pool':
             assert model_args.model_type != 'mpt'
