@@ -713,6 +713,7 @@ class LlavaLlamaForL2PTIA3CausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 idx = prompt_mask
                 task_id = idx.cpu()[0]
                 idx = expand_to_batch(idx, input_features.shape[0]).squeeze(dim=-1)
+                idx = idx.unsqueeze(-1) if len(idx.shape) == 1 else idx
         i = torch.arange(bsz).reshape(bsz, 1, 1)
         l = torch.arange(self.prompt_dim).reshape(1, 1, self.prompt_dim)
         selected_prompt_key = dap_prompt_key_norm.repeat(bsz, 1, 1)[
