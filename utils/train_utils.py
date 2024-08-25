@@ -462,7 +462,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             PEFT_TYPE_TO_MODEL_MAPPING['DUALIA3'] = DualIA3Model
             ia3_config.peft_type = 'DUALIA3'
         
-        elif 'L2P' in training_args.mode or 'DAP' in training_args.mode or 'CodaPrompt' in training_args:
+        elif 'L2P' in training_args.mode or 'DAP' in training_args.mode or 'CodaPrompt' in training_args.mode:
             from models.empty_ia3.empty_ia3_model import EmptyIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['EMPTYIA3'] = EmptyIA3Model
