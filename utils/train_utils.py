@@ -35,6 +35,7 @@ from models.llava.evoprompt_ia3_global import LlavaLlamaOURSGENIA3ForCausalLM
 from models.llava.evoprompt_ia3_global3 import LlavaLlamaOURSGENIA3ForCausalLM3
 
 from models.llava.L2P import LlavaLlamaForL2PIA3CausalLM
+from models.llava.L2P2 import LlavaLlamaForL2PIA3CausalLM2
 from models.llava.L2P_T import LlavaLlamaForL2PTIA3CausalLM
 from models.llava.L2P_T2 import LlavaLlamaForL2PTIA3CausalLM2
 from models.llava.L2P_Dual import LlavaLlamaForL2PIA3DualCausalLM
@@ -160,7 +161,20 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load L2P_T-IA3')
-        elif training_args.mode == 'L2P_T2':
+        
+        elif training_args.mode == 'L2P2' or training_args.mode == 'L2P2_FedAvg':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaForL2PIA3CausalLM2.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                pool_size = training_args.pool_size,
+                prompt_top_k = training_args.prompt_top_k,
+                **bnb_model_from_pretrained_args
+            )
+            print('load L2P-IA3')
+        elif training_args.mode == 'L2P_T2' or training_args.mode == 'L2P_T2_FedAvg':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaForL2PTIA3CausalLM2.from_pretrained(
                 model_args.model_name_or_path,
@@ -421,8 +435,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             PEFT_TYPE_TO_MODEL_MAPPING['DUALIA3'] = DualIA3Model
             ia3_config.peft_type = 'DUALIA3'
         
-        elif training_args.mode in ['L2P', 'L2P_T', 'L2P_T2', 'DAP', 'DAP_T', 'CodaPrompt', 'CodaPrompt_T',
-                                    'L2P_FedAvg', 'L2P_T_FedAvg', 'CodaPrompt_FedAvg', 'CodaPrompt_T_FedAvg',
+        elif training_args.mode in ['L2P', 'L2P_T', 'L2P2','L2P_T2', 'DAP', 'DAP_T', 'CodaPrompt', 'CodaPrompt_T',
+                                    'L2P_FedAvg', 'L2P_T_FedAvg','L2P2_FedAvg', 'L2P_T2_FedAvg', 'CodaPrompt_FedAvg', 'CodaPrompt_T_FedAvg',
                                     'L2P_FedDAT', 'L2P_T_FedDAT']:
             from models.empty_ia3.empty_ia3_model import EmptyIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
@@ -486,11 +500,11 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
     # vision_tower.requires_grad_(True)
-    if training_args.mode == 'L2P' or training_args.mode == 'L2P_FedAvg' or training_args.mode == 'L2P_FedDAT' \
+    if training_args.mode == 'L2P' or training_args.mode == 'L2P2' or training_args.mode == 'L2P_FedAvg' or training_args.mode == 'L2P_FedDAT' \
         or training_args.mode == 'CodaPrompt' or training_args.mode == 'CodaPrompt_FedAvg' or training_args.mode == 'CodaPrompt_FedDAT' \
         or training_args.mode == 'DAP' or training_args.mode == 'EvoPrompt' or training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2':
         vision_tower.select_feature = 'cls_patch'
-    elif training_args.mode == 'L2P_T' or training_args.mode == 'L2P_T2' or training_args.mode == 'L2P_T_FedAvg' \
+    elif training_args.mode == 'L2P_T' or training_args.mode == 'L2P_T2' or training_args.mode == 'L2P_T_FedAvg' or training_args.mode == 'L2P_T2_FedAvg' \
         or training_args.mode == 'CodaPrompt_T' or training_args.mode == 'CodaPrompt_T_FedAvg' or training_args.mode == 'CodaPrompt_T_FedDAT' \
         or training_args.mode == 'DAP_T' or training_args.mode == 'EvoPrompt_T' or training_args.mode =='ours_pool':
         vision_tower.select_feature = 'cls_patch'
@@ -518,7 +532,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
-    if training_args.mode == 'L2P' or training_args.mode == 'L2P_T' or training_args.mode == 'L2P_T2' \
+    if training_args.mode == 'L2P' or training_args.mode == 'L2P_T' or training_args.mode == 'L2P_T2' or training_args.mode == 'L2P2' \
+        or training_args.mode == 'L2P2_FedAvg' or training_args.mode == 'L2P_T2_FedAvg' \
         or training_args.mode == 'CodaPrompt' or training_args.mode == 'CodaPrompt_T' or training_args.mode == 'CodaPrompt_FedAvg' or training_args.mode == 'CodaPrompt_T_FedAvg' \
         or training_args.mode == 'DAP' or training_args.mode == 'DAP_T' or training_args.mode == 'EvoPrompt' or training_args.mode == 'EvoPrompt_T' \
         or training_args.mode == 'L2P_FedAvg' or training_args.mode == 'L2P_T_FedAvg' or training_args.mode == 'L2P_FedDAT':

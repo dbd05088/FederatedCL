@@ -31,11 +31,11 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
     elif mode == 'fedavg':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
     
-    elif mode == 'L2P' or mode == 'L2P_T' or mode == 'DAP' or mode == 'DAP_T' or mode == 'L2P_T2' \
+    elif mode == 'L2P' or mode == 'L2P_T' or mode == 'DAP' or mode == 'DAP_T' or mode == 'L2P_T2' or mode =='L2P2' \
         or mode == 'CodaPrompt' or mode == 'CodaPrompt_T':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
     
-    elif mode == 'L2P_FedAvg' or mode =='L2P_T_FedAvg' \
+    elif mode == 'L2P_FedAvg' or mode =='L2P_T_FedAvg' or mode =='L2P_T2_FedAvg' or mode =='L2P2_FedAvg' \
         or mode == 'CodaPrompt_FedAvg' or mode =='CodaPrompt_T_FedAvg':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
     
