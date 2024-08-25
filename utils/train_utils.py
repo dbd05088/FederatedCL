@@ -562,7 +562,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             if 'lang_prompt' in n :
                 p.requires_grad_(True)
         
-        model.set_state(training_args.set_state)
+        if 'FedDAT' in training_args.mode or 'Ditto' in training_args.mode:
+            model.set_state(training_args.set_state)
     
     elif training_args.mode == 'feddat':
         if training_args.is_eval:
