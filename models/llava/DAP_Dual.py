@@ -170,6 +170,7 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
             
                 selected_prompts = (selected_prompts_1 + selected_prompts_2) / 2
 
+            selected_prompts += 1
             new_query_embeds_k = selected_prompts[:,:4096]
             new_query_embeds_v = selected_prompts[:,4096:8192]
             new_query_embeds_mlp = selected_prompts[:,8192:]

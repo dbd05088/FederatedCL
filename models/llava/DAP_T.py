@@ -122,6 +122,7 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
             beta4 = beta4.div(beta_norm).view(film.size(0), -1, 1)
             selected_prompts = gamma4 * down + beta4
             
+            selected_prompts += 1
             new_query_embeds_k = selected_prompts[:,:4096]
             new_query_embeds_v = selected_prompts[:,4096:8192]
             new_query_embeds_mlp = selected_prompts[:,8192:]
