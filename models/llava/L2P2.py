@@ -380,7 +380,7 @@ class LlavaLlamaForL2PIA3CausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         # self.lang_prompt_feature_embedding = prefix_attention()
         self.pool_size = pool_size
         self.top_k = prompt_top_k
-        self.prompt_dim = 1792
+        self.prompt_dim = 1024
         val = math.sqrt(6. / self.prompt_dim)
         self.lang_prompt_dap_key_embeddings = nn.Parameter(torch.zeros(self.pool_size, self.prompt_dim))
         # nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)

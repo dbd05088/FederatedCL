@@ -137,10 +137,10 @@ def main():
             task_id = train_datalists[client_id][curr_round]['task_id']
             
             if 'CodaPrompt' in training_args.mode and task_id is not None and task_id != last_task_id:
-                # breakpoint()
-                for m in model.named_modules():
+                for n, m in model.named_modules():
                     if isinstance(m, CodaPrompt):
                         m.process_task_count()
+                last_task_id = task_id
             
             iteration = 0
             datalist = []

@@ -43,6 +43,8 @@ from models.dual_ia3.dual_ia3_layer import DualIA3Layer
 import copy 
 from collections import OrderedDict
 
+from federated_methods.task_id import LLaVATrainerTaskId
+
 if is_accelerate_available():
     from accelerate import skip_first_batches
     from accelerate import __version__ as accelerate_version
@@ -57,6 +59,25 @@ if is_accelerate_available():
         DATA_SAMPLERS += [SeedableRandomSampler]
 
 logger = logging.get_logger(__name__)
+
+def ditto_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
+    # layers_to_del = layer_num[-len(layer_num)//2:]
+    keys_to_del = []
+    for k in global_state_dict.keys():
+        if 'lora2' in k or 'lang_prompt_dap_key_embeddings_2' in k or 'lang_prompt_ia3_pool_2' in k:
+            keys_to_del.append(k)
+    for k in keys_to_del:
+        del global_state_dict[k]
+    
+    local_keys_to_del = []
+    for k in local_state_dict_list[0].keys():
+        if 'lora1' in k or 'lang_prompt_dap_key_embeddings_1' in k or 'lang_prompt_ia3_pool_1' in k:
+            local_keys_to_del.append(k)
+    for client_id in range(training_args.num_clients):
+        for k in local_keys_to_del:
+            del local_state_dict_list[client_id][k]
+    
+    return {'global_state':global_state_dict}
             
 def ditto_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
     trainer = LLaVATrainerDITTO(model=model,
@@ -65,12 +86,15 @@ def ditto_create_trainer(model, tokenizer, training_args, data_module, extra_sta
         packing=True,
         max_seq_length=training_args.model_max_length,
         **data_module,
+        client_id = extra_state_dict_dict['client_id'],
+        curr_round = extra_state_dict_dict['curr_round'],
+        task_id = extra_state_dict_dict['task_id'] if 'task_id' in extra_state_dict_dict else None,
         global_state=extra_state_dict_dict['global_state']
         )
     return trainer
 
 
-class LLaVATrainerDITTO(LLaVATrainerFEDAVG):   
+class LLaVATrainerDITTO(LLaVATrainerTaskId):   
     def __init__(self, global_state, **kwargs):
         super(LLaVATrainerDITTO, self).__init__(**kwargs)
         self.global_state = global_state
@@ -104,22 +128,16 @@ class LLaVATrainerDITTO(LLaVATrainerFEDAVG):
         
         # global forward
         if update_adapter == 'lora1':
-            for name, module in model.module.named_modules():
-                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    module.set_state('lora1')
-                    module.activate_lora1()
-            # model.module.base_model.model.model.mm_projector = model.module.base_model.model.model.global_mm_projector
+            model.module.set_state('lora1')
+            model.module.activate_lora1()
             loss_global, outputs = super(LLaVATrainerDITTO, self).compute_loss(model, inputs, return_outputs=True)    
 
             return (loss_global, outputs) if return_outputs else loss_global
     
         elif update_adapter == 'lora2':
             # local forward
-            for name, module in model.module.named_modules():
-                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    module.set_state('lora2')
-                    module.activate_lora2()
-            # model.module.base_model.model.model.mm_projector = model.module.base_model.model.model.local_mm_projector
+            model.module.set_state('lora2')
+            model.module.activate_lora2()
             loss_local, local_outputs = super(LLaVATrainerDITTO, self).compute_loss(model, inputs, return_outputs=True) 
 
             # Apply FedProx Loss
@@ -132,9 +150,12 @@ class LLaVATrainerDITTO(LLaVATrainerFEDAVG):
                 # if 'lora2' in name:
                 #     target_name = name.replace('lora2', 'lora1')
                 #     loss += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
-                if 'ia3_l_2' in name:
-                    target_name = name.replace('ia3_l_2', 'ia3_l_1')
-                    loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 21
+                if 'lang_prompt_ia3_pool_2' in name:
+                    target_name = name.replace('lang_prompt_ia3_pool_2', 'lang_prompt_ia3_pool_1')
+                    loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
+                elif 'lang_prompt_dap_key_embeddings_2' in name:
+                    target_name = name.replace('lang_prompt_dap_key_embeddings_2', 'lang_prompt_dap_key_embeddings_1')
+                    loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
             # model.module.base_model.model.model.mm_projector = None
             return (loss_local, local_outputs) if return_outputs else loss_local
 
@@ -221,12 +242,6 @@ class LLaVATrainerDITTO(LLaVATrainerFEDAVG):
                 )
             else:
                 debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
-                
-    
-        # feddat: make lora3 frozen
-        # for name, module in self.model.named_modules():
-        #     if isinstance(module, TripleLoraLayer):
-        #         module.deactivate_lora3()
 
         delay_optimizer_creation = is_sagemaker_mp_enabled() or self.is_fsdp_xla_enabled or self.is_fsdp_enabled
 
@@ -320,7 +335,11 @@ class LLaVATrainerDITTO(LLaVATrainerFEDAVG):
 
         # Check if saved optimizer or scheduler states exist
         self._load_optimizer_and_scheduler(resume_from_checkpoint)
-
+        
+        # FIXME
+        if self.args.save_optim and self.curr_round > 0:
+            output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
+            self._load_optimizer_and_scheduler(output_dir)
         # important: at this point:
         # self.model         is the Transformers Model
         # self.model_wrapped is DDP(Transformers Model), Deepspeed(Transformers Model),
@@ -481,7 +500,7 @@ class LLaVATrainerDITTO(LLaVATrainerFEDAVG):
                 if step % args.gradient_accumulation_steps == 0:
                     self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
 
-                # feddat: first update 'lora1'
+                #ditto: lora1
                 with self.accelerator.accumulate(model):
                     tr_loss_step = self.training_step(model, inputs, 'lora1')
 
@@ -547,15 +566,10 @@ class LLaVATrainerDITTO(LLaVATrainerFEDAVG):
 
                     # Optimizer step
                     self.optimizer.step()
-                    optimizer_was_run = not self.accelerator.optimizer_step_was_skipped
-                    if optimizer_was_run:
-                        # Delay optimizer scheduling until metrics are generated
-                        if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                            self.lr_scheduler.step()
 
                     model.zero_grad()
-                    
-                    # feddat:update 'lora2'
+                
+                # ditto: lora2
                 with self.accelerator.accumulate(model):
                     tr_loss_step = self.training_step(model, inputs, 'lora2')
 
@@ -629,10 +643,14 @@ class LLaVATrainerDITTO(LLaVATrainerFEDAVG):
 
                     model.zero_grad()
                     
-                    
                     self.state.global_step += 1
                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
+                    
+                    # wsd
+                    if self.args.is_wsd == 'WSD' and math.ceil(self.state.epoch*steps_in_epoch) == math.ceil(self.args.decay_ratio*steps_in_epoch):
+                        self.global_weight = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+                    
 
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:
@@ -725,14 +743,11 @@ class LLaVATrainerDITTO(LLaVATrainerFEDAVG):
         # for the embedding layer by removing the forward post hook.
         if self.neftune_noise_alpha is not None:
             self._deactivate_neftune(self.model)
+
+        if self.args.save_optim:
+            output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
+            self._save_optimizer_and_scheduler(output_dir)
             
-        # feddat: make adapter_2 frozen
-        for name, module in self.model.named_modules():
-            # if isinstance(module, TripleLoraLayer):
-            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                module.activate_all()
-                # module.deactivate_lora3()
+        self.model.activate_all()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
-    
-    
