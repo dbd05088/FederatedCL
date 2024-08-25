@@ -18,6 +18,8 @@ from transformers import BitsAndBytesConfig
 import time
 import datetime
 
+from models.coda_prompt import CodaPrompt
+
 def main():
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
@@ -102,6 +104,7 @@ def main():
     mm_final_lr = training_args.mm_final_lr
     
     total_rounds = training_args.num_rounds * training_args.num_tasks
+    last_task_id = -1
     
     lr_step = (init_lr - final_lr)/total_rounds
     mm_lr_step = (mm_init_lr - mm_final_lr)/total_rounds
@@ -132,6 +135,12 @@ def main():
             num_iterations = train_datalists[client_id][curr_round]['num_iter']
             
             task_id = train_datalists[client_id][curr_round]['task_id']
+            
+            if 'CodaPrompt' in training_args.mode and task_id is not None and task_id != last_task_id:
+                # breakpoint()
+                for m in model.named_modules():
+                    if isinstance(m, CodaPrompt):
+                        m.process_task_count()
             
             iteration = 0
             datalist = []
@@ -259,7 +268,7 @@ def get_datalists(args, scenario_num):
                 datalist = json.load(fp)
             random.shuffle(datalist)
             samplenum_per_rounds = int(len(datalist) / rounds_per_task)
-            num_iter = max(int(max_iterations*samplenum_per_rounds/2000), 10) # 10000 / 5 = 2000
+            num_iter = max(int(max_iterations*samplenum_per_rounds/2000), 2) # 10000 / 5 = 2000
             for i in range(rounds_per_task):
                 train_datalist.append(
                     {'datalist':datalist[i*samplenum_per_rounds:(i+1)*samplenum_per_rounds],

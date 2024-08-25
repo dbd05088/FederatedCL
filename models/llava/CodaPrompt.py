@@ -84,9 +84,9 @@ class LlamaDecoderIA3PoolLayer(LlamaDecoderLayer):
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
             )
-        if task_id is not None and task_id != self.last_task_id:
-            self.lang_prompt_ia3_pool.process_task_count()
-            self.last_task_id = task_id
+        # if task_id is not None and task_id != self.last_task_id:
+        #     self.lang_prompt_ia3_pool.process_task_count()
+        #     self.last_task_id = task_id
             
         if query_embeds is not None:
             new_query_embeds = self.lang_prompt_ia3_pool(query_embeds)
