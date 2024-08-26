@@ -73,7 +73,7 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         self.lang_prompt_film = nn.Linear(config.key_embed_size, (4096+4096+11008) * 2)
         self.lang_prompt_film.weight.data.fill_(0)
         self.lang_prompt_film.bias.data.fill_(0)
-        breakpoint() # check grad flow
+        # breakpoint() # check grad flow
 
     def forward(
         self,
