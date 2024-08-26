@@ -19,22 +19,22 @@ class CodaPrompt(nn.Module):
         self.top_k = top_k
         self.batchwise_prompt = batchwise_prompt
 
-        p = tensor_prompt(self.pool_size, length, embed_dim, ones=True)
+        p = tensor_prompt(self.pool_size, length, embed_dim) #, ones=True
         k = tensor_prompt(self.pool_size, self.key_dim)
         a = tensor_prompt(self.pool_size, self.key_dim)
         # p = self.gram_schmidt(p)
-        k = self.gram_schmidt(k)
-        a = self.gram_schmidt(a)
+        # k = self.gram_schmidt(k)
+        # a = self.gram_schmidt(a)
         self.P = p
         self.K = k
         self.A = a
     
-    def process_task_count(self):
-        self.task_count += 1
+    def process_task_count(self, task_id):
+        self.task_count = task_id
 
         self.K = self.gram_schmidt(self.K)
         self.A = self.gram_schmidt(self.A)
-        # self.P = self.gram_schmidt(self.P)
+        self.P = self.gram_schmidt(self.P)
     
     def forward(self, x_embed):
         # x_embed = img encoder output
@@ -71,6 +71,7 @@ class CodaPrompt(nn.Module):
         aq_k = torch.einsum('bkd,kd->bk', q, n_K)
         # (b x 1 x k x 1) * [1 x plen x k x d] = (b x plen x d) -> prompt = plen x k x d
         P_ = torch.einsum('bk,kld->bld', aq_k, p)
+        P_ += 1.0
         return P_
     
     # code for this function is modified from:
