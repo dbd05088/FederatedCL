@@ -540,7 +540,8 @@ class LlavaLlamaDAPTDualForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         cache_position=None,
         task_id=None,
         prompt=None,
-        task_id_estimated_emb=None
+        task_id_estimated_emb=None,
+        query_embeds=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         
         if inputs_embeds is None:

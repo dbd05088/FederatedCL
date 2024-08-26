@@ -432,7 +432,8 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         cache_position=None,
         task_id=None,
         prompt=None,
-        task_id_estimated_emb=None
+        task_id_estimated_emb=None,
+        query_embeds=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         
         if inputs_embeds is None:
@@ -705,7 +706,6 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         # key selection
         input_features = []
         bsz = new_input_embeds.shape[0]
-        assert prompt is not None
         for i in range(bsz):
             img_feat = cls_features[batch_idx].mean(dim=0)
             input_features.append(img_feat)
