@@ -613,10 +613,6 @@ class LLaVATrainerLAE(LLaVATrainerFEDAVG):
             output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
             self._save_optimizer_and_scheduler(output_dir)
 
-        if self.curr_round > 0:
-            
-            self.model.load_state_dict(self.old_weights, strict=False)
-            
         self.model.activate_all()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
