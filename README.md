@@ -145,14 +145,14 @@ python preprocess_AESOP.py
 # Baseline list
 
 - L2P (layerwise, visual feature only) -> done
-- CODA_Prompt
+- CODA_Prompt                           -> hyperparameter searching
 - DAP                                   -> done
 - EvoPrompt                             -> done
 - L2P_T (concat visual + text feature) -> done
-- CODA_Prompt_T
+- CODA_Prompt_T                         -> hyperparameter searching
 - DAP_T                                 -> done
 - EvoPrompt_T                           -> done
-- ...
+- LAE                                   -> done
 - Federated methods combined version
     - FedAvg, Ditto, Feddat, ...
 - L2P_FedAvg / L2P_T_FedAvg

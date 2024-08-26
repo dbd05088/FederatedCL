@@ -20,6 +20,8 @@ from federated_methods.optimal_transport import OT_create_trainer
 from federated_methods.ours_pool import OURS_set_state_dict, OURS_aggregate_state_dict, OURS_create_trainer
 from federated_methods.ours_generator import OURS_GEN_create_trainer
 from federated_methods.ours_generator_ema import OURS_GEN_ema_create_trainer
+from federated_methods.lae import LAE_create_trainer
+from federated_methods.ditto_lae import ditto_lae_set_state_dict, ditto_lae_create_trainer
 
 def dummy_function(*args):
     return {}
@@ -50,6 +52,16 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         or mode == 'DAP_Ditto' or mode == 'DAP_T_Ditto' \
         or mode == 'CodaPrompt_Ditto' or mode =='CodaPrompt_T_Ditto':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = ditto_set_state_dict, fedper_load_state_dict, ditto_create_trainer, fedavg_aggregate_state_dict
+    
+    elif mode == 'LAE':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, LAE_create_trainer, fedavg_aggregate_state_dict
+    elif mode == 'LAE_FedAvg':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, LAE_create_trainer, fedavg_aggregate_state_dict
+    elif mode == 'LAE_FedPer':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedper_half_set_state_dict, fedper_load_state_dict, LAE_create_trainer, fedavg_aggregate_state_dict
+    elif mode == 'LAE_Ditto':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = ditto_lae_set_state_dict, fedper_load_state_dict, ditto_lae_create_trainer, fedavg_aggregate_state_dict
+
     
     elif mode == 'L2P_FedDAT' or mode =='L2P_T_FedDAT':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = feddat_set_state_dict, fedper_load_state_dict, feddat_create_trainer, feddat_aggregate_state_dict

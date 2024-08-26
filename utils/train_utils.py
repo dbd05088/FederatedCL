@@ -50,6 +50,9 @@ from models.llava.EvoPrompt_T import LlavaLlamaEVOTIA3ForCausalLM
 from models.llava.CodaPrompt import LlavaLlamaForCodaIA3CausalLM
 from models.llava.CodaPrompt_T import LlavaLlamaForCodaIA3TCausalLM
 
+from models.llava.LAE import LlavaLlamaForLAEIA3CausalLM
+from models.llava.LAE_Dual import LlavaLlamaForDualLAEIA3CausalLM
+
 import copy
 ACCESS_TOKEN = "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"
 
@@ -297,6 +300,27 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             pass
         
         #############################################################################
+        elif training_args.mode in ['LAE', 'LAE_FedAvg', 'LAE_FedPer']:
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaForLAEIA3CausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load LAE-IA3')
+        elif training_args.mode in ['LAE_FedDAT', 'LAE_Ditto']:
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaForDualLAEIA3CausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+            print('load Dual LAE-IA3')
+        #############################################################################
         elif training_args.mode == 'ours_pool':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaForOURSIA3PoolCausalLM.from_pretrained(
@@ -468,6 +492,18 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             PEFT_TYPE_TO_MODEL_MAPPING['EMPTYIA3'] = EmptyIA3Model
             ia3_config.peft_type = 'EMPTYIA3'
         
+        elif training_args.mode in ['LAE', 'LAE_FedAvg', 'LAE_FedPer']:
+            from models.lae_ia3.lae_ia3_model import LAEIA3Model
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['LAEIA3'] = LAEIA3Model
+            ia3_config.peft_type = 'LAEIA3'
+        
+        elif training_args.mode in ['LAE_FedDAT', 'LAE_Ditto']:
+            from models.lae_ia3_dual.dual_lae_ia3_model import DualLAEIA3Model
+            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
+            PEFT_TYPE_TO_MODEL_MAPPING['DUALLAEIA3'] = DualLAEIA3Model
+            ia3_config.peft_type = 'DUALLAEIA3'
+        
         elif training_args.mode in ['EvoPrompt']:
             from models.evo_ia3.evoia3model import EVOIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
@@ -554,7 +590,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
     
-    if 'L2P' in training_args.mode or 'CodaPrompt' in training_args.mode or 'DAP' in training_args.mode or 'EvoPrompt' in training_args.mode:
+    if 'L2P' in training_args.mode or 'CodaPrompt' in training_args.mode or 'DAP' in training_args.mode or 'EvoPrompt' in training_args.mode or 'LAE' in training_args.mode:
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         model.lm_head.requires_grad_(False)
