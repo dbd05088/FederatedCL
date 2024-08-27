@@ -90,13 +90,13 @@ class LlamaDecoderIA3PoolLayer(LlamaDecoderLayer):
         if query_embeds is not None:
             idx_global,idx_local = query_embeds
             if self.active_state == 'lora1':
-                new_query_embeds, _ = self.lang_prompt_ia3_pool_1(idx_global, task_id)
+                new_query_embeds, _ = self.lang_prompt_ia3_pool_1(idx_global)
             elif self.active_state == 'lora2':
-                new_query_embeds, _ = self.lang_prompt_ia3_pool_2(idx_local, task_id)
+                new_query_embeds, _ = self.lang_prompt_ia3_pool_2(idx_local)
             
             elif self.active_state == 'gate':
-                new_query_embeds_1, _ = self.lang_prompt_ia3_pool_1(idx_global, task_id)
-                new_query_embeds_2, _ = self.lang_prompt_ia3_pool_2(idx_local, task_id)
+                new_query_embeds_1, _ = self.lang_prompt_ia3_pool_1(idx_global)
+                new_query_embeds_2, _ = self.lang_prompt_ia3_pool_2(idx_local)
             
                 new_query_embeds = (new_query_embeds_1 + new_query_embeds_2) / 2
             
