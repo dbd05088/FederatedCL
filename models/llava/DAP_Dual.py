@@ -64,20 +64,40 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
-        self.lang_prompt_downsample_1 = nn.Sequential(
+        self.lang_prompt_downsample_k_1 = nn.Sequential(
             nn.Linear(1024, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
-            nn.Linear(config.generator_hidden_feature, (4096+4096+11008), bias=False),
+            nn.Linear(config.generator_hidden_feature, 4096, bias=False),
+        )
+        self.lang_prompt_downsample_v_1 = nn.Sequential(
+            nn.Linear(1024, config.generator_hidden_feature, bias=False),
+            nn.SiLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, 4096, bias=False),
+        )
+        self.lang_prompt_downsample_mlp_1 = nn.Sequential(
+            nn.Linear(1024, config.generator_hidden_feature, bias=False),
+            nn.SiLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, 11008, bias=False),
         )
         # self.lang_prompt_downsample[2].weight.data.fill_(0)
         self.lang_prompt_film_1 = nn.Linear(config.key_embed_size, (4096+4096+11008) * 2)
         self.lang_prompt_film_1.weight.data.fill_(0)
         self.lang_prompt_film_1.bias.data.fill_(0)
         
-        self.lang_prompt_downsample_2 = nn.Sequential(
+        self.lang_prompt_downsample_k_2 = nn.Sequential(
             nn.Linear(1024, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
-            nn.Linear(config.generator_hidden_feature, (4096+4096+11008), bias=False),
+            nn.Linear(config.generator_hidden_feature, 4096, bias=False),
+        )
+        self.lang_prompt_downsample_v_2 = nn.Sequential(
+            nn.Linear(1024, config.generator_hidden_feature, bias=False),
+            nn.SiLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, 4096, bias=False),
+        )
+        self.lang_prompt_downsample_mlp_2 = nn.Sequential(
+            nn.Linear(1024, config.generator_hidden_feature, bias=False),
+            nn.SiLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, 11008, bias=False),
         )
         # self.lang_prompt_downsample[2].weight.data.fill_(0)
         self.lang_prompt_film_2 = nn.Linear(config.key_embed_size, (4096+4096+11008) * 2)
@@ -123,7 +143,10 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         if task_id_estimated_emb is not None:
             task_id_estimated_emb_1, task_id_estimated_emb_2 = task_id_estimated_emb
             if self.active_state == 'lora1':
-                down = self.lang_prompt_downsample_1(query_embeds).unsqueeze(-1)
+                down_k = self.lang_prompt_downsample_k_1(query_embeds).unsqueeze(-1)
+                down_v = self.lang_prompt_downsample_v_1(query_embeds).unsqueeze(-1)
+                down_mlp = self.lang_prompt_downsample_mlp_1(query_embeds).unsqueeze(-1)
+                down = torch.cat((down_k, down_v, down_mlp), dim=1)
             
                 film = self.lang_prompt_film_1(task_id_estimated_emb_1)
                 gamma4 = film[:, :19200]
@@ -135,7 +158,10 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
                 beta4 = beta4.div(beta_norm).view(film.size(0), -1, 1)
                 selected_prompts = gamma4 * down + beta4
             elif self.active_state == 'lora2':
-                down = self.lang_prompt_downsample_2(query_embeds).unsqueeze(-1)
+                down_k = self.lang_prompt_downsample_k_2(query_embeds).unsqueeze(-1)
+                down_v = self.lang_prompt_downsample_v_2(query_embeds).unsqueeze(-1)
+                down_mlp = self.lang_prompt_downsample_mlp_2(query_embeds).unsqueeze(-1)
+                down = torch.cat((down_k, down_v, down_mlp), dim=1)
             
                 film = self.lang_prompt_film_2(task_id_estimated_emb_2)
                 gamma4 = film[:, :19200]
@@ -148,7 +174,10 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
                 selected_prompts = gamma4 * down + beta4
             
             elif self.active_state == 'gate':
-                down = self.lang_prompt_downsample_1(query_embeds).unsqueeze(-1)
+                down_k = self.lang_prompt_downsample_k_1(query_embeds).unsqueeze(-1)
+                down_v = self.lang_prompt_downsample_v_1(query_embeds).unsqueeze(-1)
+                down_mlp = self.lang_prompt_downsample_mlp_1(query_embeds).unsqueeze(-1)
+                down = torch.cat((down_k, down_v, down_mlp), dim=1)
                 film = self.lang_prompt_film_1(task_id_estimated_emb_1)
                 gamma4 = film[:, :19200]
                 beta4 = film[:, 19200:]
@@ -158,7 +187,10 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
                 beta4 = beta4.div(beta_norm).view(film.size(0), -1, 1)
                 selected_prompts_1 = gamma4 * down + beta4
                 
-                down = self.lang_prompt_downsample_2(query_embeds).unsqueeze(-1)
+                down_k = self.lang_prompt_downsample_k_2(query_embeds).unsqueeze(-1)
+                down_v = self.lang_prompt_downsample_v_2(query_embeds).unsqueeze(-1)
+                down_mlp = self.lang_prompt_downsample_mlp_2(query_embeds).unsqueeze(-1)
+                down = torch.cat((down_k, down_v, down_mlp), dim=1)
                 film = self.lang_prompt_film_2(task_id_estimated_emb_1)
                 gamma4 = film[:, :19200]
                 beta4 = film[:, 19200:]
@@ -481,11 +513,19 @@ class LlavaLlamaDAPDualForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.lang_prompt_dap_key_embeddings_2.requires_grad = True
         self.lang_prompt_dap_emb_2.requires_grad_(True)
         for layer in self.model.layers:
-            for p in layer.lang_prompt_downsample_1.parameters():
+            for p in layer.lang_prompt_downsample_k_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_v_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_mlp_1.parameters():
                 p.requires_grad = True
             for p in layer.lang_prompt_film_1.parameters():
                 p.requires_grad = True
-            for p in layer.lang_prompt_downsample_2.parameters():
+            for p in layer.lang_prompt_downsample_k_2.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_v_2.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_mlp_2.parameters():
                 p.requires_grad = True
             for p in layer.lang_prompt_film_2.parameters():
                 p.requires_grad = True
@@ -496,11 +536,19 @@ class LlavaLlamaDAPDualForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.lang_prompt_dap_key_embeddings_2.requires_grad = True
         self.lang_prompt_dap_emb_2.requires_grad_(False)
         for layer in self.model.layers:
-            for p in layer.lang_prompt_downsample_1.parameters():
+            for p in layer.lang_prompt_downsample_k_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_v_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_mlp_1.parameters():
                 p.requires_grad = True
             for p in layer.lang_prompt_film_1.parameters():
                 p.requires_grad = True
-            for p in layer.lang_prompt_downsample_2.parameters():
+            for p in layer.lang_prompt_downsample_k_2.parameters():
+                p.requires_grad = False
+            for p in layer.lang_prompt_downsample_v_2.parameters():
+                p.requires_grad = False
+            for p in layer.lang_prompt_downsample_mlp_2.parameters():
                 p.requires_grad = False
             for p in layer.lang_prompt_film_2.parameters():
                 p.requires_grad = False
@@ -511,11 +559,19 @@ class LlavaLlamaDAPDualForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.lang_prompt_dap_key_embeddings_2.requires_grad = True
         self.lang_prompt_dap_emb_2.requires_grad_(True)
         for layer in self.model.layers:
-            for p in layer.lang_prompt_downsample_1.parameters():
+            for p in layer.lang_prompt_downsample_k_1.parameters():
+                p.requires_grad = False
+            for p in layer.lang_prompt_downsample_v_1.parameters():
+                p.requires_grad = False
+            for p in layer.lang_prompt_downsample_mlp_1.parameters():
                 p.requires_grad = False
             for p in layer.lang_prompt_film_1.parameters():
                 p.requires_grad = False
-            for p in layer.lang_prompt_downsample_2.parameters():
+            for p in layer.lang_prompt_downsample_k_2.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_v_2.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_mlp_2.parameters():
                 p.requires_grad = True
             for p in layer.lang_prompt_film_2.parameters():
                 p.requires_grad = True

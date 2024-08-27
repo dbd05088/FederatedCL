@@ -64,10 +64,20 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
-        self.lang_prompt_downsample = nn.Sequential(
+        self.lang_prompt_downsample_k = nn.Sequential(
             nn.Linear(1792, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
-            nn.Linear(config.generator_hidden_feature, (4096+4096+11008), bias=False),
+            nn.Linear(config.generator_hidden_feature, 4096, bias=False),
+        )
+        self.lang_prompt_downsample_v = nn.Sequential(
+            nn.Linear(1792, config.generator_hidden_feature, bias=False),
+            nn.SiLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, 4096, bias=False),
+        )
+        self.lang_prompt_downsample_mlp = nn.Sequential(
+            nn.Linear(1792, config.generator_hidden_feature, bias=False),
+            nn.SiLU(inplace=True),
+            nn.Linear(config.generator_hidden_feature, 11008, bias=False),
         )
         # self.lang_prompt_downsample[2].weight.data.fill_(0)
         self.lang_prompt_film = nn.Linear(config.key_embed_size, (4096+4096+11008) * 2)
@@ -110,8 +120,10 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         # add prompt
         bsz = hidden_states.shape[0]
         if task_id_estimated_emb is not None:
-            down = self.lang_prompt_downsample(query_embeds).unsqueeze(-1)
-            
+            down_k = self.lang_prompt_downsample_k(query_embeds).unsqueeze(-1)
+            down_v = self.lang_prompt_downsample_v(query_embeds).unsqueeze(-1)
+            down_mlp = self.lang_prompt_downsample_mlp(query_embeds).unsqueeze(-1)
+            down = torch.cat((down_k, down_v, down_mlp), dim=1)
             film = self.lang_prompt_film(task_id_estimated_emb)
             gamma4 = film[:, :19200]
             beta4 = film[:, 19200:]
