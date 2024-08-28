@@ -650,7 +650,7 @@ class LlavaLlamaForCodaIA3CausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         input_features = []
         for i in range(new_input_embeds.shape[0]):
 
-            img_feat = cls_features[batch_idx].mean(dim=0)
+            img_feat = cls_features[i].mean(dim=0)
             input_features.append(img_feat)
         input_features = torch.stack(input_features)
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, input_features

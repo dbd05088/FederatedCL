@@ -678,9 +678,9 @@ class LlavaLlamaForL2PTIA3CausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         input_features = []
         assert prompt is not None
         for i in range(new_input_embeds.shape[0]):
-            img_feat = cls_features[batch_idx].mean(dim=0)
-            text_ids = input_ids[batch_idx]
-            text = prompt[batch_idx]
+            img_feat = cls_features[i].mean(dim=0)
+            text_ids = input_ids[i]
+            text = prompt[i]
             text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
             text_ids['input_ids'] = text_ids['input_ids'].cuda()
             text_ids['attention_mask'] = text_ids['attention_mask'].cuda()
@@ -724,5 +724,7 @@ class LlavaLlamaForL2PTIA3CausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         x_embed_norm = x_embed_norm.unsqueeze(1)
         sim_pull = selected_prompt_key * x_embed_norm
         reduce_sim = torch.sum(sim_pull) / bsz
+        
+        # print('idx:', idx.detach().cpu().numpy().tolist())
 
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (idx, reduce_sim)

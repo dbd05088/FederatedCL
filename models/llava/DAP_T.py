@@ -720,9 +720,9 @@ class LlavaLlamaDAPTForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         bsz = new_input_embeds.shape[0]
         assert prompt is not None
         for i in range(bsz):
-            img_feat = cls_features[batch_idx].mean(dim=0)
-            text_ids = input_ids[batch_idx]
-            text = prompt[batch_idx]
+            img_feat = cls_features[i].mean(dim=0)
+            text_ids = input_ids[i]
+            text = prompt[i]
             text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
             text_ids['input_ids'] = text_ids['input_ids'].cuda()
             text_ids['attention_mask'] = text_ids['attention_mask'].cuda()

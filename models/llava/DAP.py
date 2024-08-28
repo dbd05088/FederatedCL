@@ -719,7 +719,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         input_features = []
         bsz = new_input_embeds.shape[0]
         for i in range(bsz):
-            img_feat = cls_features[batch_idx].mean(dim=0)
+            img_feat = cls_features[i].mean(dim=0)
             input_features.append(img_feat)
         input_features = torch.stack(input_features)
         dap_prompt_key_norm = F.normalize(self.lang_prompt_dap_key_embeddings, dim=-1)
