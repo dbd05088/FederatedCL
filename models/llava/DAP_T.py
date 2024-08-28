@@ -740,10 +740,10 @@ class LlavaLlamaDAPTForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         idx = idx.squeeze(dim=-1)
 
         # batchwise key selection
-        prompt_id, id_counts = torch.unique(idx, return_counts=True)
-        _, major_idx = torch.topk(id_counts, self.top_k)
-        major_prompt_id = prompt_id[major_idx]
-        idx = expand_to_batch(major_prompt_id, input_features.shape[0]).squeeze(dim=-1)
+        # prompt_id, id_counts = torch.unique(idx, return_counts=True)
+        # _, major_idx = torch.topk(id_counts, self.top_k)
+        # major_prompt_id = prompt_id[major_idx]
+        # idx = expand_to_batch(major_prompt_id, input_features.shape[0]).squeeze(dim=-1)
 
         bsz = input_features.shape[0]
         if self.training and task_id is not None:
