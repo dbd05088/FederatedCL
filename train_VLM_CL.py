@@ -104,7 +104,7 @@ def main():
     mm_final_lr = training_args.mm_final_lr
     
     total_rounds = training_args.num_rounds * training_args.num_tasks
-    last_task_id = -1
+    last_task_id = [-1 for _ in range(training_args.num_clients)]
     
     lr_step = (init_lr - final_lr)/total_rounds
     mm_lr_step = (mm_init_lr - mm_final_lr)/total_rounds
@@ -136,11 +136,11 @@ def main():
             
             task_id = train_datalists[client_id][curr_round]['task_id']
             
-            if 'CodaPrompt' in training_args.mode and task_id is not None and task_id != last_task_id:
+            if 'CodaPrompt' in training_args.mode and task_id is not None and task_id != last_task_id[client_id]:
                 for n, m in model.named_modules():
                     if isinstance(m, CodaPrompt):
-                        m.process_task_count()
-                last_task_id = task_id
+                        m.process_task_count(task_id)
+                last_task_id[client_id] = task_id
             
             iteration = 0
             datalist = []
