@@ -362,7 +362,7 @@ def main():
     
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     
-    batch_size = 1 if 'l2p' in training_args.mode or 'dap' in training_args.mode else 2
+    batch_size = 1 if 'l2p' in training_args.mode or 'dap' in training_args.mode or 'LAE' in training_args.mode else 2
     
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     

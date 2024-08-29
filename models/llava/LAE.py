@@ -278,7 +278,8 @@ class LlavaLlamaForLAEIA3CausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             )
             past_key_values_online = outputs2.past_key_values
 
-            outputs.logits = (outputs.logits + outputs2.logits)/2
+            # outputs.logits = (outputs.logits + outputs2.logits)/2
+            outputs.logits = torch.stack((outputs.logits, outputs2.logits),dim=-1).max(dim=-1)[0]
 
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
