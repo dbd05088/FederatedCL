@@ -911,6 +911,9 @@ class LlavaLlamaDAPDualForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 
         task_id_estimated_emb_1 = self.lang_prompt_dap_emb_1(idx_global)
         task_id_estimated_emb_2 = self.lang_prompt_dap_emb_1(idx_local)
+        
+        idx_local = idx_local.unsqueeze(-1) if len(idx_local.shape) == 1 else idx_local
+        idx_global = idx_global.unsqueeze(-1) if len(idx_global.shape) == 1 else idx_global
         i = torch.arange(bsz).reshape(bsz, 1, 1)
         l = torch.arange(self.prompt_dim).reshape(1, 1, self.prompt_dim)
         selected_prompt_key = dap_prompt_key_norm_2.repeat(bsz, 1, 1)[

@@ -759,6 +759,8 @@ class LlavaLlamaDAPTForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 idx = expand_to_batch(idx, input_features.shape[0]).squeeze(dim=-1)
 
         task_id_estimated_emb = self.lang_prompt_dap_emb(idx)
+        
+        idx = idx.unsqueeze(-1) if len(idx.shape) == 1 else idx
         i = torch.arange(bsz).reshape(bsz, 1, 1)
         l = torch.arange(self.prompt_dim).reshape(1, 1, self.prompt_dim)
 
