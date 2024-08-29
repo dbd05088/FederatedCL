@@ -38,7 +38,7 @@ import torch.nn.functional as F
 from models.dual_evoia32.dual_evoia3_attn import LlamaEVOIA3Attention
 from models.evo_ia3.evoia3_mlp import LlamaEVOIA3MLP
 
-from models.attention_prompt_generator import prefix_attention
+from models.attention_prompt_generator2 import prefix_attention2
 from models.dual_evoia32.dual_evoia3layer2 import DualEVOIA3Layer2
 from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 
@@ -64,11 +64,9 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
-        self.lang_prompt_downsample_kv_1 = prefix_attention(prefix_num=2, output_size=4096, head_dim=8)
-        self.lang_prompt_downsample_mlp_1 = prefix_attention(prefix_num=1, output_size=11008, head_dim=8)
+        self.lang_prompt_downsample_1 = prefix_attention2(prefix_num=1, output_size=4096+4096+11008, head_dim=config.generator_hidden_dim)
         self.lang_prompt_norm_1 = nn.LayerNorm(config.hidden_size, eps=1e-6)
-        self.lang_prompt_downsample_kv_2 = prefix_attention(prefix_num=2, output_size=4096, head_dim=8)
-        self.lang_prompt_downsample_mlp_2 = prefix_attention(prefix_num=1, output_size=11008, head_dim=8)
+        self.lang_prompt_downsample_2 = prefix_attention2(prefix_num=1, output_size=4096+4096+11008, head_dim=config.generator_hidden_dim)
         self.lang_prompt_norm_2 = nn.LayerNorm(config.hidden_size, eps=1e-6)
 
     def forward(
@@ -112,16 +110,13 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
             else:
                 new_attention_mask = torch.full((hidden_states.shape[:-1]), True).to(hidden_states.device)
             lang_prompt_norm = self.lang_prompt_norm_1(hidden_states)
-            new_query_embeds_kv_1 = self.lang_prompt_downsample_kv_1(lang_prompt_norm, new_attention_mask)
-            new_query_embeds_mlp_1 = self.lang_prompt_downsample_mlp_1(lang_prompt_norm, new_attention_mask)
+            new_query_embeds1 = self.lang_prompt_downsample_1(lang_prompt_norm, new_attention_mask)
             
             lang_prompt_norm = self.lang_prompt_norm_2(hidden_states)
-            new_query_embeds_kv_2 = self.lang_prompt_downsample_kv_2(lang_prompt_norm, new_attention_mask)
-            new_query_embeds_mlp_2 = self.lang_prompt_downsample_mlp_2(lang_prompt_norm, new_attention_mask)
-            
-            new_query_embeds_k = (new_query_embeds_kv_1[:,0], new_query_embeds_kv_2[:,0])
-            new_query_embeds_v = (new_query_embeds_kv_1[:,1], new_query_embeds_kv_2[:,1])
-            new_query_embeds_mlp = (new_query_embeds_mlp_1[:,0], new_query_embeds_mlp_2[:,0])
+            new_query_embeds2 = self.lang_prompt_downsample_2(lang_prompt_norm, new_attention_mask)
+            new_query_embeds_k = (new_query_embeds1[:,0,:4096], new_query_embeds2[:,0,:4096])
+            new_query_embeds_v = (new_query_embeds1[:,0,4096:4096*2], new_query_embeds2[:,0,4096:4096*2])
+            new_query_embeds_mlp = (new_query_embeds1[:,0,4096*2:], new_query_embeds2[:,0,4096*2:])
         else:
             new_query_embeds_k = None
             new_query_embeds_v = None
@@ -385,8 +380,9 @@ class LlamaEVOIA3ForCausalLM(LlamaForCausalLM):
 class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
-    def __init__(self, config):
+    def __init__(self, config,generator_hidden_dim):
         super(LlamaForCausalLM, self).__init__(config)
+        config.generator_hidden_dim=generator_hidden_dim
         self.model = LlavaLlamaEVOIA3Model(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
@@ -408,22 +404,22 @@ class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausa
                 module.set_state(state)
 
     def activate_all(self):
+        # for p in self.lang_prompt_dap_key_embeddings_1.parameters():
+        #     p.requires_grad = True
+        # for p in self.lang_prompt_dap_key_embeddings_2.parameters():
+        #     p.requires_grad = True
         for layer in self.model.layers:
-            for p in layer.lang_prompt_downsample_kv_1.parameters():
-                p.requires_grad = True
-            for p in layer.lang_prompt_downsample_mlp_1.parameters():
+            for p in layer.lang_prompt_downsample_1.parameters():
                 p.requires_grad = True
             for p in layer.lang_prompt_norm_1.parameters():
                 p.requires_grad = True
-            for p in layer.lang_prompt_downsample_kv_2.parameters():
-                p.requires_grad = True
-            for p in layer.lang_prompt_downsample_mlp_2.parameters():
+            for p in layer.lang_prompt_downsample_2.parameters():
                 p.requires_grad = True
             for p in layer.lang_prompt_norm_2.parameters():
                 p.requires_grad = True
         
         # for name, module in self.model.named_modules():
-        #     if isinstance(module, DualEVOIA3Layer2) or isinstance(module, DualIA3PoolLayer):
+        #     if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3PoolLayer):
         #         module.activate_all()
 
     def activate_lora1(self):
@@ -432,40 +428,32 @@ class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausa
         # for p in self.lang_prompt_dap_key_embeddings_2.parameters():
         #     p.requires_grad = False
         for layer in self.model.layers:
-            for p in layer.lang_prompt_downsample_kv_1.parameters():
-                p.requires_grad = True
-            for p in layer.lang_prompt_downsample_mlp_1.parameters():
+            for p in layer.lang_prompt_downsample_1.parameters():
                 p.requires_grad = True
             for p in layer.lang_prompt_norm_1.parameters():
                 p.requires_grad = True
-            for p in layer.lang_prompt_downsample_kv_2.parameters():
-                p.requires_grad = False
-            for p in layer.lang_prompt_downsample_mlp_2.parameters():
+            for p in layer.lang_prompt_downsample_2.parameters():
                 p.requires_grad = False
             for p in layer.lang_prompt_norm_2.parameters():
                 p.requires_grad = False
             
         # for name, module in self.model.named_modules():
-        #     if isinstance(module, DualEVOIA3Layer2) or isinstance(module, DualIA3PoolLayer):
+        #     if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3PoolLayer):
         #         module.activate_lora1()
     
     def activate_lora2(self):
         for layer in self.model.layers:
-            for p in layer.lang_prompt_downsample_kv_1.parameters():
-                p.requires_grad = False
-            for p in layer.lang_prompt_downsample_mlp_1.parameters():
+            for p in layer.lang_prompt_downsample_1.parameters():
                 p.requires_grad = False
             for p in layer.lang_prompt_norm_1.parameters():
                 p.requires_grad = False
-            for p in layer.lang_prompt_downsample_kv_2.parameters():
-                p.requires_grad = True
-            for p in layer.lang_prompt_downsample_mlp_2.parameters():
+            for p in layer.lang_prompt_downsample_2.parameters():
                 p.requires_grad = True
             for p in layer.lang_prompt_norm_2.parameters():
                 p.requires_grad = True
         
         # for name, module in self.model.named_modules():
-        #     if isinstance(module, DualEVOIA3Layer2) or isinstance(module, DualIA3PoolLayer):
+        #     if isinstance(module, DualEVOIA3Layer) or isinstance(module, DualIA3PoolLayer):
         #         module.activate_lora2()
     def get_model(self):
         return self.model
@@ -672,12 +660,12 @@ class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausa
             inputs['query_embeds'] = query_embeds
         return inputs
     
-    def encode_images(self, images):
-        image_features = self.get_model().get_vision_tower()(images)
-        cls_feature = image_features[:, 0]
-        image_features = image_features[:, 1:]
-        image_features = self.get_model().mm_projector(image_features)
-        return image_features, cls_feature
+    # def encode_images(self, images):
+    #     image_features = self.get_model().get_vision_tower()(images)
+    #     cls_feature = image_features[:, 0]
+    #     image_features = image_features[:, 1:]
+    #     image_features = self.get_model().mm_projector(image_features)
+    #     return image_features, cls_feature
     
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
@@ -691,10 +679,11 @@ class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausa
             if type(images) is list:
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
             concat_images = torch.cat([image for image in images], dim=0)
-            image_features, cls_features = self.encode_images(concat_images)
+            # image_features, cls_features = self.encode_images(concat_images)
+            image_features = self.encode_images(concat_images)
             split_sizes = [image.shape[0] for image in images]
             image_features = torch.split(image_features, split_sizes, dim=0)
-            cls_features = torch.split(cls_features, split_sizes, dim=0)
+            # cls_features = torch.split(cls_features, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
             image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
         else:

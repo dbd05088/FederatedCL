@@ -31,7 +31,7 @@ from models.feddat_lora.tripleloralayer import TripleLoraLayer
 # from models.llava.evoprompt_ia3 import LlavaLlamaEVOIA3ForCausalLM
 from models.llava.llava_ia3_global import LlavaLlamaForOURSIA3PoolCausalLM
 from models.llava.evoprompt_ia3_global import LlavaLlamaOURSGENIA3ForCausalLM
-# from models.llava.evoprompt_ia3_global2 import LlavaLlamaOURSGENIA3ForCausalLM2
+from models.llava.evoprompt_ia3_global2 import LlavaLlamaOURSGENIA3ForCausalLM2
 from models.llava.evoprompt_ia3_global3 import LlavaLlamaOURSGENIA3ForCausalLM3
 
 from models.llava.L2P2 import LlavaLlamaForL2PIA3CausalLM2
@@ -363,6 +363,17 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator')
+        elif training_args.mode == 'ours_generator2':
+            assert model_args.model_type != 'mpt'
+            model = LlavaLlamaOURSGENIA3ForCausalLM2.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                generator_hidden_dim=training_args.generator_hidden_dim,
+                **bnb_model_from_pretrained_args
+            )
+            print('load ours generator2')
         elif training_args.mode == 'ours_generator3':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaOURSGENIA3ForCausalLM3.from_pretrained(

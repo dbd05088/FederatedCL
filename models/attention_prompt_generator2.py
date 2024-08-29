@@ -1,4 +1,4 @@
-from transformers.models.llama.modeling_llama import LlamaAttention, apply_rotary_pos_emb, LlamaFlashAttention2, LlamaRotaryEmbedding
+from transformers.models.llama.modeling_llama import LlamaAttention, apply_rotary_pos_emb, LlamaFlashAttention2, LlamaRotaryEmbedding, rotate_half
 import torch
 from typing import Optional, Tuple
 from transformers.utils import (
@@ -16,7 +16,7 @@ logger = logging.get_logger(__name__)
 _CONFIG_FOR_DOC = "LlamaConfig"
 
 
-class prefix_attention(LlamaFlashAttention2):
+class prefix_attention2(LlamaFlashAttention2):
     def __init__(self, prefix_num=1, hidden_size=4096, output_size=4096, head_dim=256, attn_dropout=0.0, attn_bias=False):
         (nn.Module).__init__(self)
 
@@ -29,7 +29,7 @@ class prefix_attention(LlamaFlashAttention2):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.is_causal = False
 
-        self.qproj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=attn_bias)
+        # self.qproj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=attn_bias)
         self.kproj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=attn_bias)
         self.vproj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=attn_bias)
         self.oproj = nn.Linear(self.head_dim, self.output_size, bias=attn_bias)
@@ -37,12 +37,13 @@ class prefix_attention(LlamaFlashAttention2):
         self._flash_attn_uses_top_left_mask = not is_flash_attn_greater_or_equal_2_10()
         
         self.prefix_num = prefix_num
-        self.prefix_embedding = nn.Parameter(torch.zeros(self.prefix_num, self.hidden_size))
+        # self.prefix_embedding = nn.Parameter(torch.zeros(self.prefix_num, self.hidden_size))
+        self.prefix_embedding = nn.Parameter(torch.zeros(self.prefix_num, self.num_heads * self.head_dim))
         val = math.sqrt(6. / float(3 * reduce(mul, (hidden_size,), 1)))
         # nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
         with torch.no_grad():
             self.prefix_embedding.uniform_(-val, val)
-
+        
         self.rotary_emb = LlamaRotaryEmbedding(
                 self.head_dim,
                 max_position_embeddings=20000,
@@ -63,29 +64,33 @@ class prefix_attention(LlamaFlashAttention2):
 
         bsz, q_len, _ = hidden_states.size()
         
-        combined = torch.concat((self.prefix_embedding.repeat(bsz, 1, 1), hidden_states), dim=1)
-        if attention_mask is not None:
-            attention_mask = torch.concat((torch.full((bsz, self.prefix_num), True).cuda(), attention_mask), dim=1)
+        # combined = torch.concat((self.prefix_embedding.repeat(bsz, 1, 1), hidden_states), dim=1)
+        # if attention_mask is not None:
+        #     attention_mask = torch.concat((torch.full((bsz, self.prefix_num), True).cuda(), attention_mask), dim=1)
+        
         if position_ids is None:
             position_ids = torch.arange(
-                0, 0 + combined.shape[1], device=combined.device
+                0, 0 + hidden_states.shape[1], device=hidden_states.device
             ).unsqueeze(0)
-        bsz, q_len, _ = combined.size()
+        # bsz, q_len, _ = combined.size()
 
-        query_states = self.qproj(combined)
-        key_states = self.kproj(combined)
-        value_states = self.vproj(combined)
+        # query_states = self.qproj(hidden_states)
+        key_states = self.kproj(hidden_states)
+        value_states = self.vproj(hidden_states)
 
         # Flash attention requires the input to have the shape
         # batch_size x seq_length x head_dim x hidden_dim
         # therefore we just need to keep the original shape
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+        # query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        query_states = self.prefix_embedding.repeat(bsz, 1).view(bsz, self.prefix_num, self.num_heads, self.head_dim).transpose(1,2)
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-
+        
         cos, sin = self.rotary_emb(value_states, position_ids)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-
+        # query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        key_states = (key_states * cos) + (rotate_half(key_states) * sin)
+        
         # TODO: These transpose are quite inefficient but Flash Attention requires the layout [batch_size, sequence_length, num_heads, head_dim]. We would need to refactor the KV cache
         # to be able to avoid many of these transpose/reshape/view.
         query_states = query_states.transpose(1, 2)
@@ -121,10 +126,10 @@ class prefix_attention(LlamaFlashAttention2):
             value_states = value_states.to(target_dtype)
 
         attn_output = self._flash_attention_forward(
-            query_states, key_states, value_states, attention_mask, q_len, dropout=dropout_rate
+            query_states, key_states, value_states, attention_mask, 1, dropout=dropout_rate
         )
 
-        attn_output = attn_output.reshape(bsz, q_len, self.head_dim).contiguous()
+        attn_output = attn_output.reshape(bsz, 1, self.head_dim).contiguous()
         attn_output = self.oproj(attn_output)
 
         return attn_output[:,:self.prefix_num,:]
