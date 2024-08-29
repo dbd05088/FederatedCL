@@ -84,6 +84,7 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
         self.task_id = task_id
         self.ema_ratio = ema_ratio
         self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+        self.mu = 0.1
     
     def compute_loss(self, model, inputs, return_outputs=False):
         """
@@ -124,9 +125,17 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
                 )
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
-
+            
+        
+        # regularization
+        for name, param in model.module.named_parameters():
+            if not param.requires_grad:
+                continue
+            
+            loss += self.mu / 2 * (torch.norm(param - self.old_weights[name]))**2    
+        
         return (loss, outputs) if return_outputs else loss
-    
+
     
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
@@ -661,32 +670,8 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
             self._save_optimizer_and_scheduler(output_dir)
 
         # Optimal Transport Combination within client
-        if self.curr_round > 0:
-            # pass
-            # cur_weights = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
-            # ot_mat, cur_T_var = _compute_transport_matrix(self.old_weights, cur_weights)
-            
-            # # aggregate
-            # # if self._use_ot and self.attribution_aware_fusion:
-            # #     self._align_attribution()
-
-            # # if self.attribution_aware_fusion:
-            # #     global_importance = self._get_global_attribution(normalize=True).type_as(
-            # #         self.prev_reference_prompt_memory
-            # #     )
-            # #     current_importance = self._get_current_attribution(normalize=True).type_as(
-            # #         self.prev_reference_prompt_memory
-            # #     )
-            # # fusion weight
-            # alpha = 0.5
-            # for key in cur_weights.keys():
-            #     weight = torch.ones_like(cur_weights[key]) * alpha
-            #     # if self.attribution_aware_fusion:
-            #     #     weight = (torch.ones_like(self.prev_reference_prompt_memory) * alpha) + (
-            #     #         (current_importance - global_importance) * alpha
-            #     #     )
-            #     cur_weights[key] = cur_weights[key] + weight * (self.old_weights[key] - cur_weights[key])
-            self.model.load_state_dict(self.old_weights, strict=False)
+        # if self.curr_round > 0:
+        #     self.model.load_state_dict(self.old_weights, strict=False)
             
         self.model.activate_all()
 
