@@ -65,17 +65,17 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
         self.lang_prompt_downsample_k_1 = nn.Sequential(
-            nn.Linear(1792, config.generator_hidden_feature, bias=False),
+            nn.Linear(768, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
             nn.Linear(config.generator_hidden_feature, 4096, bias=False),
         )
         self.lang_prompt_downsample_v_1 = nn.Sequential(
-            nn.Linear(1792, config.generator_hidden_feature, bias=False),
+            nn.Linear(768, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
             nn.Linear(config.generator_hidden_feature, 4096, bias=False),
         )
         self.lang_prompt_downsample_mlp_1 = nn.Sequential(
-            nn.Linear(1792, config.generator_hidden_feature, bias=False),
+            nn.Linear(768, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
             nn.Linear(config.generator_hidden_feature, 11008, bias=False),
         )
@@ -85,17 +85,17 @@ class LlamaDecoderDAPLayer(LlamaDecoderLayer):
         self.lang_prompt_film_1.bias.data.fill_(0)
         
         self.lang_prompt_downsample_k_2 = nn.Sequential(
-            nn.Linear(1792, config.generator_hidden_feature, bias=False),
+            nn.Linear(768, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
             nn.Linear(config.generator_hidden_feature, 4096, bias=False),
         )
         self.lang_prompt_downsample_v_2 = nn.Sequential(
-            nn.Linear(1792, config.generator_hidden_feature, bias=False),
+            nn.Linear(768, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
             nn.Linear(config.generator_hidden_feature, 4096, bias=False),
         )
         self.lang_prompt_downsample_mlp_2 = nn.Sequential(
-            nn.Linear(1792, config.generator_hidden_feature, bias=False),
+            nn.Linear(768, config.generator_hidden_feature, bias=False),
             nn.SiLU(inplace=True),
             nn.Linear(config.generator_hidden_feature, 11008, bias=False),
         )
@@ -483,7 +483,7 @@ class LlavaLlamaDAPTDualForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         self.post_init()
         
         self.pool_size = 4
-        self.prompt_dim = 1792
+        self.prompt_dim = 768
         val = math.sqrt(6. / float(3 * reduce(mul, (576,), 1) + self.prompt_dim))
         self.lang_prompt_dap_key_embeddings_1 = nn.Parameter(torch.zeros(self.pool_size, self.prompt_dim))
         # nn.init.uniform_(self.lang_prompt_dap_key_embeddings.data, -val, val)
@@ -871,17 +871,25 @@ class LlavaLlamaDAPTDualForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         input_features = []
         bsz = new_input_embeds.shape[0]
         assert prompt is not None
-        for i in range(bsz):
-            img_feat = cls_features[i].mean(dim=0)
-            text_ids = input_ids[i]
-            text = prompt[i]
-            text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
-            text_ids['input_ids'] = text_ids['input_ids'].cuda()
-            text_ids['attention_mask'] = text_ids['attention_mask'].cuda()
-            text_ids['input_ids'] = text_ids['input_ids'][:,-248:] if len(text_ids['input_ids'][0]) > 248 else text_ids['input_ids']
-            text_ids['attention_mask'] = text_ids['attention_mask'][:,-248:] if len(text_ids['attention_mask'][0]) > 248 else text_ids['attention_mask']
-            text_feat = self.text_encoder(**text_ids)[1][0].to(torch.bfloat16)
-            input_features.append(torch.concat((img_feat, text_feat)))
+        with torch.no_grad():
+            for i in range(new_input_embeds.shape[0]):
+                # img_feat = cls_features[i].mean(dim=0)
+                img_feat = self.clip_encoder.visual_projection(cls_features[i]).mean(dim=0)
+                # img_feat = self.clip_encoder.get_image_features(F.interpolate(images[i], 224)).mean(dim=0)
+                
+                text_ids = input_ids[i]
+                text = prompt[i]
+                text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
+                text_ids['input_ids'] = text_ids['input_ids'].cuda()
+                text_ids['attention_mask'] = text_ids['attention_mask'].cuda()
+                text_ids['input_ids'] = text_ids['input_ids'][:,-self.clip_encoder.config.text_config.max_position_embeddings:] if len(text_ids['input_ids'][0]) > self.clip_encoder.config.text_config.max_position_embeddings else text_ids['input_ids']
+                text_ids['attention_mask'] = text_ids['attention_mask'][:,-self.clip_encoder.config.text_config.max_position_embeddings:] if len(text_ids['attention_mask'][0]) > self.clip_encoder.config.text_config.max_position_embeddings else text_ids['attention_mask']
+                # text_feat = self.text_encoder(**text_ids)[1][0].to(torch.bfloat16)
+                text_feat = self.clip_encoder.get_text_features(**text_ids)[0]
+
+                # input_features.append(torch.concat((img_feat, text_feat)))
+                input_features.append((img_feat + text_feat)/2)
+        
         input_features = torch.stack(input_features)
         dap_prompt_key_norm_1 = F.normalize(self.lang_prompt_dap_key_embeddings_1, dim=-1)
         dap_prompt_key_norm_2 = F.normalize(self.lang_prompt_dap_key_embeddings_2, dim=-1)

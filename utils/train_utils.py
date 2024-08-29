@@ -5,7 +5,7 @@ import transformers
 from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.language_model.llava_mpt import LlavaMptForCausalLM
 from models.bunny import BunnyPhiForCausalLM, BunnyStableLMForCausalLM, BunnyQwen2ForCausalLM, BunnyMiniCPMForCausalLM, BunnyLlamaForCausalLM
-from transformers import AutoModelForCausalLM, AutoTokenizer, CLIPTextModel, CLIPProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer, CLIPTextModel, CLIPProcessor, CLIPModel
 import models.llava.conversation as conversation_lib_llava
 import models.bunny.conversation as conversation_lib_bunny
 from transformers import Trainer
@@ -49,6 +49,8 @@ from models.llava.EvoPrompt_T import LlavaLlamaEVOTIA3ForCausalLM
 
 from models.llava.CodaPrompt import LlavaLlamaForCodaIA3CausalLM
 from models.llava.CodaPrompt_T import LlavaLlamaForCodaIA3TCausalLM
+from models.llava.CodaPrompt_Dual import LlavaLlamaForCodaIA3DualCausalLM
+from models.llava.CodaPrompt_T_Dual import LlavaLlamaForCodaIA3TDualCausalLM
 
 from models.llava.LAE import LlavaLlamaForLAEIA3CausalLM
 from models.llava.LAE_Dual import LlavaLlamaForDualLAEIA3CausalLM
@@ -218,10 +220,28 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             print('load CodaPrompt_T-IA3')
         elif training_args.mode in ['CodaPrompt_FedDAT', 'CodaPrompt_Ditto']:
             assert model_args.model_type != 'mpt'
-            pass
+            model = LlavaLlamaForCodaIA3DualCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                pool_size = training_args.pool_size,
+                prompt_top_k = training_args.prompt_top_k,
+                **bnb_model_from_pretrained_args
+            )
+            print('load CodaPrompt_Dual-IA3')
         elif training_args.mode in ['CodaPrompt_T_FedDAT', 'CodaPrompt_T_Ditto']:
             assert model_args.model_type != 'mpt'
-            pass
+            model = LlavaLlamaForCodaIA3TDualCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                pool_size = training_args.pool_size,
+                prompt_top_k = training_args.prompt_top_k,
+                **bnb_model_from_pretrained_args
+            )
+            print('load CodaPrompt_T_Dual-IA3')
         
         #############################################################################
         elif training_args.mode in ['DAP', 'DAP_FedAvg', 'DAP_FedPer']:
@@ -516,7 +536,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['EVOIA3'] = EVOIA3Model
             ia3_config.peft_type = 'EVOIA3'
-            ia3_config.generator_output_size = 1792
+            ia3_config.generator_output_size = 768
             ia3_config.generator_hidden_feature = training_args.generator_hidden_feature
         
         elif training_args.mode in ['ours_pool']:
@@ -566,16 +586,22 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         vision_tower.select_feature = 'cls_patch'
     
         if '_T' in training_args.mode:
-            model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
+            # model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
+            
+            model.base_model.model.clip_encoder = CLIPModel.from_pretrained(model_args.vision_tower).to(device=training_args.device, dtype=compute_dtype)
+            
             model.base_model.model.clipprocessor = CLIPProcessor.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipprocessor/")
             # long clip
-            model.base_model.model.text_encoder.text_model.embeddings.position_embedding = torch.nn.Embedding(248, 768).cuda()
-            model.base_model.model.text_encoder.text_model.embeddings.register_buffer(
-                "position_ids", torch.arange(248).expand((1, -1)).cuda(), persistent=False
-            )
-            model.base_model.model.text_encoder.load_state_dict(torch.load("/home/vision/thkim/FederatedCL/models/clip_models/longclip_L_text.pt", map_location=training_args.device))
-            
-            model.base_model.model.text_encoder.requires_grad_(False)
+            # model.base_model.model.clip_encoder = CLIPModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipmodel/").to(device='cuda', dtype=torch.bfloat16)
+            # model.base_model.model.clip_encoder.text_model.embeddings.position_embedding = torch.nn.Embedding(248, 768).cuda()
+            # model.base_model.model.clip_encoder.text_model.embeddings.register_buffer(
+            #     "position_ids", torch.arange(248).expand((1, -1)).cuda(), persistent=False
+            # )
+            # model.base_model.model.clip_encoder.config.text_config.max_position_embeddings = 248
+            # model.base_model.model.clip_encoder.load_state_dict(torch.load("/home/vision/thkim/FederatedCL/models/clip_models/longclip_L_transformers.pt", map_location=training_args.device))
+            # model.base_model.model.clip_encoder.to(torch.bfloat16)
+            # model.base_model.model.text_encoder.requires_grad_(False)
+            model.base_model.model.clip_encoder.requires_grad_(False)
 
     # if not training_args.is_eval:
     #     data_args.img_mean = vision_tower.image_processor.image_mean
