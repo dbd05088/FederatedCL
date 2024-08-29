@@ -722,6 +722,7 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
             img_feat = cls_features[i].mean(dim=0)
             input_features.append(img_feat)
         input_features = torch.stack(input_features)
+        
         dap_prompt_key_norm = F.normalize(self.lang_prompt_dap_key_embeddings, dim=-1)
         x_embed_norm = F.normalize(input_features, dim=-1)
         sim = torch.matmul(dap_prompt_key_norm,
@@ -729,7 +730,6 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
         sim = torch.transpose(sim, 1, 0)
         (sim_top_k, idx) = torch.topk(sim, self.top_k)
         idx = idx.squeeze(dim=-1)
-
         # batchwise key selection
         # prompt_id, id_counts = torch.unique(idx, return_counts=True)
         # _, major_idx = torch.topk(id_counts, self.top_k)
@@ -750,14 +750,16 @@ class LlavaLlamaDAPForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 idx = expand_to_batch(idx, input_features.shape[0]).squeeze(dim=-1)
 
         task_id_estimated_emb = self.lang_prompt_dap_emb(idx)
+        
+        idx = idx.unsqueeze(-1) if len(idx.shape) == 1 else idx
         i = torch.arange(bsz).reshape(bsz, 1, 1)
         l = torch.arange(self.prompt_dim).reshape(1, 1, self.prompt_dim)
-
         selected_prompt_key = dap_prompt_key_norm.repeat(bsz, 1, 1)[
             i, idx.unsqueeze(-1), l]
-        
         x_embed_norm = x_embed_norm.unsqueeze(1)
         sim_pull = selected_prompt_key * x_embed_norm
         reduce_sim = torch.sum(sim_pull) / bsz
+        
+        # print('idx:', idx.detach().cpu().numpy().tolist())
 
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (task_id_estimated_emb,F.normalize(input_features, dim=-1),reduce_sim)
