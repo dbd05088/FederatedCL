@@ -102,70 +102,22 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
     def compute_loss(self, model, inputs, return_outputs=False):
         curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
         with torch.no_grad():
-            model.module.load_state_dict(self.old_weights)
+            model.module.load_state_dict(self.old_weights, strict=False)
             _, outputs = super(LLaVATrainerOURS, self).compute_loss(
                     model, inputs, return_outputs=True
                 )
             outputs_target = outputs['logits']
-            model.module.load_state_dict(curr_weights)
+            model.module.load_state_dict(curr_weights, strict=False)
         loss, outputs = super(LLaVATrainerOURS, self).compute_loss(model, inputs, return_outputs=True)
         
         # loss_kl_1 = kl_loss(outputs['logits'], outputs_target.clone().detach())
         # loss_kl_1 = ((outputs['logits'] - outputs_target.detach())**2).mean()
             
         # loss = (loss + loss_kl_1) / 2
-        loss += self.mu*kl_loss(outputs['logits'], outputs_target.detach())
-        
-    def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        How the loss is computed by Trainer. By default, all models return the loss in the first element.
-
-        Subclass and override for custom behavior.
-        """
-        if self.label_smoother is not None and "labels" in inputs:
-            labels = inputs.pop("labels")
-        else:
-            labels = None
-        
-        if 'prompt' in inputs:
-            text_prompt = inputs.pop('prompt')
-        else:
-            text_prompt = None
-        outputs = model(**inputs, prompt=text_prompt, task_id=self.task_id) if text_prompt else model(**inputs, task_id=self.task_id)
-        # Save past state if it exists
-        # TODO: this needs to be fixed and made cleaner later.
-        if self.args.past_index >= 0:
-            self._past = outputs[self.args.past_index]
-
-        if labels is not None:
-            unwrapped_model = unwrap_model(model)
-            if _is_peft_model(unwrapped_model):
-                model_name = unwrapped_model.base_model.model._get_name()
-            else:
-                model_name = unwrapped_model._get_name()
-            if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
-                loss = self.label_smoother(outputs, labels, shift_labels=True)
-            else:
-                loss = self.label_smoother(outputs, labels)
-        else:
-            if isinstance(outputs, dict) and "loss" not in outputs:
-                raise ValueError(
-                    "The model did not return a loss from the inputs, only the following keys: "
-                    f"{','.join(outputs.keys())}. For reference, the inputs it received are {','.join(inputs.keys())}."
-                )
-            # We don't use .loss here since the model may return tuples instead of ModelOutput.
-            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
-            
-        
-        # regularization
-        for name, param in model.module.named_parameters():
-            if not param.requires_grad:
-                continue
-            
-            loss += self.mu / 2 * (torch.norm(param - self.old_weights[name]))**2    
-        
+        if self.curr_round > 0:
+            loss += self.mu*kl_loss(outputs['logits'], outputs_target.detach())
+        # breakpoint()
         return (loss, outputs) if return_outputs else loss
-
     
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
