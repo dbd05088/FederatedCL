@@ -4,14 +4,18 @@ import csv
 from collections import defaultdict
 import os
 
-mode = 'apfl'
+mode = 'L2P_T2'
 # Method = 'llava_zeroshot_full'
 # Method = 'PT_fullmem_sc20_lr1e-2_4tasks_5rounds_itr125'
 # Method = 'fedavg_exscicap_1e-4_bs16_itr100_constant_round10_0'
 # Method = 'sft_llava_sc12_lr1e-4_bs16_itr100_constant_round10'
 # Method = 'fedper_8_llava_sc12_lr1e-4_bs16_itr100_constant_round10'
-Method = 'apfl_sc12_lr1e-4_1e-6_itr100_round10'
-num_rounds = 10
+# Method = 'apfl_sc12_lr1e-4_1e-6_itr100_round10'
+# Method = 'ditto_ia3_lr3e-3_sc20_4tasks_5rounds_itr125'
+# Method = 'ditto_lora_lr5e-5_sc20_4tasks_5rounds_itr125'
+# Method='fedper_ia3_lr3e-3_sc20_4tasks_5rounds_itr125'
+Method='L2P_T2_3_12_lr1e-2_sc20_4tasks_5rounds_itr125'
+num_rounds = 20
 is_client = True
 
 scenario_num = 20
@@ -26,28 +30,17 @@ for client_data in scenario:
     for data in client_data['datasets']:
         data_name = f"{data['dataset']}-{data['subset_id']}"
         
-        if data['type'] == 'open-ended':
-            count = 0
-            total_score = 0
-            if is_client:
-                with jsonlines.open(f'./eval_results_gpt/{mode}/{Method}_correctness/client{id}_round{num_rounds}_{data_name}.jsonl') as read_file:
-                    for line in read_file.iter():
-                        total_score += line['score']
-                        count+=1
-            else:
-                with jsonlines.open(f'./eval_results_gpt/{mode}/{Method}_correctness/server_round{num_rounds}_{data_name}.jsonl') as read_file:
-                    for line in read_file.iter():
-                        total_score += line['score']
-                        count+=1
-            score = total_score/count/10
-        elif data['type'] == 'multi-choice':
-            if is_client:
-                with open(f'./eval_results/{mode}/{Method}/client{id}_round{num_rounds}_{data_name}.json', 'r') as fp:
-                    result = json.load(fp)[-1]
-            else:
-                with open(f'./eval_results/{mode}/{Method}/server_round{num_rounds}_{data_name}.json', 'r') as fp:
-                    result = json.load(fp)[-1]
+        if is_client:
+            with open(f'./eval_results/{mode}/{Method}/client{id}_round{num_rounds}_{data_name}.json', 'r') as fp:
+                result = json.load(fp)[-1]
+        else:
+            with open(f'./eval_results/{mode}/{Method}/server_round{num_rounds}_{data_name}.json', 'r') as fp:
+                result = json.load(fp)[-1]
+                
+        if data['type'] == 'multi-choice':
             score = result['accuracy']
+        elif data['type'] == 'open-ended':
+            score = result['ROUGE_L'][0]
         
         scores[data_name] = score
         client_scores[id].append(score)
@@ -79,54 +72,3 @@ print(f"Method: {Method}")
 print(f"Score: {scores}")
 print(f"Avg Score: {avg_score}")
 print(f"Results have been appended to {csv_file}")
-
-# datalist = ['Bongard-OpenWorld-0','Birds-to-Words-0', 'HRVQA-2', 'DiDeMoSV-0', 'NLVR2-0', 'Mementos-0', 'SciCap-1','AQUA-0', 'HRVQA-3', 'AQUA-1']
-# precision_datalist = {
-#     'HRVQA-2':2,
-#     'NLVR2-0':4,
-#     'AQUA-0':7,
-#     'HRVQA-3':8,
-# }
-# gpt_datalist = {
-#     'Bongard-OpenWorld-0':0,
-#     'Birds-to-Words-0':1,
-#     'DiDeMoSV-0':3,
-#     'Mementos-0':5,
-#     'SciCap-1':6,
-#     'AQUA-1':9}
-
-# scores = {name:0 for name in datalist}
-# if is_client:
-    
-#     for data_name, id in precision_datalist.items():
-#         with open(f'./eval_results/{mode}/{Method}/client{id}_round{num_rounds}_{data_name}.json', 'r') as fp:
-#             result = json.load(fp)[-1]
-#         scores[data_name] = result['precision']
-
-#     for data_name, id in gpt_datalist.items():
-#         count = 0
-#         total_score = 0
-#         with jsonlines.open(f'./eval_results_gpt/{mode}/{Method}_correctness/client{id}_round{num_rounds}_{data_name}.jsonl') as read_file:
-#             for line in read_file.iter():
-#                 total_score += line['score']
-#                 count+=1
-#             scores[data_name] = total_score/count/10
-# else:
-#     for data_name, id in precision_datalist.items():
-#         with open(f'./eval_results/{mode}/{Method}/server_round{num_rounds}_{data_name}.json', 'r') as fp:
-#             result = json.load(fp)[-1]
-#         scores[data_name] = result['precision']
-
-#     for data_name, id in gpt_datalist.items():
-#         count = 0
-#         total_score = 0
-#         with jsonlines.open(f'./eval_results_gpt/{mode}/{Method}_correctness/server_round{num_rounds}_{data_name}.jsonl') as read_file:
-#             for line in read_file.iter():
-#                 total_score += line['score']
-#                 count+=1
-#             scores[data_name] = total_score/count/10
-# avg_score = sum(scores.values()) / len(scores)
-# print(f"Method: {Method}")
-# print(f"Score: {scores}")
-# print(f"Avg Score: {avg_score}")
-
