@@ -363,7 +363,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator')
-        elif training_args.mode == 'ours_generator2':
+        elif training_args.mode == 'ours_generator2' or training_args.mode == 'ours_generator4':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaOURSGENIA3ForCausalLM2.from_pretrained(
                 model_args.model_name_or_path,
@@ -374,7 +374,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator2')
-        elif training_args.mode == 'ours_generator3' or training_args.mode == 'ours_generator4':
+        elif training_args.mode == 'ours_generator3':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaOURSGENIA3ForCausalLM3.from_pretrained(
                 model_args.model_name_or_path,

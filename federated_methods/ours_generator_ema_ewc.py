@@ -1,7 +1,7 @@
 from federated_methods.fedavg import LLaVATrainerFEDAVG
 from federated_methods.task_id import LLaVATrainerTaskId
 import copy
-from transformers.trainer import unwrap_model, _is_peft_model, MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
+from transformers.trainer import unwrap_model, _is_peft_model, MODEL_FOR_CAUSAL_LM_MAPPING_NAMES, SCHEDULER_NAME
 from easydict import EasyDict as edict
 from utils.optimal_transport import get_wassersteinized_layers_modularized
 
@@ -24,7 +24,8 @@ from transformers.trainer_utils import (
     has_length,
     speed_metrics,
 )
-from transformers.trainer_pt_utils import get_model_param_count, get_dataloader_sampler
+import warnings
+from transformers.trainer_pt_utils import get_model_param_count, get_dataloader_sampler, reissue_pt_warnings
 from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
 from transformers.integrations.deepspeed import deepspeed_init, deepspeed_load_checkpoint
 from transformers import Trainer
@@ -35,9 +36,11 @@ from transformers.trainer import (
     TRAINER_STATE_NAME,
     is_torch_xla_available,
     is_accelerate_available,
+    is_deepspeed_available,
     get_parameter_names,
     ALL_LAYERNORM_LAYERS
 )
+
 from transformers.integrations import hp_params
 from transformers.trainer_callback import TrainerState
 from transformers.training_args import ParallelMode
@@ -54,6 +57,9 @@ if is_accelerate_available():
         from accelerate.data_loader import SeedableRandomSampler
 
         DATA_SAMPLERS += [SeedableRandomSampler]
+    
+    if is_deepspeed_available():
+        from accelerate.utils import DeepSpeedSchedulerWrapper
 
 from models.duallora.dualloralayer import DualLoraLayer
 from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer
@@ -91,14 +97,17 @@ def kl_loss(output, target, temp=2):
     l_kl = l_kl * temp**2
     return l_kl
 
+def normalize_fn(fisher):
+    return (fisher - fisher.min()) / (fisher.max() - fisher.min() + 1e-20)
+
 class LLaVATrainerOURS(LLaVATrainerTaskId):
     def __init__(self, task_id, ema_ratio=0.996, **kwargs):
         super(LLaVATrainerOURS, self).__init__(**kwargs)
         self.task_id = task_id
         self.ema_ratio = ema_ratio
         # self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
-        self.old_weights = torch.concat([t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad])
-        self.mu = 1.0
+        self.old_weights = torch.concat([t.detach().clone().flatten() for k, t in self.model.named_parameters() if t.requires_grad])
+        self.mu = 10000.0
         self.fisher_old = None
         
         assert self.args.save_optim
@@ -113,9 +122,9 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         # loss = (loss + loss_kl_1) / 2
         if self.curr_round > 0 and self.fisher_old is not None:
             # loss += self.mu*kl_loss(outputs['logits'], outputs_target.detach())
-            curr_weights = torch.concat([t for k, t in self.model.module.named_parameters() if t.requires_grad])
+            curr_weights = torch.concat([t.flatten() for k, t in model.module.named_parameters() if t.requires_grad])
             loss += self.mu * (self.fisher_old * (curr_weights - self.old_weights).pow(2)).sum()
-        # breakpoint()
+
         return (loss, outputs) if return_outputs else loss
     
     def _inner_training_loop(
@@ -209,7 +218,7 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         self.model.set_state('lora2')
         self.model.activate_lora2()
         # self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
-        self.old_weights = torch.concat([t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad])
+        self.old_weights = torch.concat([t.detach().clone().flatten() for k, t in self.model.named_parameters() if t.requires_grad])
         
         delay_optimizer_creation = is_sagemaker_mp_enabled() or self.is_fsdp_xla_enabled or self.is_fsdp_enabled
 
@@ -308,7 +317,11 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         if self.args.save_optim and self.curr_round > 0:
             output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
             self._load_optimizer_and_scheduler(output_dir)
-            self.fisher_old = self.optimizer.state_dict()['base_optimzier_state']['state'][0]['exp_avg_sq'].clone()
+            self.fisher_old = self.optimizer.state_dict()['base_optimizer_state']['state'][0]['exp_avg_sq'].clone()
+            
+            #normalize fisher
+            # self.fisher_old = normalize_fn(self.fisher_old)
+            
         # important: at this point:
         # self.model         is the Transformers Model
         # self.model_wrapped is DDP(Transformers Model), Deepspeed(Transformers Model),
@@ -554,9 +567,9 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                     # ema update
                     if optimizer_was_run and self.curr_round > 0:
                         with torch.no_grad():
-                            cur_weights = {k: t for k, t in self.model.named_parameters() if t.requires_grad}
-                            for name, param in self.old_weights.items():
-                                self.old_weights[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*cur_weights[name])
+                            curr_weights = torch.concat([t.flatten() for k, t in self.model.named_parameters() if t.requires_grad])
+                            self.old_weights = self.ema_ratio*self.old_weights + (1-self.ema_ratio)*curr_weights
+                    
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:
                     self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
@@ -674,7 +687,7 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         opt_model = self.model
 
         if self.optimizer is None:
-            decay_parameters = [name for name in decay_parameters if "bias" not in name]
+            # decay_parameters = [name for name in decay_parameters if "bias" not in name]
             optimizer_grouped_parameters = [
                 {
                     "params": [
@@ -702,3 +715,44 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                 logger.info(f"skipped: {skipped/2**20}M params")
 
         return self.optimizer
+    
+    def _load_optimizer_and_scheduler(self, checkpoint):
+        """If optimizer and scheduler states exist, load them."""
+        if checkpoint is None:
+            return
+
+        if self.is_deepspeed_enabled:
+            from deepspeed.runtime.state_dict_factory import SDLoaderFactory
+            from deepspeed.runtime.pipe.module import PipelineModule
+            latest_tag = "latest"
+            latest_path = os.path.join(checkpoint, latest_tag)
+            if os.path.isfile(latest_path):
+                with open(latest_path, "r") as fd:
+                    tag = fd.read().strip()
+                    
+            ckpt_list = self.model_wrapped._get_all_ckpt_names(checkpoint, tag)
+            sd_loader = SDLoaderFactory.get_sd_loader(ckpt_list, checkpoint_engine=self.model_wrapped.checkpoint_engine)
+
+            is_pipe_parallel = isinstance(self.model_wrapped.module, PipelineModule)
+
+            mp_rank = 0 if self.model_wrapped.mpu is None else self.model_wrapped.mpu.get_model_parallel_rank()
+            load_path, checkpoint_state, _ = sd_loader.load(self.model_wrapped.mp_world_size, mp_rank, is_pipe_parallel=is_pipe_parallel)
+            self.model_wrapped.loaded_checkpoint_dp_world_size = checkpoint_state['dp_world_size']
+            self.model_wrapped.loaded_checkpoint_mp_world_size = checkpoint_state['mp_world_size']
+            
+            zero_sd_list = self.model_wrapped._get_all_zero_checkpoints(checkpoint, tag)
+            self.model_wrapped.optimizer.load_state_dict(state_dict_list=zero_sd_list,
+                                       load_optimizer_states=True,
+                                       load_from_fp32_weights=self.model_wrapped.zero_load_from_fp32_weights(),
+                                       checkpoint_folder=None,
+                                       load_serial=None)
+            
+            # deepspeed loads optimizer/lr_scheduler together with the model in deepspeed_init
+            if not isinstance(self.lr_scheduler, DeepSpeedSchedulerWrapper):
+                with warnings.catch_warnings(record=True) as caught_warnings:
+                    self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, SCHEDULER_NAME)))
+                reissue_pt_warnings(caught_warnings)
+            return
+
+        else:
+            super()._load_optimizer_and_scheduler(checkpoint)
