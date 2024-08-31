@@ -63,7 +63,7 @@ import numpy as np
 
 logger = logging.get_logger(__name__)
 
-def OURS_GEN_ema_distill_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
+def OURS_GEN_ema_ewc_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
     task_id = extra_state_dict_dict['task_id'] if 'task_id' in extra_state_dict_dict else None
     ema_ratio = training_args.ema_ratio
     trainer = LLaVATrainerOURS(model=model,
@@ -96,27 +96,25 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         super(LLaVATrainerOURS, self).__init__(**kwargs)
         self.task_id = task_id
         self.ema_ratio = ema_ratio
-        self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+        # self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+        self.old_weights = torch.concat([t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad])
         self.mu = 1.0
+        self.fisher_old = None
+        
+        assert self.args.save_optim
     
     def compute_loss(self, model, inputs, return_outputs=False):
-        curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
-        with torch.no_grad():
-            model.module.load_state_dict(self.old_weights, strict=False)
-            _, outputs = super(LLaVATrainerOURS, self).compute_loss(
-                    model, inputs, return_outputs=True
-                )
-            outputs_target = outputs['logits']
-            model.module.load_state_dict(curr_weights, strict=False)
+        # curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
         loss, outputs = super(LLaVATrainerOURS, self).compute_loss(model, inputs, return_outputs=True)
         
         # loss_kl_1 = kl_loss(outputs['logits'], outputs_target.clone().detach())
         # loss_kl_1 = ((outputs['logits'] - outputs_target.detach())**2).mean()
             
         # loss = (loss + loss_kl_1) / 2
-        if self.curr_round > 0:
+        if self.curr_round > 0 and self.fisher_old is not None:
             # loss += self.mu*kl_loss(outputs['logits'], outputs_target.detach())
-            loss += self.mu * ((outputs['logits'] - outputs_target.detach())**2).mean()
+            curr_weights = torch.concat([t for k, t in self.model.module.named_parameters() if t.requires_grad])
+            loss += self.mu * (self.fisher_old * (curr_weights - self.old_weights).pow(2)).sum()
         # breakpoint()
         return (loss, outputs) if return_outputs else loss
     
@@ -210,7 +208,8 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         #     self.model.set_state('lora2')
         self.model.set_state('lora2')
         self.model.activate_lora2()
-        self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+        # self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+        self.old_weights = torch.concat([t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad])
         
         delay_optimizer_creation = is_sagemaker_mp_enabled() or self.is_fsdp_xla_enabled or self.is_fsdp_enabled
 
@@ -309,6 +308,7 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         if self.args.save_optim and self.curr_round > 0:
             output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
             self._load_optimizer_and_scheduler(output_dir)
+            self.fisher_old = self.optimizer.state_dict()['base_optimzier_state']['state'][0]['exp_avg_sq'].clone()
         # important: at this point:
         # self.model         is the Transformers Model
         # self.model_wrapped is DDP(Transformers Model), Deepspeed(Transformers Model),
@@ -660,3 +660,45 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         self.model.activate_all()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
+    
+    def create_optimizer(self):
+        """
+        Setup the optimizer.
+
+        We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
+        Trainer's init through `optimizers`, or subclass and override this method in a subclass.
+        """
+        if is_sagemaker_mp_enabled():
+            return super().create_optimizer()
+
+        opt_model = self.model
+
+        if self.optimizer is None:
+            decay_parameters = [name for name in decay_parameters if "bias" not in name]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters() if (p.requires_grad)
+                    ],
+                    "weight_decay": self.args.weight_decay,
+                },
+            ]
+
+            optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
+
+            self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
+            if optimizer_cls.__name__ == "Adam8bit":
+                import bitsandbytes
+
+                manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
+
+                skipped = 0
+                for module in opt_model.modules():
+                    if isinstance(module, nn.Embedding):
+                        skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
+                        logger.info(f"skipped {module}: {skipped/2**20}M params")
+                        manager.register_module_override(module, "weight", {"optim_bits": 32})
+                        logger.debug(f"bitsandbytes: will optimize {module} in fp32")
+                logger.info(f"skipped: {skipped/2**20}M params")
+
+        return self.optimizer

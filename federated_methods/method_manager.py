@@ -23,6 +23,7 @@ from federated_methods.ours_generator_ema import OURS_GEN_ema_create_trainer
 from federated_methods.lae import LAE_create_trainer
 from federated_methods.ditto_lae import ditto_lae_set_state_dict, ditto_lae_create_trainer
 from federated_methods.ours_generator_ema_distill import OURS_GEN_ema_distill_create_trainer
+from federated_methods.ours_generator_ema_ewc import OURS_GEN_ema_ewc_create_trainer
 
 def dummy_function(*args):
     return {}
@@ -81,6 +82,9 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
     elif mode == 'ours_generator2':
         # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_distill_create_trainer, OURS_aggregate_state_dict
+    
+    elif mode == 'ours_generator4':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_ewc_create_trainer, OURS_aggregate_state_dict
     else:
         raise NotImplementedError(mode)
     return set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules

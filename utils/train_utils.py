@@ -374,7 +374,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator2')
-        elif training_args.mode == 'ours_generator3':
+        elif training_args.mode == 'ours_generator3' or training_args.mode == 'ours_generator4':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaOURSGENIA3ForCausalLM3.from_pretrained(
                 model_args.model_name_or_path,
@@ -562,7 +562,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             ia3_config.peft_type = 'OURSGEN'
             ia3_config.generator_output_size = training_args.generator_output_size
             ia3_config.generator_hidden_feature = training_args.generator_hidden_feature
-        elif training_args.mode in ['ours_generator2', 'ours_generator3']:
+        elif training_args.mode in ['ours_generator2', 'ours_generator3', 'ours_generator4']:
             from models.dual_evoia32.dual_evoia3model2 import DualEVOIA3Model2
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['OURSGEN2'] = DualEVOIA3Model2
@@ -700,7 +700,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 p.requires_grad_(True)
         model.set_state('gate')
         model.activate_all()
-    elif training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2' or training_args.mode == 'ours_generator3':
+    elif training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2' or training_args.mode == 'ours_generator3' or training_args.mode == 'ours_generator4':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         model.lm_head.requires_grad_(False)
