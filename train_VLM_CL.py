@@ -105,6 +105,7 @@ def main():
     
     total_rounds = training_args.num_rounds * training_args.num_tasks
     last_task_id = [-1 for _ in range(training_args.num_clients)]
+    fisher_olds = [None for _ in range(training_args.num_clients)]
     
     lr_step = (init_lr - final_lr)/total_rounds
     mm_lr_step = (mm_init_lr - mm_final_lr)/total_rounds
@@ -182,10 +183,14 @@ def main():
             extra_state_dict_dict['curr_round'] = curr_round
             if training_args.use_task_id:
                 extra_state_dict_dict['task_id'] = task_id
+            if training_args.mode == 'ours_generator4':
+                extra_state_dict_dict['fisher_old'] = fisher_olds[client_id]
             trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
 
             results = trainer.train()
             training_loss[client_id].append(results.training_loss)
+            if training_args.mode == 'ours_generator4':
+                fisher_olds[client_id] = trainer.fisher_old
             
             if training_args.local_rank == 0 or training_args.local_rank == -1: 
                 path = os.path.join(training_args.state_dir, f"{client_id}_trainer_state.json")
