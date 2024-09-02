@@ -64,14 +64,14 @@ def ditto_set_state_dict(model, global_state_dict, local_state_dict_list, traini
     # layers_to_del = layer_num[-len(layer_num)//2:]
     keys_to_del = []
     for k in global_state_dict.keys():
-        if 'lora2' in k or 'lang_prompt_dap_key_embeddings_2' in k or 'lang_prompt_ia3_pool_2' in k:
+        if 'lora2' in k or 'lang_prompt_dap_key_embeddings_2' in k or 'lang_prompt_ia3_pool_2' in k or 'ia3_l_2' in k:
             keys_to_del.append(k)
     for k in keys_to_del:
         del global_state_dict[k]
     
     local_keys_to_del = []
     for k in local_state_dict_list[0].keys():
-        if 'lora1' in k or 'lang_prompt_dap_key_embeddings_1' in k or 'lang_prompt_ia3_pool_1' in k:
+        if 'lora1' in k or 'lang_prompt_dap_key_embeddings_1' in k or 'lang_prompt_ia3_pool_1' in k or 'ia3_l_1' in k:
             local_keys_to_del.append(k)
     for client_id in range(training_args.num_clients):
         for k in local_keys_to_del:

@@ -34,6 +34,8 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, sft_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
     elif mode == 'fedavg':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
+    elif mode =='ditto':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = ditto_set_state_dict, fedper_load_state_dict, ditto_create_trainer, fedavg_aggregate_state_dict
     
     elif mode == 'L2P_T2' or mode =='L2P2' \
         or mode == 'DAP' or mode == 'DAP_T' \

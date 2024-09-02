@@ -107,15 +107,15 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         super(LLaVATrainerOURS, self).__init__(**kwargs)
         self.task_id = task_id
         self.ema_ratio = ema_ratio
-        # self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
-        self.old_weights = torch.concat([t.detach().clone().flatten() for k, t in self.model.named_parameters() if t.requires_grad])
-        self.mu = 1.0
-        # self.fisher_old = {k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
-        self.fisher_old = fisher_old.cuda() if fisher_old is not None else None
+        self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+        # self.old_weights = torch.concat([t.detach().clone().flatten() for k, t in self.model.named_parameters() if t.requires_grad])
+        self.mu = 100.0
+        self.fisher_old = {k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
+        # self.fisher_old = fisher_old.cuda() if fisher_old is not None else None
         #normalize fisher
         # self.fisher_old = {k:normalize_fn(p.cuda()) for k, p in fisher_old.items()} if fisher_old is not None else None
         
-        assert self.args.save_optim
+        # assert self.args.save_optim
     
     def compute_loss(self, model, inputs, return_outputs=False):
         # curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
@@ -127,17 +127,17 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         # loss = (loss + loss_kl_1) / 2
         if self.curr_round > 0 and self.fisher_old is not None:
             # loss += self.mu*kl_loss(outputs['logits'], outputs_target.detach())
-            curr_weights = torch.concat([t.flatten() for k, t in model.module.named_parameters() if t.requires_grad])
+            # curr_weights = torch.concat([t.flatten() for k, t in model.module.named_parameters() if t.requires_grad])
             # loss += self.mu * (self.fisher_old * (curr_weights - self.old_weights).pow(2)).sum()
-            delta = curr_weights - self.old_weights
-            fisher_loss = delta @ (delta*self.fisher_old) / 2
-            # fisher_loss = 0
-            # for name, param in model.module.named_parameters():
-            # # only trainable parameters
-            #     if not param.requires_grad:
-            #         continue
-            #     else:
-            #         fisher_loss += (self.fisher_old[name] * (param - self.old_weights[name]).pow(2)).sum()
+            # delta = curr_weights - self.old_weights
+            # fisher_loss = delta @ (delta*self.fisher_old) / 2
+            fisher_loss = 0
+            for name, param in model.module.named_parameters():
+            # only trainable parameters
+                if not param.requires_grad:
+                    continue
+                else:
+                    fisher_loss += (self.fisher_old[name] * (param - self.old_weights[name]).pow(2)).sum()
             loss += self.mu * fisher_loss
         return (loss, outputs) if return_outputs else loss
     
@@ -231,8 +231,8 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         #     self.model.set_state('lora2')
         self.model.set_state('lora2')
         self.model.activate_lora2()
-        # self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
-        self.old_weights = torch.concat([t.detach().clone().flatten() for k, t in self.model.named_parameters() if t.requires_grad])
+        self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+        # self.old_weights = torch.concat([t.detach().clone().flatten() for k, t in self.model.named_parameters() if t.requires_grad])
         
         delay_optimizer_creation = is_sagemaker_mp_enabled() or self.is_fsdp_xla_enabled or self.is_fsdp_enabled
 
@@ -694,12 +694,12 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         # if self.curr_round > 0:
         #     self.model.load_state_dict(self.old_weights, strict=False)
         
-        # self.fisher_old = {}
-        # for name, param in self.model.named_parameters():
-        #     if param.requires_grad:
-        #         self.fisher_old[name] = safe_get_full_optimizer_state(param, "exp_avg_sq")
-        self.fisher_old = torch.concat([safe_get_full_optimizer_state(param, "exp_avg_sq").detach().flatten() 
-                                        for name, param in self.model.named_parameters() if param.requires_grad]).to(torch.bfloat16)
+        self.fisher_old = {}
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                self.fisher_old[name] = safe_get_full_optimizer_state(param, "exp_avg_sq")
+        # self.fisher_old = torch.concat([safe_get_full_optimizer_state(param, "exp_avg_sq").detach().flatten() 
+        #                                 for name, param in self.model.named_parameters() if param.requires_grad]).to(torch.bfloat16)
         self.model.activate_all()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
