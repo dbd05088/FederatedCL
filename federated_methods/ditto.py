@@ -100,7 +100,7 @@ class LLaVATrainerDITTO(LLaVATrainerTaskId):
         self.global_state = global_state
         for k in self.global_state.keys():
             self.global_state[k] = self.global_state[k].cuda()
-        self.mu = 0.01
+        self.mu = 0.1
         
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], update_adapter) -> torch.Tensor:
         model.train()
@@ -155,6 +155,9 @@ class LLaVATrainerDITTO(LLaVATrainerTaskId):
                     loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
                 elif 'lang_prompt_dap_key_embeddings_2' in name:
                     target_name = name.replace('lang_prompt_dap_key_embeddings_2', 'lang_prompt_dap_key_embeddings_1')
+                    loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
+                elif 'ia3_l_2' in name:
+                    target_name = name.replace('ia3_l_2', 'ia3_l_1')
                     loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
             # model.module.base_model.model.model.mm_projector = None
             return (loss_local, local_outputs) if return_outputs else loss_local

@@ -63,10 +63,11 @@ class LLaVATrainerTaskId(LLaVATrainerFEDAVG):
             text_prompt = inputs.pop('prompt')
         else:
             text_prompt = None
-        if self.task_id:
-            outputs = model(**inputs, task_id=self.task_id, prompt=text_prompt) if text_prompt else model(**inputs, task_id=self.task_id)
+        
+        if self.task_id is not None:
+            outputs = model(**inputs, task_id=self.task_id, prompt=text_prompt) if text_prompt is not None else model(**inputs, task_id=self.task_id)
         else:
-            outputs = model(**inputs, prompt=text_prompt) if text_prompt else model(**inputs)
+            outputs = model(**inputs, prompt=text_prompt) if text_prompt is not None else model(**inputs)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
