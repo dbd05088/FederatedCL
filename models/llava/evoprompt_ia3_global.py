@@ -38,7 +38,7 @@ import torch.nn.functional as F
 from models.evo_ia3.evoia3_attn import LlamaEVOIA3Attention
 from models.evo_ia3.evoia3_mlp import LlamaEVOIA3MLP
 
-from models.attention_prompt_generator import prefix_attention
+from models.attention_prompt_generator2 import prefix_attention2
 from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer
 from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 
@@ -64,9 +64,9 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         
-        self.lang_prompt_downsample_1 = prefix_attention(prefix_num=1, output_size=config.generator_output_size, head_dim=config.generator_hidden_dim)
+        self.lang_prompt_downsample_1 = prefix_attention2(prefix_num=1, output_size=config.generator_output_size, head_dim=config.generator_hidden_dim)
         self.lang_prompt_norm_1 = nn.LayerNorm(config.hidden_size, eps=1e-6)
-        self.lang_prompt_downsample_2 = prefix_attention(prefix_num=1, output_size=config.generator_output_size, head_dim=config.generator_hidden_dim)
+        self.lang_prompt_downsample_2 = prefix_attention2(prefix_num=1, output_size=config.generator_output_size, head_dim=config.generator_hidden_dim)
         self.lang_prompt_norm_2 = nn.LayerNorm(config.hidden_size, eps=1e-6)
 
     def forward(

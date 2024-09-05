@@ -17,6 +17,7 @@ import json
 from transformers import BitsAndBytesConfig
 import time
 import datetime
+import torch.nn.functional as F
 
 from models.coda_prompt import CodaPrompt
 
@@ -86,6 +87,7 @@ def main():
     )
     global_state_dict.update(non_lora_state_dict)
     local_state_dict_list = [copy.deepcopy(global_state_dict) for i in range(training_args.num_clients)]
+    old_local_state_dict_list = [copy.deepcopy(local_state_dict_list[i]) for i in range(len(local_state_dict_list))]
     local_state_dict_keys = local_state_dict_list[0].keys()
     extra_state_dict_dict = set_state_dict(model, global_state_dict, local_state_dict_list, training_args)
 
@@ -106,10 +108,18 @@ def main():
     total_rounds = training_args.num_rounds * training_args.num_tasks
     last_task_id = [-1 for _ in range(training_args.num_clients)]
     fisher_olds = [None for _ in range(training_args.num_clients)]
+    task_vectors = [None for _ in range(training_args.num_clients)]
     
     lr_step = (init_lr - final_lr)/total_rounds
     mm_lr_step = (mm_init_lr - mm_final_lr)/total_rounds
     for curr_round in range(total_rounds):
+        old_local_state_dict_list = [copy.deepcopy(local_state_dict_list[i]) for i in range(len(local_state_dict_list))]
+        if curr_round > 0:
+            task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
+            sim = torch.matmul(task_vector,
+                            torch.transpose(task_vector, 1, 0))
+            sim = torch.transpose(sim, 1, 0)
+            extra_state_dict_dict['task_similarty'] = sim
         # clients turn
         cids = np.arange(training_args.num_clients).tolist()
         num_selection = int(round(training_args.num_clients*frac_clients)) #4#
@@ -128,14 +138,19 @@ def main():
             torch.cuda.empty_cache()
             client_id = selected_ids[idx]
             
-            load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args)
-            print('model loading done')
-            
             ##### simulate online memory insertion & get_batch ####
             sub_dataset = train_datalists[client_id][curr_round]['datalist']
             num_iterations = train_datalists[client_id][curr_round]['num_iter']
             
             task_id = train_datalists[client_id][curr_round]['task_id']
+            
+            extra_state_dict_dict['client_id'] = client_id
+            extra_state_dict_dict['curr_round'] = curr_round
+            if training_args.use_task_id:
+                extra_state_dict_dict['task_id'] = task_id
+            
+            load_state_dict(model, global_state_dict, old_local_state_dict_list, client_id, training_args, extra_state_dict_dict)
+            print('model loading done')
             
             if 'CodaPrompt' in training_args.mode and task_id is not None and task_id != last_task_id[client_id]:
                 for n, m in model.named_modules():
@@ -179,10 +194,7 @@ def main():
                 logger.info(f'Round {curr_round} | train client {client_id} | num samples {len(sub_dataset)}')
 
             # ===== Train local model on the client side =====
-            extra_state_dict_dict['client_id'] = client_id
-            extra_state_dict_dict['curr_round'] = curr_round
-            if training_args.use_task_id:
-                extra_state_dict_dict['task_id'] = task_id
+            
             if training_args.mode == 'ours_generator4':
                 extra_state_dict_dict['fisher_old'] = fisher_olds[client_id]
             trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
@@ -191,6 +203,9 @@ def main():
             training_loss[client_id].append(results.training_loss)
             if training_args.mode == 'ours_generator4':
                 fisher_olds[client_id] = trainer.fisher_old
+            
+            if training_args.mode == 'ours_generator':
+                task_vectors[client_id] = trainer.task_vector
             
             if training_args.local_rank == 0 or training_args.local_rank == -1: 
                 path = os.path.join(training_args.state_dir, f"{client_id}_trainer_state.json")

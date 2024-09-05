@@ -64,6 +64,7 @@ from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 from collections import OrderedDict
 import numpy as np
 import warnings
+from deepspeed.utils import safe_get_full_optimizer_state
 
 logger = logging.get_logger(__name__)
 
@@ -83,6 +84,62 @@ def OURS_GEN_ema_distill_create_trainer(model, tokenizer, training_args, data_mo
         )
     return trainer
 
+def OURS_GEN_load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args, extra_state_dict_dict=None):
+    # first load loca model and then load global model
+    with torch.no_grad():
+        if 'zero3' in training_args.deepspeed:
+            load_deepspeed(local_state_dict_list[client_id], model, strict=False)
+        else:
+            model.load_state_dict(local_state_dict_list[client_id], strict=False)  
+    
+    
+        # total mean
+        # if 'zero3' in training_args.deepspeed:
+        #     load_deepspeed(global_state_dict, model, strict=False)
+        # else:
+        #     model.load_state_dict(global_state_dict, strict=False) 
+        
+        # exlude mean
+        # if extra_state_dict_dict['curr_round'] > 0:
+        #     new_global_state_dict = {}
+        #     for name in global_state_dict.keys():
+        #         new_param = 0
+        #         for id in range(training_args.num_clients):
+        #             if id == client_id:
+        #                 continue
+        #             new_param += local_state_dict_list[id][name]
+        #         new_param /= (training_args.num_clients - 1)
+        #         new_global_state_dict[name] = new_param
+        # else:
+        #     new_global_state_dict = global_state_dict
+        # if 'zero3' in training_args.deepspeed:
+        #     load_deepspeed(new_global_state_dict, model, strict=False)
+        # else:
+        #     model.load_state_dict(new_global_state_dict, strict=False) 
+        
+        # gradient based similarity wegithed averaging (exclude own)
+        if extra_state_dict_dict['curr_round'] > 0:
+            # similarity matrix
+            sim = extra_state_dict_dict['task_similarty']
+            
+            new_global_state_dict = {}
+            for name in global_state_dict.keys():
+                new_param = 0
+                sim_sum = sim[client_id].sum()
+                for id in range(training_args.num_clients):
+                    if id == client_id:
+                        continue
+                    new_param += sim[client_id][id]*local_state_dict_list[id][name] / sim_sum
+                new_global_state_dict[name] = new_param
+        else:
+            new_global_state_dict = global_state_dict
+        if 'zero3' in training_args.deepspeed:
+            load_deepspeed(new_global_state_dict, model, strict=False)
+        else:
+            model.load_state_dict(new_global_state_dict, strict=False) 
+        
+        
+
 def kl_loss(output, target, temp=2):
     if output.shape[-1]>3000:
         p = F.log_softmax(output / temp, dim=-1)
@@ -101,17 +158,21 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         self.task_id = task_id
         self.ema_ratio = ema_ratio
         self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
-        self.mu = 1.0
+        self.mu = 0.1
     
     def compute_loss(self, model, inputs, return_outputs=False):
-        curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
-        with torch.no_grad():
-            model.module.load_state_dict(self.old_weights, strict=False)
-            _, outputs = super(LLaVATrainerOURS, self).compute_loss(
-                    model, inputs, return_outputs=True
-                )
-            outputs_target = outputs['logits']
-            model.module.load_state_dict(curr_weights, strict=False)
+        if self.curr_round > 0:
+            curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
+            with torch.no_grad():
+                model.module.load_state_dict(self.old_weights, strict=False)
+                model.module.set_state('lora2')
+                _, outputs = super(LLaVATrainerOURS, self).compute_loss(
+                        model, inputs, return_outputs=True
+                    )
+                outputs_target = outputs['logits']
+                model.module.load_state_dict(curr_weights, strict=False)
+                model.module.set_state('gate')
+        
         loss, outputs = super(LLaVATrainerOURS, self).compute_loss(model, inputs, return_outputs=True)
         
         # loss_kl_1 = kl_loss(outputs['logits'], outputs_target.clone().detach())
@@ -208,11 +269,11 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                 debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
 
         # OURS:
-        # if self.curr_round > 0:
-        #     self.model.set_state('gate')
-        # else:
-        #     self.model.set_state('lora2')
-        self.model.set_state('lora2')
+        if self.curr_round > 0:
+            self.model.set_state('gate')
+        else:
+            self.model.set_state('lora2')
+        # self.model.set_state('lora2')
         self.model.activate_lora2()
         self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
         
@@ -660,10 +721,56 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         # Optimal Transport Combination within client
         # if self.curr_round > 0:
         #     self.model.load_state_dict(self.old_weights, strict=False)
-            
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                self.task_vector = safe_get_full_optimizer_state(param, "exp_avg")
+        self.task_vector = self.task_vector.detach().clone().cpu()
+        
         self.model.activate_all()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
+    
+    def create_optimizer(self):
+        """
+        Setup the optimizer.
+
+        We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
+        Trainer's init through `optimizers`, or subclass and override this method in a subclass.
+        """
+        if is_sagemaker_mp_enabled():
+            return super().create_optimizer()
+
+        opt_model = self.model
+
+        if self.optimizer is None:
+            # decay_parameters = [name for name in decay_parameters if "bias" not in name]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters() if (p.requires_grad)
+                    ],
+                    "weight_decay": self.args.weight_decay,
+                },
+            ]
+
+            optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
+
+            self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
+            if optimizer_cls.__name__ == "Adam8bit":
+                import bitsandbytes
+
+                manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
+
+                skipped = 0
+                for module in opt_model.modules():
+                    if isinstance(module, nn.Embedding):
+                        skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
+                        logger.info(f"skipped {module}: {skipped/2**20}M params")
+                        manager.register_module_override(module, "weight", {"optim_bits": 32})
+                        logger.debug(f"bitsandbytes: will optimize {module} in fp32")
+                logger.info(f"skipped: {skipped/2**20}M params")
+
+        return self.optimizer
     
     # only load deepspeeed optimizer
     def _load_optimizer_and_scheduler(self, checkpoint):
