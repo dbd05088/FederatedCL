@@ -31,6 +31,8 @@ from models.duallora.dualloralayer import DualLoraLayer
 from models.dual_ia3.dual_ia3_layer import DualIA3Layer
 
 import warnings
+import time
+import datetime
 warnings.filterwarnings('ignore')
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
@@ -365,7 +367,7 @@ def main():
     batch_size = 1 if 'l2p' in training_args.mode or 'dap' in training_args.mode or 'LAE' in training_args.mode else 2
     
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
-    
+    start_time = time.time()
     server_eval_key = []
     
     if not training_args.zeroshot and training_args.eval_server:
@@ -422,7 +424,8 @@ def main():
                     else:
                         evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
                     server_eval_key.append(data_info['data_name'])
-
+    
+    logger.info(f"elapsed time {datetime.timedelta(seconds=int(time.time() - start_time))} | ")
 def get_datalists(args, scenario_num):
     with open(f"./scenarios/scenario-{scenario_num}.json") as fp:
         scenario = json.load(fp)
