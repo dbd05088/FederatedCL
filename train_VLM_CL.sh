@@ -1,15 +1,15 @@
 #!/bin/bash
 # CIL CONFIG
-NOTE="L2P_T2_5_20_15e-2_sc24_4tasks_5rounds_itr125" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="L2P_T2"
+NOTE="ours_generator_512_8_8_bs4_saveoptim_l2distill0.1_fishernormmerge_lr3e-4_sc22_4tasks_5rounds_itr125" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="ours_generator"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 RND_SEED=1
 
 # fed args
-SCENARIO=24
+SCENARIO=22
 NUM_ROUNDS=5
 NUM_TASKS=4
-NUM_CLIENTS=2
+NUM_CLIENTS=4
 MODEL_MAX_LEN=20000
 NUM_ITER=125
 MEMORY_SIZE=100000
@@ -17,15 +17,29 @@ IS_STREAMONLY=True
 
 LORA_ENABLE=False
 IA3_ENABLE=True
-PROMPT_NUM=15
-USE_TASK_ID=True
+
+USE_TASK_ID=False
+USE_PROMPT=False
+
+SAVE_OPTIM=True
+
+USE_TASK_VECTOR=False
+USE_FISHER=True
+
+GENERATOR_OUTPUT_SIZE=512
+GENERATOR_HIDDEN_DIM=8
+GENERATOR_HIDDEN_FEATURE=8
+KEY_EMBED_SIZE=64
+POOL_SIZE=12
+PROMPT_TOP_K=3
+EMA_RATIO=0.9
 
 BATCHSIZE=4
 
-LR=1.5e-2
-MM_PROJECTOR_LR=1.5e-2
-FINAL_LR=1.5e-2
-MM_FINAL_LR=1.5e-2
+LR=3e-4
+MM_PROJECTOR_LR=$LR #3e-4
+FINAL_LR=$LR #3e-4
+MM_FINAL_LR=$LR #3e-4
 OPT_NAME="adamw_torch" # adam8bit_bnb adamw_torch
 SCHED_NAME="constant" #cosine
 WARMUP_RATIO=0.1 # SHOULD BE 0.03 / NUM_ROUNDS
@@ -56,8 +70,8 @@ else
 fi
 # --master_port 29500
 # --num_gpus=4
-deepspeed --master_port 29600 \
-    --include localhost:4,5,6,7 \
+deepspeed --master_port 29504 \
+    --include localhost:4 \
     train_VLM_CL.py \
     --deepspeed ./deepspeed_script/zero2.json \
     --model_name_or_path $MODEL_NAME \
@@ -93,19 +107,20 @@ deepspeed --master_port 29600 \
     --note $NOTE \
     --memory_size $MEMORY_SIZE \
     --is_streamonly $IS_STREAMONLY \
-    --prompt_num $PROMPT_NUM \
+    --prompt_num 1 \
     --lora_enable $LORA_ENABLE \
     --ia3_enable $IA3_ENABLE \
     --use_task_id $USE_TASK_ID \
-    --get_prompt True \
-    --generator_output_size 256 \
-    --generator_hidden_dim 8 \
-    --generator_hidden_feature 16 \
-    --key_embed_size 128 \
-    --pool_size 20 \
-    --prompt_top_k 5 \
-    --save_optim False \
-    --output_dir "./results/test/" > ./nohup/L2P_T2_5_20_lr15e-2_sc24_4tasks_5rounds_itr125.log 2>&1 &
+    --get_prompt $USE_PROMPT \
+    --generator_output_size $GENERATOR_OUTPUT_SIZE \
+    --generator_hidden_dim $GENERATOR_HIDDEN_DIM \
+    --generator_hidden_feature $GENERATOR_HIDDEN_FEATURE \
+    --ema_ratio $EMA_RATIO \
+    --key_embed_size $KEY_EMBED_SIZE \
+    --pool_size $POOL_SIZE \
+    --prompt_top_k $PROMPT_TOP_K \
+    --save_optim $SAVE_OPTIM \
+    --output_dir "./results/test/" > ./nohup/${NOTE}.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD
 # lr_scheduler_type

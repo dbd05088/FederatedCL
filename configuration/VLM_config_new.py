@@ -130,3 +130,6 @@ class TrainingArguments(transformers.TrainingArguments):
     key_embed_size:int = 64
     pool_size:int = 4
     prompt_top_k:int = 1
+    
+    use_task_vector:bool = False
+    use_fisher:bool = False

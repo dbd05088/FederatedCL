@@ -114,12 +114,14 @@ def main():
     mm_lr_step = (mm_init_lr - mm_final_lr)/total_rounds
     for curr_round in range(total_rounds):
         old_local_state_dict_list = [copy.deepcopy(local_state_dict_list[i]) for i in range(len(local_state_dict_list))]
-        if curr_round > 0:
+        
+        if curr_round > 0 and training_args.use_task_vector:
             task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
             sim = torch.matmul(task_vector,
                             torch.transpose(task_vector, 1, 0))
             sim = torch.transpose(sim, 1, 0)
             extra_state_dict_dict['task_similarty'] = sim
+        
         # clients turn
         cids = np.arange(training_args.num_clients).tolist()
         num_selection = int(round(training_args.num_clients*frac_clients)) #4#
@@ -195,16 +197,19 @@ def main():
 
             # ===== Train local model on the client side =====
             
-            if training_args.mode == 'ours_generator4':
+            # if training_args.mode == 'ours_generator4' or training_args.mode == 'ours_generator':
+            if training_args.use_fisher:
                 extra_state_dict_dict['fisher_old'] = fisher_olds[client_id]
             trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
 
             results = trainer.train()
             training_loss[client_id].append(results.training_loss)
-            if training_args.mode == 'ours_generator4':
+            # if training_args.mode == 'ours_generator4' or training_args.mode == 'ours_generator':
+            if training_args.user_fisher:
                 fisher_olds[client_id] = trainer.fisher_old
             
-            if training_args.mode == 'ours_generator':
+            # if training_args.mode == 'ours_generator':
+            if training_args.use_task_vector:
                 task_vectors[client_id] = trainer.task_vector
             
             if training_args.local_rank == 0 or training_args.local_rank == -1: 
@@ -257,7 +262,7 @@ def main():
         if (training_args.local_rank == 0 or training_args.local_rank == -1): 
             torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
             
-    if training_args.mode == 'ours_generator':
+    if training_args.use_task_vector:
         task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
         sim = torch.matmul(task_vector,
                         torch.transpose(task_vector, 1, 0))
