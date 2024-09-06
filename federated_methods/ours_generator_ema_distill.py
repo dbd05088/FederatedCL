@@ -121,16 +121,20 @@ def OURS_GEN_load_state_dict(model, global_state_dict, local_state_dict_list, cl
         if extra_state_dict_dict['curr_round'] > 0:
             # similarity matrix
             sim = extra_state_dict_dict['task_similarty']
-            
             new_global_state_dict = {}
+            sim_sum = sim[client_id].sum() - sim[client_id][client_id]
             for name in global_state_dict.keys():
                 new_param = 0
-                sim_sum = sim[client_id].sum()
                 for id in range(training_args.num_clients):
                     if id == client_id:
                         continue
                     new_param += sim[client_id][id]*local_state_dict_list[id][name] / sim_sum
+                    
                 new_global_state_dict[name] = new_param
+            
+            if (training_args.local_rank == 0 or training_args.local_rank == -1):
+                output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
+                torch.save(new_global_state_dict, output_dir)
         else:
             new_global_state_dict = global_state_dict
         if 'zero3' in training_args.deepspeed:
@@ -723,8 +727,8 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         #     self.model.load_state_dict(self.old_weights, strict=False)
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                self.task_vector = safe_get_full_optimizer_state(param, "exp_avg")
-        self.task_vector = self.task_vector.detach().clone().cpu()
+                self.task_vector = safe_get_full_optimizer_state(param, "exp_avg_sq")
+        self.task_vector = self.task_vector.flatten().detach().clone().cpu()
         
         self.model.activate_all()
 

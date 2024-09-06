@@ -256,6 +256,16 @@ def main():
         # Save server model
         if (training_args.local_rank == 0 or training_args.local_rank == -1): 
             torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
+            
+    if training_args.mode == 'ours_generator':
+        task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
+        sim = torch.matmul(task_vector,
+                        torch.transpose(task_vector, 1, 0))
+        sim = torch.transpose(sim, 1, 0)
+        extra_state_dict_dict['task_similarty'] = sim
+        extra_state_dict_dict['curr_round'] += 1
+        for client_id in range(training_args.num_clients):
+            load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args, extra_state_dict_dict)
     logger.info("total done\n")
 
 def make_supervised_data_module(client_data, tokenizer: transformers.PreTrainedTokenizer,
