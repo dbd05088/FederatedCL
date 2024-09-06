@@ -120,6 +120,8 @@ deepspeed --master_port 29504 \
     --pool_size $POOL_SIZE \
     --prompt_top_k $PROMPT_TOP_K \
     --save_optim $SAVE_OPTIM \
+    --use_task_vector $USE_TASK_VECTOR \
+    --use_fisher $USE_FISHER \
     --output_dir "./results/test/" > ./nohup/${NOTE}.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD
