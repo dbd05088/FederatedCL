@@ -326,6 +326,6 @@ def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=False, is_training=False)
     else:
         gumbel_out = logits.to(torch.bfloat16)
     # Calculate the final result based on gumbel_out
-    result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * (0.5 * (tensor1 + tensor2))
+    result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * tensor2 # (0.5 * (tensor1 + tensor2))
     
     return result, gumbel_out

@@ -59,7 +59,7 @@ import numpy as np
 
 logger = logging.get_logger(__name__)
 
-def fedavg_load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args):
+def fedavg_load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args, extra_state_dict_dict):
     model_to_load = global_state_dict
     with torch.no_grad():
         if 'zero3' in training_args.deepspeed:

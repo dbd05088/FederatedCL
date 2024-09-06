@@ -58,7 +58,7 @@ def fedper_8_set_state_dict(model, global_state_dict, local_state_dict_list, tra
         del global_state_dict[k]
     return {}
 
-def fedper_load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args):
+def fedper_load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args, extra_state_dict_dict):
     # first load loca model and then load global model
     with torch.no_grad():
         if 'zero3' in training_args.deepspeed:
