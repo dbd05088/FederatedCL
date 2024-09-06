@@ -205,7 +205,7 @@ def main():
             results = trainer.train()
             training_loss[client_id].append(results.training_loss)
             # if training_args.mode == 'ours_generator4' or training_args.mode == 'ours_generator':
-            if training_args.user_fisher:
+            if training_args.use_fisher:
                 fisher_olds[client_id] = trainer.fisher_old
             
             # if training_args.mode == 'ours_generator':
