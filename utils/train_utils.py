@@ -20,7 +20,7 @@ from models.dap_ia3.dapia3layer import DAPIA3Layer
 from models.feddat_lora.tripleloralayer import TripleLoraLayer
 
 from models.llava.ditto import LlavaLlamaFordittoCausalLM
-# from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
+from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
 # from models.llava.l2p_model import Llava_L2P
 # from models.llava.l2p_layerwise_model import LlavaLlamaL2PForCausalLM
 # from models.llava.dap_model import LlavaLlamaDAPForCausalLM
@@ -390,6 +390,14 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         
         elif 'ditto' == training_args.mode:
             model = LlavaLlamaFordittoCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+        elif 'fedsim' == training_args.mode:
+            model = FEDSIMLlavaLlamaForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,

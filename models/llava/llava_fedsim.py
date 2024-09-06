@@ -16,6 +16,9 @@ from transformers.generation.streamers import BaseStreamer
 import warnings
 from transformers.utils import logging
 import copy
+from models.duallora.dualloralayer import DualLoraLayer
+from models.dual_ia3.dual_ia3_layer import DualIA3Layer
+
 logger = logging.get_logger(__name__)
 
 class LlavaConfig(LlamaConfig):
@@ -39,9 +42,34 @@ class FEDSIMLlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
 
         # Initialize weights and apply final processing
         self.post_init()
+        
+        self.active_state = 'loar1'
 
     def get_model(self):
         return self.model
+    
+    def set_state(self, state):
+        assert state in ['lora1', 'lora2', 'gate'], state
+        self.active_state = state
+        
+        for name, module in self.model.named_modules():
+            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
+                module.set_state(state)
+
+    def activate_all(self):
+        for name, module in self.model.named_modules():
+            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
+                module.activate_all()
+
+    def activate_lora1(self):
+        for name, module in self.model.named_modules():
+            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
+                module.activate_lora1()
+    
+    def activate_lora2(self):
+        for name, module in self.model.named_modules():
+            if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
+                module.activate_lora2()
     
     def forward(
         self,
@@ -105,31 +133,12 @@ class FEDSIMLlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             raise NotImplementedError("`inputs_embeds` is not supported")
 
         if images is not None:
-            self.model.base_model.mm_projector = self.model.base_model.global_mm_projector
-            (
-                _,
-                _,
-                _,
-                _,
-                inputs_embeds1,
-                _
-            ) = self.prepare_inputs_labels_for_multimodal(
-                copy.deepcopy(inputs),
-                position_ids,
-                attention_mask,
-                None,
-                None,
-                images,
-                image_sizes=image_sizes
-            )
-            
-            self.model.base_model.mm_projector = self.model.base_model.local_mm_projector
             (
                 inputs,
                 position_ids,
                 attention_mask,
                 _,
-                inputs_embeds2,
+                inputs_embeds,
                 _
             ) = self.prepare_inputs_labels_for_multimodal(
                 inputs,
@@ -138,27 +147,21 @@ class FEDSIMLlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 None,
                 None,
                 images,
-                image_sizes=image_sizes
             )
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
         return super().generate(
-            # inputs=inputs,
-            # images=images,
             position_ids=position_ids,
             attention_mask=attention_mask,
-            inputs_embeds1=inputs_embeds1,
-            inputs_embeds2=inputs_embeds2,
+            inputs_embeds=inputs_embeds,
             **kwargs
         )
         
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, attention_mask=None,
-                                      inputs_embeds1=None, inputs_embeds2=None, **kwargs):
+                                      inputs_embeds=None, **kwargs):
         images = kwargs.pop("images", None)
         image_sizes = kwargs.pop("image_sizes", None)
-        
-        inputs_embeds = inputs_embeds1 if inputs_embeds1 is not None else inputs_embeds2
         
         inputs = super().prepare_inputs_for_generation(
             input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, attention_mask=attention_mask, **kwargs
@@ -256,18 +259,15 @@ class FEDSIMLlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=input_ids.device)
         model_kwargs["cache_position"] = torch.arange(cur_len, device=input_ids.device)
 
+
+        past_key_values_global = None
+        past_key_values_local = None
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
-            # prepare model inputs
-            inputs_embeds1 = model_kwargs.pop('inputs_embeds1', None)
-            inputs_embeds2 = model_kwargs.pop('inputs_embeds2', None)
             
             # global
             model_kwargs1 = copy.deepcopy(model_kwargs)
-            model_kwargs1['inputs_embeds1'] = inputs_embeds1
-            for name, module in self.model.named_modules():
-                if isinstance(module, DualLoraLayer):
-                    module.set_state('lora1')
-            self.model.base_model.mm_projector = self.model.base_model.global_mm_projector
+            model_kwargs1['past_key_values'] = past_key_values_global
+            self.set_state("lora1")
             model_inputs = self.prepare_inputs_for_generation(copy.deepcopy(input_ids), **model_kwargs1)
 
             # forward pass to get next token
@@ -277,14 +277,12 @@ class FEDSIMLlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
             )
+            past_key_values_global = outputs.past_key_values
             
             # local
             model_kwargs2 = copy.deepcopy(model_kwargs)
-            model_kwargs2['inputs_embeds2'] = inputs_embeds2
-            for name, module in self.model.named_modules():
-                if isinstance(module, DualLoraLayer):
-                    module.set_state('lora2')
-            self.model.base_model.mm_projector = self.model.base_model.local_mm_projector
+            model_kwargs2['past_key_values'] = past_key_values_local
+            self.set_state("lora2")
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs2)
 
             # forward pass to get next token
@@ -294,6 +292,7 @@ class FEDSIMLlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
             )
+            past_key_values_local = outputs2.past_key_values
             
             outputs.logits = outputs.logits + outputs2.logits
 

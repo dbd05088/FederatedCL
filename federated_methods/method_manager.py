@@ -36,6 +36,12 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = dummy_function, fedavg_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
     elif mode =='ditto':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = ditto_set_state_dict, fedper_load_state_dict, ditto_create_trainer, fedavg_aggregate_state_dict
+        
+    elif mode =='fedper':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedper_set_state_dict, fedper_load_state_dict, fedavg_create_trainer, fedavg_aggregate_state_dict
+        
+    elif mode =='fedsim':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedsim_set_state_dict, fedper_load_state_dict, fedsim_create_trainer, fedavg_aggregate_state_dict
     
     elif mode == 'L2P_T2' or mode =='L2P2' \
         or mode == 'DAP' or mode == 'DAP_T' \
@@ -50,7 +56,7 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
     elif mode =='L2P_T2_FedPer' or mode =='L2P2_FedPer' \
         or mode == 'DAP_FedPer' or mode == 'DAP_T_FedPer' \
         or mode == 'CodaPrompt_FedPer' or mode =='CodaPrompt_T_FedPer':
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedper_half_set_state_dict, fedper_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedper_set_state_dict, fedper_load_state_dict, task_id_create_trainer, fedavg_aggregate_state_dict
     
     elif mode =='L2P_T2_Ditto' or mode =='L2P2_Ditto' \
         or mode == 'DAP_Ditto' or mode == 'DAP_T_Ditto' \
