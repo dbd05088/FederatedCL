@@ -88,11 +88,13 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, OURS_GEN_load_state_dict, OURS_GEN_ema_distill_create_trainer, OURS_aggregate_state_dict
     elif mode == 'ours_generator3':
         # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_create_trainer, OURS_aggregate_state_dict
+        # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_create_trainer, OURS_aggregate_state_dict
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, OURS_GEN_load_state_dict, OURS_GEN_ema_distill_create_trainer, OURS_aggregate_state_dict
     elif mode == 'ours_generator2':
         # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_create_trainer, OURS_aggregate_state_dict
-        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_distill_create_trainer, OURS_aggregate_state_dict
-    
+        # set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_distill_create_trainer, OURS_aggregate_state_dict
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, OURS_GEN_load_state_dict, OURS_GEN_ema_distill_create_trainer, OURS_aggregate_state_dict
+        
     elif mode == 'ours_generator4':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_ewc_create_trainer, OURS_aggregate_state_dict
     else:

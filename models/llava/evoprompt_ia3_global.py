@@ -48,6 +48,18 @@ from functools import reduce
 
 logger = logging.get_logger(__name__)
 
+from dataclasses import dataclass
+from transformers.utils import ModelOutput
+
+@dataclass
+class CausalLMOutputWithPast2(ModelOutput):
+    loss: Optional[torch.FloatTensor] = None
+    logits: torch.FloatTensor = None
+    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    ia3_layer: Optional[Tuple[torch.FloatTensor, ...]]=None
+
 def expand_to_batch(x, batch_size, dim=0):
     shape = [1 for _ in x.shape]
     shape.insert(dim, batch_size)
@@ -124,7 +136,7 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         hidden_states = self.input_layernorm(hidden_states)
 
         # Self Attention
-        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+        hidden_states, self_attn_weights, present_key_value, (ia3_k, ia3_v) = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -140,7 +152,7 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states,query_embeds=new_query_embeds)
+        hidden_states, ia3_down = self.mlp(hidden_states,query_embeds=new_query_embeds)
         hidden_states = residual + hidden_states
         
         outputs = (hidden_states,)
@@ -150,6 +162,8 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
 
         if use_cache:
             outputs += (present_key_value,)
+            
+        outputs += (torch.cat((ia3_k, ia3_v, ia3_down), dim=-1),)
 
         return outputs
 
@@ -231,6 +245,7 @@ class LlamaEVOIA3Model(LlamaModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = None
         
+        ia3_layers = []
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -268,7 +283,9 @@ class LlamaEVOIA3Model(LlamaModel):
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
-
+            
+            ia3_layers.append(layer_outputs[-1])
+            
         hidden_states = self.norm(hidden_states)
 
         # add hidden states from the last decoder layer
@@ -287,7 +304,7 @@ class LlamaEVOIA3Model(LlamaModel):
             past_key_values=next_cache,
             hidden_states=all_hidden_states,
             attentions=all_self_attns,
-        )
+        ), ia3_layers
 
 
 class LlavaConfig(LlamaConfig):
@@ -324,7 +341,7 @@ class LlamaEVOIA3ForCausalLM(LlamaForCausalLM):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        outputs = self.model(
+        outputs, ia3_layer = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -362,15 +379,16 @@ class LlamaEVOIA3ForCausalLM(LlamaForCausalLM):
             loss = loss_fct(shift_logits, shift_labels)
 
         if not return_dict:
-            output = (logits,) + outputs[1:]
+            output = (logits,) + outputs[1:] + (ia3_layer,)
             return (loss,) + output if loss is not None else output
 
-        return CausalLMOutputWithPast(
+        return CausalLMOutputWithPast2(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            ia3_layer=ia3_layer,
         )
 
 

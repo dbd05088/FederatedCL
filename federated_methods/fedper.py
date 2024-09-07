@@ -10,7 +10,7 @@ def fedper_set_state_dict(model, global_state_dict, local_state_dict_list, train
         layer_num.append(int(k.split('.')[4]))
     layer_num = sorted(list(set(layer_num)))
     
-    layers_to_del = layer_num[-3:]
+    layers_to_del = layer_num[-1:]
     # layers_to_del = layer_num[-len(layer_num)//2:]
     keys_to_del = []
     for k in global_state_dict.keys():

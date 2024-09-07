@@ -120,6 +120,7 @@ def main():
             sim = torch.matmul(task_vector,
                             torch.transpose(task_vector, 1, 0))
             sim = torch.transpose(sim, 1, 0)
+            sim = (sim+1)/2 # normalize -1~1 to 0~1
             extra_state_dict_dict['task_similarty'] = sim
             print("task similarity matrix:")
             print(sim)
@@ -202,6 +203,9 @@ def main():
             # if training_args.mode == 'ours_generator4' or training_args.mode == 'ours_generator':
             if training_args.use_fisher:
                 extra_state_dict_dict['fisher_old'] = fisher_olds[client_id]
+                
+            if training_args.use_task_vector:
+                extra_state_dict_dict['task_vector'] = task_vectors[client_id]
             trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
 
             results = trainer.train()

@@ -15,6 +15,6 @@ class LlamaEVOIA3MLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x,query_embeds=None):
-        down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x), query_embeds=query_embeds)
+        down_proj, ia3 = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x), query_embeds=query_embeds)
 
-        return down_proj
+        return down_proj, ia3

@@ -293,7 +293,7 @@ class Linear(nn.Module, DualEVOIA3Layer):
                 result = result.to(dtype) * ia3_scaling.unsqueeze(1)
 
         result = result.to(previous_dtype)
-        return result
+        return result, ia3_scaling
 
 import torch.nn.functional as F
 def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=True, is_training=False):

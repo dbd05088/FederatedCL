@@ -47,8 +47,8 @@ class LlamaEVOIA3Attention(LlamaFlashAttention2):
         bsz, q_len, _ = hidden_states.size()
 
         query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states, query_embeds=query_embeds[0])
-        value_states = self.v_proj(hidden_states, query_embeds=query_embeds[1])
+        key_states, ia3_k = self.k_proj(hidden_states, query_embeds=query_embeds[0])
+        value_states, ia3_v = self.v_proj(hidden_states, query_embeds=query_embeds[1])
 
         # Flash attention requires the input to have the shape
         # batch_size x seq_length x head_dim x hidden_dim
@@ -112,4 +112,4 @@ class LlamaEVOIA3Attention(LlamaFlashAttention2):
         if not output_attentions:
             attn_weights = None
 
-        return attn_output, attn_weights, past_key_value
+        return attn_output, attn_weights, past_key_value, (ia3_k, ia3_v)
