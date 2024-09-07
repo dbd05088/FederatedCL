@@ -298,7 +298,7 @@ class Linear(nn.Module, DualEVOIA3Layer2):
         return result
 
 import torch.nn.functional as F
-def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=False, is_training=False):
+def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=True, is_training=False):
     # Initialize logits for each condition
     logits = torch.zeros(tensor1.size(0), tensor1.size(1), 3).to(tensor1.device)  # 3 categories: tensor1, tensor2, average
     
@@ -317,7 +317,7 @@ def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=False, is_training=False)
     logits[indices[0], indices[1], 0] = (tensor1[indices[0], indices[1]] <= tensor2[indices[0], indices[1]]).float()
     logits[indices[0], indices[1], 1] = (tensor2[indices[0], indices[1]] <= tensor1[indices[0], indices[1]]).float()
     
-    # For one_greater_one_smaller
+    # For one_greater_one_smaller 
     indices = one_greater_one_smaller.nonzero(as_tuple=True)
     logits[indices[0], indices[1], 2] = 1.0  # Average choice for mixed cases
     # logits[..., 2] = 1.0
@@ -327,7 +327,8 @@ def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=False, is_training=False)
         gumbel_out = F.gumbel_softmax(logits.to(torch.bfloat16), tau=tau, hard=hard)#.to(torch.bfloat16)
     else:
         gumbel_out = logits.to(torch.bfloat16)
-    # Calculate the final result based on gumbel_out
-    result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * (0.5 * (tensor1 + tensor2))
+    # Calculate the final result based on gumbel_out                                            
+    # result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * (0.5 * (tensor1 + tensor2))
+    result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * tensor2 #-> follow local
     
     return result, gumbel_out

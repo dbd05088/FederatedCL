@@ -121,6 +121,8 @@ def main():
                             torch.transpose(task_vector, 1, 0))
             sim = torch.transpose(sim, 1, 0)
             extra_state_dict_dict['task_similarty'] = sim
+            print("task similarity matrix:")
+            print(sim)
         
         # clients turn
         cids = np.arange(training_args.num_clients).tolist()

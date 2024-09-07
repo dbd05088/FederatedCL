@@ -176,7 +176,14 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                 outputs_target = outputs['logits']
                 model.module.load_state_dict(curr_weights, strict=False)
                 model.module.set_state('gate')
-        
+            
+            # with torch.no_grad():
+            #     model.module.set_state('lora1')
+            #     _, outputs = super(LLaVATrainerOURS, self).compute_loss(
+            #             model, inputs, return_outputs=True
+            #         )
+            #     outputs_target = outputs['logits']
+            #     model.module.set_state('lora2')
         loss, outputs = super(LLaVATrainerOURS, self).compute_loss(model, inputs, return_outputs=True)
         
         # loss_kl_1 = kl_loss(outputs['logits'], outputs_target.clone().detach())
@@ -626,6 +633,19 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                             cur_weights = {k: t for k, t in self.model.named_parameters() if t.requires_grad}
                             for name, param in self.old_weights.items():
                                 self.old_weights[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*cur_weights[name])
+                    
+                    # global ema update
+                    # if optimizer_was_run and self.curr_round > 0:
+                    #     with torch.no_grad():
+                    #         model_params = OrderedDict(self.model.named_parameters())
+                    #         for name, param in model_params.items():
+                    #             if 'lang_prompt_downsample_1' in name:
+                    #                 target_name = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
+                    #                 model_params[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*model_params[target_name])
+                    #             elif 'ia3_generator_1' in name:
+                    #                 target_name = name.replace('ia3_generator_1', 'ia3_generator_2')
+                    #                 model_params[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*model_params[target_name])
+                    
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:
                     self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
@@ -726,8 +746,9 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         # if self.curr_round > 0:
         #     self.model.load_state_dict(self.old_weights, strict=False)
         for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                self.task_vector = safe_get_full_optimizer_state(param, "exp_avg_sq")
+            # if param.requires_grad:
+            if name == 'base_model.model.model.layers.31.lang_prompt_downsample_2.oproj.weight':
+                self.task_vector = safe_get_full_optimizer_state(param, "exp_avg_sq") #_sq
         self.task_vector = self.task_vector.flatten().detach().clone().cpu()
         
         self.model.activate_all()

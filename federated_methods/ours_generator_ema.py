@@ -1,6 +1,7 @@
 from federated_methods.fedavg import LLaVATrainerFEDAVG
+from federated_methods.task_id import LLaVATrainerTaskId
 import copy
-from transformers.trainer import unwrap_model, _is_peft_model, MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
+from transformers.trainer import unwrap_model, _is_peft_model, MODEL_FOR_CAUSAL_LM_MAPPING_NAMES, SCHEDULER_NAME
 from easydict import EasyDict as edict
 from utils.optimal_transport import get_wassersteinized_layers_modularized
 
@@ -23,7 +24,7 @@ from transformers.trainer_utils import (
     has_length,
     speed_metrics,
 )
-from transformers.trainer_pt_utils import get_model_param_count, get_dataloader_sampler
+from transformers.trainer_pt_utils import get_model_param_count, get_dataloader_sampler, reissue_pt_warnings
 from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
 from transformers.integrations.deepspeed import deepspeed_init, deepspeed_load_checkpoint
 from transformers import Trainer
@@ -34,6 +35,7 @@ from transformers.trainer import (
     TRAINER_STATE_NAME,
     is_torch_xla_available,
     is_accelerate_available,
+    is_deepspeed_available,
     get_parameter_names,
     ALL_LAYERNORM_LAYERS
 )
@@ -53,12 +55,17 @@ if is_accelerate_available():
         from accelerate.data_loader import SeedableRandomSampler
 
         DATA_SAMPLERS += [SeedableRandomSampler]
+    
+    if is_deepspeed_available():
+        from accelerate.utils import DeepSpeedSchedulerWrapper
 
 from models.duallora.dualloralayer import DualLoraLayer
 from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer
 from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
 from collections import OrderedDict
 import numpy as np
+import warnings
+from deepspeed.utils import safe_get_full_optimizer_state
 
 logger = logging.get_logger(__name__)
 
@@ -74,66 +81,43 @@ def OURS_GEN_ema_create_trainer(model, tokenizer, training_args, data_module, ex
         curr_round=extra_state_dict_dict['curr_round'],
         task_id = task_id,
         ema_ratio=ema_ratio,
+        fisher_old=extra_state_dict_dict['fisher_old'] if 'fisher_old' in extra_state_dict_dict else None,
         **data_module,
         )
     return trainer
 
-class LLaVATrainerOURS(LLaVATrainerFEDAVG):
-    def __init__(self, task_id, ema_ratio=0.996, **kwargs):
+class LLaVATrainerOURS(LLaVATrainerTaskId):
+    def __init__(self, task_id, ema_ratio=0.996, fisher_old=None, **kwargs):
         super(LLaVATrainerOURS, self).__init__(**kwargs)
         self.task_id = task_id
         self.ema_ratio = ema_ratio
         self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
         self.mu = 0.1
+        self.fisher_old = {k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
     
     def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        How the loss is computed by Trainer. By default, all models return the loss in the first element.
-
-        Subclass and override for custom behavior.
-        """
-        if self.label_smoother is not None and "labels" in inputs:
-            labels = inputs.pop("labels")
-        else:
-            labels = None
+        if self.curr_round > 0:
+            curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
+            with torch.no_grad():
+                model.module.load_state_dict(self.old_weights, strict=False)
+                # model.module.set_state('lora2')
+                _, outputs = super(LLaVATrainerOURS, self).compute_loss(
+                        model, inputs, return_outputs=True
+                    )
+                outputs_target = outputs['logits']
+                model.module.load_state_dict(curr_weights, strict=False)
+                # model.module.set_state('gate')
         
-        if 'prompt' in inputs:
-            text_prompt = inputs.pop('prompt')
-        else:
-            text_prompt = None
-        outputs = model(**inputs, prompt=text_prompt, task_id=self.task_id) if text_prompt else model(**inputs, task_id=self.task_id)
-        # Save past state if it exists
-        # TODO: this needs to be fixed and made cleaner later.
-        if self.args.past_index >= 0:
-            self._past = outputs[self.args.past_index]
-
-        if labels is not None:
-            unwrapped_model = unwrap_model(model)
-            if _is_peft_model(unwrapped_model):
-                model_name = unwrapped_model.base_model.model._get_name()
-            else:
-                model_name = unwrapped_model._get_name()
-            if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
-                loss = self.label_smoother(outputs, labels, shift_labels=True)
-            else:
-                loss = self.label_smoother(outputs, labels)
-        else:
-            if isinstance(outputs, dict) and "loss" not in outputs:
-                raise ValueError(
-                    "The model did not return a loss from the inputs, only the following keys: "
-                    f"{','.join(outputs.keys())}. For reference, the inputs it received are {','.join(inputs.keys())}."
-                )
-            # We don't use .loss here since the model may return tuples instead of ModelOutput.
-            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+        loss, outputs = super(LLaVATrainerOURS, self).compute_loss(model, inputs, return_outputs=True)
+        
+        # loss_kl_1 = kl_loss(outputs['logits'], outputs_target.clone().detach())
+        # loss_kl_1 = ((outputs['logits'] - outputs_target.detach())**2).mean()
             
-        
-        # regularization
-        for name, param in model.module.named_parameters():
-            if not param.requires_grad:
-                continue
-            
-            loss += self.mu / 2 * (torch.norm(param - self.old_weights[name]))**2    
-        
+        # loss = (loss + loss_kl_1) / 2
+        if self.curr_round > 0:
+            # loss += self.mu*kl_loss(outputs['logits'], outputs_target.detach())
+            loss += self.mu * ((outputs['logits'] - outputs_target.detach())**2).mean()
+        # breakpoint()
         return (loss, outputs) if return_outputs else loss
 
     
@@ -221,11 +205,11 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
                 debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
 
         # OURS:
-        if self.curr_round > 0:
-            self.model.set_state('gate')
-        else:
-            self.model.set_state('lora2')
-        
+        # if self.curr_round > 0:
+        #     self.model.set_state('gate')
+        # else:
+        #     self.model.set_state('lora2')
+        self.model.set_state('lora2')
         self.model.activate_lora2()
         self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
         
@@ -569,10 +553,11 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
                     
                     
                     # ema update
-                    if optimizer_was_run and self.curr_round > 0:
-                        cur_weights = {k: t for k, t in self.model.named_parameters() if t.requires_grad}
-                        for name, param in self.old_weights.items():
-                            self.old_weights[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*cur_weights[name])
+                    # if optimizer_was_run and self.curr_round > 0:
+                    #     cur_weights = {k: t for k, t in self.model.named_parameters() if t.requires_grad}
+                    #     for name, param in self.old_weights.items():
+                    #         self.old_weights[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*cur_weights[name])
+                            
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:
                     self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
@@ -664,15 +649,125 @@ class LLaVATrainerOURS(LLaVATrainerFEDAVG):
         # for the embedding layer by removing the forward post hook.
         if self.neftune_noise_alpha is not None:
             self._deactivate_neftune(self.model)
-
+        
         if self.args.save_optim:
             output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
             self._save_optimizer_and_scheduler(output_dir)
 
         # Optimal Transport Combination within client
-        # if self.curr_round > 0:
-        #     self.model.load_state_dict(self.old_weights, strict=False)
+        if self.curr_round > 0:
+            # self.model.load_state_dict(self.old_weights, strict=False)
             
+            # ema = 0.5
+            # with torch.no_grad():
+            #     model_params = OrderedDict(self.model.named_parameters())
+            #     for name, param in self.old_weights.items():
+            #         model_params[name].copy_(ema*param + (1-ema)*model_params[name])
+                    
+            with torch.no_grad():
+                model_params = OrderedDict(self.model.named_parameters())
+                for name, param in self.old_weights.items():
+                    fisher_curr = safe_get_full_optimizer_state(model_params[name], "exp_avg_sq")
+                    fisher_old = self.fisher_old[name]
+                    
+                    # normalize
+                    fisher_curr_norm = (fisher_curr - fisher_curr.min()) / (fisher_curr.max() - fisher_curr.min())
+                    fisher_old_norm = (fisher_old - fisher_old.min()) / (fisher_old.max() - fisher_old.min())
+                    
+                    ratio = fisher_old_norm / (fisher_old_norm + fisher_curr_norm + 1e-9)
+                    model_params[name].copy_(ratio*param + (1-ratio)*model_params[name])
+                    
+                    self.fisher_old[name] = fisher_curr
+        else:
+            self.fisher_old = {}
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    self.fisher_old[name] = safe_get_full_optimizer_state(param, "exp_avg_sq")
+        
         self.model.activate_all()
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
+    
+    def create_optimizer(self):
+        """
+        Setup the optimizer.
+
+        We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
+        Trainer's init through `optimizers`, or subclass and override this method in a subclass.
+        """
+        if is_sagemaker_mp_enabled():
+            return super().create_optimizer()
+
+        opt_model = self.model
+
+        if self.optimizer is None:
+            # decay_parameters = [name for name in decay_parameters if "bias" not in name]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters() if (p.requires_grad)
+                    ],
+                    "weight_decay": self.args.weight_decay,
+                },
+            ]
+
+            optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
+
+            self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
+            if optimizer_cls.__name__ == "Adam8bit":
+                import bitsandbytes
+
+                manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
+
+                skipped = 0
+                for module in opt_model.modules():
+                    if isinstance(module, nn.Embedding):
+                        skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
+                        logger.info(f"skipped {module}: {skipped/2**20}M params")
+                        manager.register_module_override(module, "weight", {"optim_bits": 32})
+                        logger.debug(f"bitsandbytes: will optimize {module} in fp32")
+                logger.info(f"skipped: {skipped/2**20}M params")
+
+        return self.optimizer
+    
+    # only load deepspeeed optimizer
+    def _load_optimizer_and_scheduler(self, checkpoint):
+        """If optimizer and scheduler states exist, load them."""
+        if checkpoint is None:
+            return
+
+        if self.is_deepspeed_enabled:
+            from deepspeed.runtime.state_dict_factory import SDLoaderFactory
+            from deepspeed.runtime.pipe.module import PipelineModule
+            latest_tag = "latest"
+            latest_path = os.path.join(checkpoint, latest_tag)
+            if os.path.isfile(latest_path):
+                with open(latest_path, "r") as fd:
+                    tag = fd.read().strip()
+                    
+            ckpt_list = self.model_wrapped._get_all_ckpt_names(checkpoint, tag)
+            sd_loader = SDLoaderFactory.get_sd_loader(ckpt_list, checkpoint_engine=self.model_wrapped.checkpoint_engine)
+
+            is_pipe_parallel = isinstance(self.model_wrapped.module, PipelineModule)
+
+            mp_rank = 0 if self.model_wrapped.mpu is None else self.model_wrapped.mpu.get_model_parallel_rank()
+            load_path, checkpoint_state, _ = sd_loader.load(self.model_wrapped.mp_world_size, mp_rank, is_pipe_parallel=is_pipe_parallel)
+            self.model_wrapped.loaded_checkpoint_dp_world_size = checkpoint_state['dp_world_size']
+            self.model_wrapped.loaded_checkpoint_mp_world_size = checkpoint_state['mp_world_size']
+            
+            zero_sd_list = self.model_wrapped._get_all_zero_checkpoints(checkpoint, tag)
+            self.model_wrapped.optimizer.load_state_dict(state_dict_list=zero_sd_list,
+                                       load_optimizer_states=True,
+                                       load_from_fp32_weights=self.model_wrapped.zero_load_from_fp32_weights(),
+                                       checkpoint_folder=None,
+                                       load_serial=None)
+            
+            # deepspeed loads optimizer/lr_scheduler together with the model in deepspeed_init
+            if not isinstance(self.lr_scheduler, DeepSpeedSchedulerWrapper):
+                with warnings.catch_warnings(record=True) as caught_warnings:
+                    self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, SCHEDULER_NAME)))
+                reissue_pt_warnings(caught_warnings)
+            return
+
+        else:
+            super()._load_optimizer_and_scheduler(checkpoint)
