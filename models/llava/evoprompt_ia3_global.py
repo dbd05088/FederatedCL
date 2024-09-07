@@ -35,8 +35,8 @@ import warnings
 from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 import torch.nn.functional as F
-from models.evo_ia3.evoia3_attn import LlamaEVOIA3Attention
-from models.evo_ia3.evoia3_mlp import LlamaEVOIA3MLP
+from models.dual_evoia3.dual_evoia3_attn import LlamaEVOIA3Attention
+from models.dual_evoia3.dual_evoia3_mlp import LlamaEVOIA3MLP
 
 from models.attention_prompt_generator2 import prefix_attention2
 from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer
@@ -153,6 +153,7 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states, ia3_down = self.mlp(hidden_states,query_embeds=new_query_embeds)
+        
         hidden_states = residual + hidden_states
         
         outputs = (hidden_states,)

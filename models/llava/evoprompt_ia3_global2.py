@@ -36,7 +36,7 @@ from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 import torch.nn.functional as F
 from models.dual_evoia32.dual_evoia3_attn import LlamaEVOIA3Attention
-from models.evo_ia3.evoia3_mlp import LlamaEVOIA3MLP
+from models.dual_evoia3.dual_evoia3_mlp import LlamaEVOIA3MLP
 
 from models.attention_prompt_generator2 import prefix_attention2
 from models.dual_evoia32.dual_evoia3layer2 import DualEVOIA3Layer2
