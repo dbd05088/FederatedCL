@@ -43,6 +43,9 @@ for task in tasks:
     
     for jsondata in [train_json_data, test_json_data]:
         for item in jsondata:
+            if 'HRVQA-1.0' in item['image']:
+                item['image'] = item['image'].replace('HRVQA-1.0', 'HRVQA')
+            
             answer_idx = np.random.randint(0, len(options))
             answer = item['conversations'][1]['value']
             answer_idx_inlist = unique_values.index(answer)
