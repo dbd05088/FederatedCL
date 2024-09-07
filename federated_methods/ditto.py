@@ -100,7 +100,7 @@ class LLaVATrainerDITTO(LLaVATrainerTaskId):
         self.global_state = global_state
         for k in self.global_state.keys():
             self.global_state[k] = self.global_state[k].cuda()
-        self.mu = 0.1
+        self.mu = 0.001
         
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], update_adapter) -> torch.Tensor:
         model.train()
