@@ -33,3 +33,5 @@ rm -rf SemArt
 git clone https://github.com/noagarcia/ArtVQA
 mv ArtVQA/AQUA/*.json AQUA
 rm -rf ArtVQA
+cd AQUA
+mv Images images
