@@ -20,6 +20,7 @@ import datetime
 import torch.nn.functional as F
 
 from models.coda_prompt import CodaPrompt
+from collections import OrderedDict
 
 def main():
     parser = transformers.HfArgumentParser(
@@ -109,6 +110,8 @@ def main():
     last_task_id = [-1 for _ in range(training_args.num_clients)]
     fisher_olds = [None for _ in range(training_args.num_clients)]
     task_vectors = [None for _ in range(training_args.num_clients)]
+    original_weights = OrderedDict(model.named_parameters())['base_model.model.model.layers.31.lang_prompt_downsample_2.oproj.weight'].clone().detach().cpu().flatten()
+
     
     lr_step = (init_lr - final_lr)/total_rounds
     mm_lr_step = (mm_init_lr - mm_final_lr)/total_rounds
@@ -116,11 +119,24 @@ def main():
         old_local_state_dict_list = [copy.deepcopy(local_state_dict_list[i]) for i in range(len(local_state_dict_list))]
         
         if curr_round > 0 and training_args.use_task_vector:
+            
+            # cosine sim matrix
             task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
             sim = torch.matmul(task_vector,
                             torch.transpose(task_vector, 1, 0))
             sim = torch.transpose(sim, 1, 0)
-            sim = (sim+1)/2 # normalize -1~1 to 0~1
+            # sim = (sim+1)/2 # normalize -1~1 to 0~1
+            
+            
+            # l2 distance matrix
+            # task_vector = torch.stack(task_vectors)
+
+            # # Compute pairwise squared differences
+            # diff = task_vector.unsqueeze(1) - task_vector.unsqueeze(0)
+            
+            # # Compute L2 distance matrix by summing the squared differences and taking the square root
+            # sim = 1 / torch.sqrt(torch.sum(diff ** 2, dim=2))
+            
             extra_state_dict_dict['task_similarty'] = sim
             print("task similarity matrix:")
             print(sim)
@@ -216,7 +232,7 @@ def main():
             
             # if training_args.mode == 'ours_generator':
             if training_args.use_task_vector:
-                task_vectors[client_id] = trainer.task_vector
+                task_vectors[client_id] = trainer.task_vector - original_weights
             
             if training_args.local_rank == 0 or training_args.local_rank == -1: 
                 path = os.path.join(training_args.state_dir, f"{client_id}_trainer_state.json")

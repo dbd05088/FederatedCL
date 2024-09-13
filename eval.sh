@@ -1,6 +1,8 @@
+#!/bin/bash
+
 # CIL CONFIG
-NOTE="llava_zeroshot_full" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="llava_zeroshot"
+NOTE="L2P_T2_1_4_bs4_saveoptim_lr3e-3_sc20_4tasks_5rounds_fixitr100"
+MODE="L2P_T2"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 
 # fed args
@@ -11,9 +13,6 @@ NUM_CLIENTS=10
 MODEL_MAX_LEN=20000
 MAX_NEW_TOKENS=512
 
-ROUND_TO_EVAL=$2
-
-# adam8bit_bnb adamw_torch
 
 if [ "$MODEL_ARCH" == "llava" ]; then
     MODEL_NAME="./llava-v1.5-7b"
@@ -39,26 +38,42 @@ else
     exit 1
 fi
 
-CUDA_VISIBLE_DEVICES=$1 python eval_VLM_CL.py \
-    --is_eval True \
-    --model_name_or_path $MODEL_NAME \
-    --model_name_for_dataarg $MODEL_NAME \
-    --model_type $MODEL_TYPE \
-    --version $VERSION \
-    --scenario $SCENARIO \
-    --num_rounds $NUM_ROUNDS \
-    --num_tasks $NUM_TASKS \
-    --num_clients $NUM_CLIENTS \
-    --model_max_length $MODEL_MAX_LEN \
-    --max_new_tokens $MAX_NEW_TOKENS \
-    --vision_tower $VISION_TOWER \
-    --bits $BITS \
-    --bf16 True \
-    --tf32 True \
-    --note $NOTE \
-    --mode $MODE \
-    --eval_server False \
-    --lora_enable False \
-    --round_to_eval $ROUND_TO_EVAL \
-    --output_dir "./nohup" > ./nohup/llava_zeroshot_full_eval_round$ROUND_TO_EVAL.log 2>&1 &
+# ROUND_TO_EVALS=$2
+ROUND_TO_EVALS=(20)
+
+for ((index=0; index<${#ROUND_TO_EVALS[@]}; index++)); do
+    CUDA_VISIBLE_DEVICES=$1 python eval_VLM_CL.py \
+        --is_eval True \
+        --model_name_or_path $MODEL_NAME \
+        --model_name_for_dataarg $MODEL_NAME \
+        --model_type $MODEL_TYPE \
+        --version $VERSION \
+        --scenario $SCENARIO \
+        --num_rounds $NUM_ROUNDS \
+        --num_tasks $NUM_TASKS \
+        --num_clients $NUM_CLIENTS \
+        --model_max_length $MODEL_MAX_LEN \
+        --max_new_tokens $MAX_NEW_TOKENS \
+        --vision_tower $VISION_TOWER \
+        --bits $BITS \
+        --bf16 True \
+        --tf32 True \
+        --note $NOTE \
+        --mode $MODE \
+        --eval_server False \
+        --zeroshot False \
+        --lora_enable False \
+        --ia3_enable True \
+        --generator_output_size 512 \
+        --generator_hidden_dim 8 \
+        --generator_hidden_feature 8 \
+        --key_embed_size 64 \
+        --prompt_top_k 1 \
+        --pool_size 4 \
+        --set_state "gate" \
+        --is_prompt True \
+        --use_task_vector False \
+        --round_to_eval ${ROUND_TO_EVALS[$index]} \
+        --output_dir "./nohup" > ./nohup/${NOTE}_eval_round${ROUND_TO_EVALS[$index]}.log 2>&1 &
+done
 # --eval_period $EVAL_PERIOD

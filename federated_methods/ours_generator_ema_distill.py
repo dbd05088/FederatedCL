@@ -81,6 +81,7 @@ def OURS_GEN_ema_distill_create_trainer(model, tokenizer, training_args, data_mo
         task_id = task_id,
         ema_ratio=ema_ratio,
         task_vector=extra_state_dict_dict['task_vector'] if 'task_vector' in extra_state_dict_dict else None,
+        fisher_old=extra_state_dict_dict['fisher_old'] if 'fisher_old' in extra_state_dict_dict else None,
         **data_module,
         )
     return trainer
@@ -119,17 +120,23 @@ def OURS_GEN_load_state_dict(model, global_state_dict, local_state_dict_list, cl
         #     model.load_state_dict(new_global_state_dict, strict=False) 
         
         # gradient based similarity wegithed averaging (exclude own)
-        if extra_state_dict_dict['curr_round'] > 0:
+        if extra_state_dict_dict['curr_round'] > 0 and 'task_similarity' in extra_state_dict_dict:
             # similarity matrix
             sim = extra_state_dict_dict['task_similarty']
             new_global_state_dict = {}
-            sim_sum = sim[client_id].sum() #- sim[client_id][client_id]
+            
+            weights = sim[client_id].clone()
+            
+            weights[client_id] = -1e9
+            weights = (weights).softmax(dim=0)
+            
+            sim_sum = weights.sum() - weights[client_id]
             for name in global_state_dict.keys():
                 new_param = 0
                 for id in range(training_args.num_clients):
-                    # if id == client_id:
-                    #     continue
-                    new_param += sim[client_id][id]*local_state_dict_list[id][name] / sim_sum
+                    if id == client_id:
+                        continue
+                    new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
                     
                 new_global_state_dict[name] = new_param
             
@@ -142,8 +149,7 @@ def OURS_GEN_load_state_dict(model, global_state_dict, local_state_dict_list, cl
             load_deepspeed(new_global_state_dict, model, strict=False)
         else:
             model.load_state_dict(new_global_state_dict, strict=False) 
-        
-        
+
 
 def kl_loss(output, target, temp=2):
     if output.shape[-1]>3000:
@@ -158,7 +164,7 @@ def kl_loss(output, target, temp=2):
     return l_kl
 
 class LLaVATrainerOURS(LLaVATrainerTaskId):
-    def __init__(self, task_id, ema_ratio=0.996, task_vector=None, **kwargs):
+    def __init__(self, task_id, ema_ratio=0.996, task_vector=None, fisher_old=None, **kwargs):
         super(LLaVATrainerOURS, self).__init__(**kwargs)
         self.task_id = task_id
         self.ema_ratio = ema_ratio
@@ -167,28 +173,35 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         
         self.prompt_ema_ratio = 0.99
         self.task_vector=task_vector.cuda() if task_vector is not None else None
+        self.fisher_old = {k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
     
     def compute_loss(self, model, inputs, return_outputs=False):
         if self.curr_round > 0:
-            # curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
-            # with torch.no_grad():
-            #     model.module.load_state_dict(self.old_weights, strict=False)
-            #     model.module.set_state('lora2')
-            #     _, outputs = super(LLaVATrainerOURS, self).compute_loss(
-            #             model, inputs, return_outputs=True
-            #         )
-            #     outputs_target = outputs['logits']
-            #     model.module.load_state_dict(curr_weights, strict=False)
-            #     model.module.set_state('gate')
-            
+            curr_weights = {k: t.detach().clone() for k, t in model.module.named_parameters() if t.requires_grad}
             with torch.no_grad():
-                model.module.set_state('lora1')
+                model.module.load_state_dict(self.old_weights, strict=False)
+                # model.module.set_state('lora2')
                 _, outputs = super(LLaVATrainerOURS, self).compute_loss(
                         model, inputs, return_outputs=True
                     )
                 outputs_target = outputs['logits']
-                model.module.set_state('lora2')
+                model.module.load_state_dict(curr_weights, strict=False)
+                # model.module.set_state('gate')
+            
+            # with torch.no_grad():
+            #     model.module.set_state('lora1')
+            #     _, outputs = super(LLaVATrainerOURS, self).compute_loss(
+            #             model, inputs, return_outputs=True
+            #         )
+            #     outputs_target = outputs['logits']
+            #     model.module.set_state('lora2')
         loss, outputs = super(LLaVATrainerOURS, self).compute_loss(model, inputs, return_outputs=True)
+        
+        # l1 loss
+        # l1_loss = 0
+        # for layer_num in range(len(outputs['local_ia3_layer'])):
+        #     l1_loss += torch.sum(torch.abs(outputs['local_ia3_layer'][layer_num])) / len(outputs['local_ia3_layer'])
+        # loss += 0.001*l1_loss
 
         # loss_kl_1 = kl_loss(outputs['logits'], outputs_target.clone().detach())
         # loss_kl_1 = ((outputs['logits'] - outputs_target.detach())**2).mean()
@@ -198,13 +211,14 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
             loss += self.mu * ((outputs['logits'] - outputs_target.detach())**2).mean()
             
         # accumulate task vector
-        layer_num = 31 # 0~31 or multiple
-        task_vector = outputs['ia3_layer'][layer_num].detach().mean(dim=0) -1
+        # layer_num = 30 # 0~31 or multiple
+        # task_vector = outputs['ia3_layer'][layer_num].detach().mean(dim=0) -1
+        # # task_vector = torch.cat(outputs['ia3_layer'][-3:], dim=0).detach().mean(dim=0) - 1
         
-        if self.task_vector is None:
-            self.task_vector = task_vector
-        else:
-            self.task_vector = self.prompt_ema_ratio * self.task_vector + (1-self.prompt_ema_ratio) * task_vector
+        # if self.task_vector is None:
+        #     self.task_vector = task_vector
+        # else:
+        #     self.task_vector = self.prompt_ema_ratio * self.task_vector + (1-self.prompt_ema_ratio) * task_vector
 
         return (loss, outputs) if return_outputs else loss
     
@@ -640,23 +654,23 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                     
                     
                     # ema update
-                    # if optimizer_was_run and self.curr_round > 0:
-                    #     with torch.no_grad():
-                    #         cur_weights = {k: t for k, t in self.model.named_parameters() if t.requires_grad}
-                    #         for name, param in self.old_weights.items():
-                    #             self.old_weights[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*cur_weights[name])
-                    
-                    # global ema update
                     if optimizer_was_run and self.curr_round > 0:
                         with torch.no_grad():
-                            model_params = OrderedDict(self.model.named_parameters())
-                            for name, param in model_params.items():
-                                if 'lang_prompt_downsample_1' in name:
-                                    target_name = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
-                                    model_params[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*model_params[target_name])
-                                elif 'ia3_generator_1' in name:
-                                    target_name = name.replace('ia3_generator_1', 'ia3_generator_2')
-                                    model_params[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*model_params[target_name])
+                            cur_weights = {k: t for k, t in self.model.named_parameters() if t.requires_grad}
+                            for name, param in self.old_weights.items():
+                                self.old_weights[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*cur_weights[name])
+                    
+                    # global ema update
+                    # if optimizer_was_run and self.curr_round > 0:
+                    #     with torch.no_grad():
+                    #         model_params = OrderedDict(self.model.named_parameters())
+                    #         for name, param in model_params.items():
+                    #             if 'lang_prompt_downsample_1' in name:
+                    #                 target_name = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
+                    #                 model_params[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*model_params[target_name])
+                    #             elif 'ia3_generator_1' in name:
+                    #                 target_name = name.replace('ia3_generator_1', 'ia3_generator_2')
+                    #                 model_params[name].copy_(self.ema_ratio*param + (1-self.ema_ratio)*model_params[target_name])
                     
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:
@@ -756,16 +770,43 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
 
         # Optimal Transport Combination within client
         # if self.curr_round > 0:
-        #     self.model.load_state_dict(self.old_weights, strict=False)
+        #     # self.model.load_state_dict(self.old_weights, strict=False)
+            
+        #     # ema = 0.5
+        #     # with torch.no_grad():
+        #     #     model_params = OrderedDict(self.model.named_parameters())
+        #     #     for name, param in self.old_weights.items():
+        #     #         model_params[name].copy_(ema*param + (1-ema)*model_params[name])
+                    
+        #     with torch.no_grad():
+        #         model_params = OrderedDict(self.model.named_parameters())
+        #         for name, param in self.old_weights.items():
+        #             fisher_curr = safe_get_full_optimizer_state(model_params[name], "exp_avg_sq")
+        #             fisher_old = self.fisher_old[name]
+                    
+        #             # normalize
+        #             fisher_curr_norm = (fisher_curr - fisher_curr.min()) / (fisher_curr.max() - fisher_curr.min())
+        #             fisher_old_norm = (fisher_old - fisher_old.min()) / (fisher_old.max() - fisher_old.min())
+                    
+        #             ratio = fisher_old_norm / (fisher_old_norm + fisher_curr_norm + 1e-9)
+        #             model_params[name].copy_(ratio*param + (1-ratio)*model_params[name])
+                    
+        #             self.fisher_old[name] = fisher_curr
+        # else:
+        #     self.fisher_old = {}
+        #     for name, param in self.model.named_parameters():
+        #         if param.requires_grad:
+        #             self.fisher_old[name] = safe_get_full_optimizer_state(param, "exp_avg_sq")
+        
     
 
         # for name, param in self.model.named_parameters():
         #     # if param.requires_grad:
         #     if name == 'base_model.model.model.layers.31.lang_prompt_downsample_2.oproj.weight':
-        #         self.task_vector = safe_get_full_optimizer_state(param, "exp_avg") #_sq
+        #         self.task_vector = param #safe_get_full_optimizer_state(param, "exp_avg") #_sq
         # self.task_vector = self.task_vector.flatten().detach().clone().cpu()
         
-        self.task_vector = self.task_vector.detach().cpu()
+        # self.task_vector = self.task_vector.detach().cpu()
         
         self.model.activate_all()
 

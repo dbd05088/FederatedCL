@@ -388,6 +388,11 @@ def main():
                 # breakpoint()
                 if not training_args.zeroshot:
                     model.load_state_dict(client_state_dict, strict=False)
+                    
+                    if 'ours_generator' in training_args.mode and training_args.use_task_vector:
+                        logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_global_model_round{training_args.round_to_eval}.pth')
+                        personal_global_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_global_model_round{training_args.round_to_eval}.pth', map_location='cpu')
+                        model.load_state_dict(personal_global_state_dict, strict=False)
                 # model.load_state_dict(server_state_dict, strict=False)
                 if training_args.mode in ['apfl', 'ditto']:
                     # for name, module in model.named_modules():

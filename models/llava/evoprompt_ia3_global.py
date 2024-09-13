@@ -59,6 +59,7 @@ class CausalLMOutputWithPast2(ModelOutput):
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
     ia3_layer: Optional[Tuple[torch.FloatTensor, ...]]=None
+    local_ia3_layer: Optional[Tuple[torch.FloatTensor, ...]]=None
 
 def expand_to_batch(x, batch_size, dim=0):
     shape = [1 for _ in x.shape]
@@ -164,7 +165,8 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         if use_cache:
             outputs += (present_key_value,)
             
-        outputs += (torch.cat((ia3_k, ia3_v, ia3_down), dim=-1),)
+        # outputs += (torch.cat((ia3_k, ia3_v, ia3_down), dim=-1),)
+        outputs += (torch.cat((ia3_k[0], ia3_v[0], ia3_down[0]), dim=-1),torch.cat((ia3_k[1], ia3_v[1], ia3_down[1]), dim=-1))
 
         return outputs
 
@@ -247,6 +249,7 @@ class LlamaEVOIA3Model(LlamaModel):
         next_decoder_cache = None
         
         ia3_layers = []
+        local_ia3_layers = []
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -285,7 +288,8 @@ class LlamaEVOIA3Model(LlamaModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
             
-            ia3_layers.append(layer_outputs[-1])
+            ia3_layers.append(layer_outputs[-2])
+            local_ia3_layers.append(layer_outputs[-1])
             
         hidden_states = self.norm(hidden_states)
 
@@ -305,7 +309,7 @@ class LlamaEVOIA3Model(LlamaModel):
             past_key_values=next_cache,
             hidden_states=all_hidden_states,
             attentions=all_self_attns,
-        ), ia3_layers
+        ), (ia3_layers, local_ia3_layers)
 
 
 class LlavaConfig(LlamaConfig):
@@ -380,7 +384,7 @@ class LlamaEVOIA3ForCausalLM(LlamaForCausalLM):
             loss = loss_fct(shift_logits, shift_labels)
 
         if not return_dict:
-            output = (logits,) + outputs[1:] + (ia3_layer,)
+            output = (logits,) + outputs[1:] + (ia3_layer[0],ia3_layer[1])
             return (loss,) + output if loss is not None else output
 
         return CausalLMOutputWithPast2(
@@ -389,7 +393,8 @@ class LlamaEVOIA3ForCausalLM(LlamaForCausalLM):
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-            ia3_layer=ia3_layer,
+            ia3_layer=ia3_layer[0],
+            local_ia3_layer=ia3_layer[1],
         )
 
 

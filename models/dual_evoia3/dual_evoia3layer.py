@@ -253,20 +253,22 @@ class Linear(nn.Module, DualEVOIA3Layer):
                 dtype = self.ia3_generator_1[active_adapter].block[0].weight.dtype
 
                 bs = x.shape[0]
+                ia3_delta_2 = None
                 if query_embeds is not None:
                     query_embeds_1, query_embeds_2 = query_embeds
                     if self.active_state == 'lora1':
                         ia3_delta = self.ia3_generator_1[active_adapter](query_embeds_1)
                     elif self.active_state == 'lora2':
-                        ia3_delta = self.ia3_generator_2[active_adapter](query_embeds_2)
+                        ia3_delta = ia3_delta_2 = self.ia3_generator_2[active_adapter](query_embeds_2)
                     elif self.active_state == 'gate':
                         ia3_delta_1 = self.ia3_generator_1[active_adapter](query_embeds_1)
 
                         ia3_delta_2 = self.ia3_generator_2[active_adapter](query_embeds_2)
-                        
                         # FIXME: gumbel softmax combining
                         # ia3_delta = (ia3_delta_1 + ia3_delta_2)/2
-                        ia3_delta, gumbel_out = create_mask_gumbel(ia3_delta_1, ia3_delta_2, is_training=self.training)
+                        # ia3_delta = (ia3_delta_1 + ia3_delta_2)
+                        ia3_delta = selective_masking(ia3_delta_1, ia3_delta_2)
+                        # ia3_delta, gumbel_out = create_mask_gumbel(ia3_delta_1, ia3_delta_2, is_training=self.training)
                     
                     if self.is_feedforward:
                         weight = torch.ones((bs,1, self.in_features)).to(x.device)
@@ -280,6 +282,7 @@ class Linear(nn.Module, DualEVOIA3Layer):
                     self.prev_ia3_scaling = ia3_scaling.clone()
                 else:
                     ia3_scaling = self.prev_ia3_scaling
+                    ia3_delta_2 = self.prev_ia3_scaling
                     # self.prev_ia3_scaling = None
 
             if self.is_feedforward:
@@ -293,10 +296,10 @@ class Linear(nn.Module, DualEVOIA3Layer):
                 result = result.to(dtype) * ia3_scaling.unsqueeze(1)
 
         result = result.to(previous_dtype)
-        return result, ia3_scaling
+        return result, (ia3_scaling, ia3_delta_2.reshape(bs, -1))
 
 import torch.nn.functional as F
-def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=True, is_training=False):
+def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=False, is_training=False):
     # Initialize logits for each condition
     logits = torch.zeros(tensor1.size(0), tensor1.size(1), tensor1.size(2), 3).to(tensor1.device)  # 3 categories: tensor1, tensor2, average
     
@@ -329,3 +332,13 @@ def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=True, is_training=False):
     result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * tensor2 # (0.5 * (tensor1 + tensor2))
     
     return result, gumbel_out
+
+def selective_masking(tensor1, tensor2):
+    
+    # mask sign conflict
+    same_sign = (tensor1*tensor2) >= 0
+    
+    
+    result = tensor1*same_sign + tensor2
+    return result
+
