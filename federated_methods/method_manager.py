@@ -25,6 +25,8 @@ from federated_methods.ditto_lae import ditto_lae_set_state_dict, ditto_lae_crea
 from federated_methods.ours_generator_ema_distill import OURS_GEN_ema_distill_create_trainer, OURS_GEN_load_state_dict
 from federated_methods.ours_generator_ema_ewc import OURS_GEN_ema_ewc_create_trainer
 
+from federated_methods.fedours import fedours_ema_distill_create_trainer, fedours_load_state_dict
+
 def dummy_function(*args):
     return {}
 
@@ -42,6 +44,9 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         
     elif mode =='fedsim':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = fedsim_set_state_dict, fedper_load_state_dict, fedsim_create_trainer, fedavg_aggregate_state_dict
+    
+    elif mode =='feddat':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = feddat_set_state_dict, fedper_load_state_dict, feddat_create_trainer, feddat_aggregate_state_dict
     
     elif mode == 'L2P_T2' or mode =='L2P2' \
         or mode == 'DAP' or mode == 'DAP_T' \
@@ -97,6 +102,10 @@ def select_method(mode: str) -> Tuple[Callable, Callable, Callable, Callable, Di
         
     elif mode == 'ours_generator4':
         set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedper_load_state_dict, OURS_GEN_ema_ewc_create_trainer, OURS_aggregate_state_dict
+    
+    elif mode == 'fedours':
+        set_state_dict, load_state_dict, create_trainer, aggregate_state_dict = OURS_set_state_dict, fedours_load_state_dict, fedours_ema_distill_create_trainer, OURS_aggregate_state_dict    
+    
     else:
         raise NotImplementedError(mode)
     return set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules

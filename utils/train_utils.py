@@ -388,7 +388,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             )
             print('load ours generator3')
         
-        elif 'ditto' == training_args.mode:
+        elif 'ditto' == training_args.mode or 'feddat' == training_args.mode or 'fedours' == training_args.mode:
             model = LlavaLlamaFordittoCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
@@ -502,7 +502,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             task_type="CAUSAL_LM",
         )
         
-        if training_args.mode in ['fedsim', 'apfl', 'ditto'] or training_args.mode =='feddat':
+        if training_args.mode in ['fedsim', 'apfl', 'ditto', 'fedours'] or training_args.mode =='feddat':
             from models.duallora.dualloramodel import DualLoraModel
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['DUALLORA'] = DualLoraModel
@@ -530,7 +530,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['IA3POOL'] = IA3PoolModel
             ia3_config.peft_type = 'IA3POOL'
-        elif training_args.mode in ['fedsim', 'apfl', 'ditto'] or training_args.mode =='feddat':
+        elif training_args.mode in ['fedsim', 'apfl', 'ditto', 'fedours'] or training_args.mode =='feddat':
             from models.dual_ia3.dual_ia3_model import DualIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['DUALIA3'] = DualIA3Model
@@ -685,7 +685,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         model.deactivate_gating()
         model.set_active_adapter('adapter_1')
     
-    elif training_args.mode in [ 'fedsim', 'ditto', 'apfl']:
+    elif training_args.mode in [ 'fedsim', 'ditto', 'apfl', 'feddat', 'fedours']:
         # model.get_model().global_mm_projector = model.get_model().mm_projector
         # model.get_model().local_mm_projector = copy.deepcopy(model.get_model().mm_projector)
         # model.get_model().mm_projector = None
@@ -696,6 +696,8 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             for name, module in model.named_modules():
                 if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
                     module.set_state('lora2')
+            
+            model.set_state(training_args.set_state)
         else:
             for name, module in model.named_modules():
                 if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
