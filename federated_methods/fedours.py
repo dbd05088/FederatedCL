@@ -97,7 +97,7 @@ def fedours_load_state_dict(model, global_state_dict, local_state_dict_list, cli
         # gradient based similarity wegithed averaging (exclude own)
         if extra_state_dict_dict['curr_round'] > 0 and 'task_similarity' in extra_state_dict_dict:
             # similarity matrix
-            sim = extra_state_dict_dict['task_similarty']
+            sim = extra_state_dict_dict['task_similarity']
             new_global_state_dict = {}
             
             weights = sim[client_id].clone()
@@ -107,18 +107,17 @@ def fedours_load_state_dict(model, global_state_dict, local_state_dict_list, cli
             
             sim_sum = weights.sum() - weights[client_id]
             
-            # weights[client_id] = sim_sum
-            # sim_sum += sim_sum
+            weights[client_id] = sim_sum
+            sim_sum += sim_sum
             
             for name in global_state_dict.keys():
                 new_param = 0
                 for id in range(training_args.num_clients):
-                    if id == client_id:
-                        continue
+                    # if id == client_id:
+                    #     continue
                     new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
                     
                 new_global_state_dict[name] = new_param
-            
             if (training_args.local_rank == 0 or training_args.local_rank == -1):
                 output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
                 torch.save(new_global_state_dict, output_dir)

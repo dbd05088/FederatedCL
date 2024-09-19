@@ -672,7 +672,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                     module.activate_all()
             model.lm_head.requires_grad_(False)
             for p in model.get_model().mm_projector.parameters():
-                p.requires_grad = True
+                p.requires_grad = False
     elif training_args.mode == 'fedadapter':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = True
@@ -731,10 +731,10 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         model.set_state(training_args.set_state)
         model.activate_all()
         
-        # if training_args.mode == 'ours_generator2':
-        #     for layer in model.base_model.model.model.layers:
-        #         layer.lang_prompt_downsample_1.oproj.weight.data.fill_(0)
-        #         layer.lang_prompt_downsample_2.oproj.weight.data.fill_(0)
+        if training_args.mode == 'ours_generator2':
+            for layer in model.base_model.model.model.layers:
+                layer.lang_prompt_downsample_1.oproj.weight.data.fill_(0)
+                layer.lang_prompt_downsample_2.oproj.weight.data.fill_(0)
         
     else:
         for p in model.get_model().mm_projector.parameters():

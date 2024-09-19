@@ -218,7 +218,9 @@ class Linear(nn.Module, DualIA3Layer):
                     ia3_scaling *= ia3_2.flatten()
                 elif self.active_state == 'gate':
                     ia3_scaling *= ((ia3_1+ia3_2)/2).flatten()
-
+                    # ia3_scaling *= (selective_masking(ia3_1,ia3_2)+ia3_2 - 1).flatten()
+                    # ia3_scaling *= ((ia3_1+ia3_2) - 1).flatten()
+                    # ia3_scaling *= ia3_1.flatten() * ia3_2.flatten()
             if self.is_feedforward:
                 x = x.to(dtype)
                 # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
@@ -231,3 +233,12 @@ class Linear(nn.Module, DualIA3Layer):
 
         result = result.to(previous_dtype)
         return result
+
+def selective_masking(tensor1, tensor2):
+    with torch.no_grad():
+        # mask sign conflict
+        same_sign = ((tensor1-1)*(tensor2-1)) >= 0
+        
+        tensor1[same_sign == 0] = 1
+    
+    return tensor1

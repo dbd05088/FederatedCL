@@ -157,10 +157,10 @@ class LLaVATrainerFEDDAT(LLaVATrainerTaskId):
                 _, outputs = super(LLaVATrainerFEDDAT, self).compute_loss(
                         model, inputs, return_outputs=True
                     )
-                outputs_target = outputs['logits']
+                outputs_target = outputs['logits'][model.module.labels != -100].detach()
                 
-            #update only server adapter
-            model.module.load_state_dict(self.current_global, strict=False)
+                #update only server adapter
+                model.module.load_state_dict(self.current_global, strict=False)
             
             model.module.set_state('lora1')
             model.module.activate_lora1()
@@ -177,12 +177,12 @@ class LLaVATrainerFEDDAT(LLaVATrainerTaskId):
             model.module.activate_lora2()
         
         loss, outputs = super(LLaVATrainerFEDDAT, self).compute_loss(model, inputs, return_outputs=True)
-        
-        loss_kl_1 = kl_loss(outputs['logits'], outputs_target.clone().detach())
+        loss_kl_1 = kl_loss(outputs['logits'][model.module.labels != -100], outputs_target.detach())
+        # loss_kl_1 = ((outputs['logits'] - outputs_target.detach())**2).mean()
             
         loss = (loss + loss_kl_1) / 2
         
-        self.outputs_1 = outputs['logits'].clone().detach()
+        self.outputs_1 = outputs['logits'][model.module.labels != -100].detach()
         
         return (loss, outputs) if return_outputs else loss
 

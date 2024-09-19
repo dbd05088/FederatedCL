@@ -122,20 +122,24 @@ def OURS_GEN_load_state_dict(model, global_state_dict, local_state_dict_list, cl
         # gradient based similarity wegithed averaging (exclude own)
         if extra_state_dict_dict['curr_round'] > 0 and 'task_similarity' in extra_state_dict_dict:
             # similarity matrix
-            sim = extra_state_dict_dict['task_similarty']
+            sim = extra_state_dict_dict['task_similarity']
             new_global_state_dict = {}
             
             weights = sim[client_id].clone()
             
             weights[client_id] = -1e9
-            weights = (weights).softmax(dim=0)
-            
+            weights = (weights/2).softmax(dim=0)
+
             sim_sum = weights.sum() - weights[client_id]
+            
+            weights[client_id] = sim_sum
+            sim_sum += sim_sum
+            
             for name in global_state_dict.keys():
                 new_param = 0
                 for id in range(training_args.num_clients):
-                    if id == client_id:
-                        continue
+                    # if id == client_id:
+                    #     continue
                     new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
                     
                 new_global_state_dict[name] = new_param
@@ -173,7 +177,10 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         
         self.prompt_ema_ratio = 0.99
         self.task_vector=task_vector.cuda() if task_vector is not None else None
-        self.fisher_old = {k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
+        # self.fisher_old = {k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
+        self.fisher_old = fisher_old
+        self.fisher_cur = 0
+        self.fisher_cnt = 0
     
     def compute_loss(self, model, inputs, return_outputs=False):
         if self.curr_round > 0:
@@ -184,7 +191,7 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                 _, outputs = super(LLaVATrainerOURS, self).compute_loss(
                         model, inputs, return_outputs=True
                     )
-                outputs_target = outputs['logits']
+                outputs_target = outputs['logits'][model.module.labels != -100].detach()
                 model.module.load_state_dict(curr_weights, strict=False)
                 # model.module.set_state('gate')
             
@@ -207,18 +214,18 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         # loss_kl_1 = ((outputs['logits'] - outputs_target.detach())**2).mean()
         
         if self.curr_round > 0:
-            # loss += self.mu*kl_loss(outputs['logits'], outputs_target.detach())
-            loss += self.mu * ((outputs['logits'] - outputs_target.detach())**2).mean()
+            loss += self.mu*kl_loss(outputs['logits'][model.module.labels != -100].detach(), outputs_target.detach())
+            # loss += self.mu * ((outputs['logits'] - outputs_target.detach())**2).mean()
             
         # accumulate task vector
         # layer_num = 30 # 0~31 or multiple
         # task_vector = outputs['ia3_layer'][layer_num].detach().mean(dim=0) -1
-        # # task_vector = torch.cat(outputs['ia3_layer'][-3:], dim=0).detach().mean(dim=0) - 1
+        task_vector = torch.cat(outputs['ia3_layer'][-3:], dim=0).detach().mean(dim=0) #- 1
         
-        # if self.task_vector is None:
-        #     self.task_vector = task_vector
-        # else:
-        #     self.task_vector = self.prompt_ema_ratio * self.task_vector + (1-self.prompt_ema_ratio) * task_vector
+        if self.task_vector is None:
+            self.task_vector = task_vector
+        else:
+            self.task_vector = self.prompt_ema_ratio * self.task_vector + (1-self.prompt_ema_ratio) * task_vector
 
         return (loss, outputs) if return_outputs else loss
     
@@ -310,7 +317,7 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         #     self.model.set_state('gate')
         # else:
         #     self.model.set_state('lora2')
-        self.model.set_state('lora2')
+        self.model.set_state('gate')
         self.model.activate_lora2()
         self.old_weights = {k: t.detach().clone() for k, t in self.model.named_parameters() if t.requires_grad}
         
@@ -644,6 +651,40 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
 
                     model.zero_grad()
                     
+                    # # compute fisher online
+                    
+                    # # only enable gradient for last transformer block
+                    # # for p in self.model.base_model.model.model.layers[-1].self_attn.o_proj.parameters():
+                    # #     p.requires_grad = True
+                    # for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
+                    #     p.requires_grad = True
+                        
+                    # with self.model.disable_adapter():
+                    #     inputs = self._prepare_inputs(inputs)
+
+                    #     loss = self.model(**inputs).loss
+                    #     loss.backward()
+                        
+                    #     grads = []
+                    #     for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
+                    #         grads.append(p.grad.view(-1))
+                    #     grads = torch.cat(grads)
+                        
+                    # self.fisher_cur += grads**2
+                    # self.fisher_cnt += 1
+                    
+                    # for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
+                    #     p.requires_grad = False
+                    
+                    # model.zero_grad()
+                        # output = self.model(**inputs).logits
+                        # loss = - F.nll_loss(self.logsoft(output), inputs["labels"].unsqueeze(0),
+                        #                     reduction='none')
+                        # exp_cond_prob = torch.mean(torch.exp(loss.detach().clone()))
+                        # loss = torch.mean(loss)
+                        # loss.backward()
+                        # fish += exp_cond_prob * self.net.get_grads() ** 2
+                    
                     self.state.global_step += 1
                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
@@ -806,7 +847,10 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         #         self.task_vector = param #safe_get_full_optimizer_state(param, "exp_avg") #_sq
         # self.task_vector = self.task_vector.flatten().detach().clone().cpu()
         
-        # self.task_vector = self.task_vector.detach().cpu()
+        self.task_vector = self.task_vector.detach().cpu()
+        
+        # self.fisher_old = ((self.fisher_cur/self.fisher_cnt) + self.fisher_old) / 2 if self.fisher_old is not None else (self.fisher_cur/self.fisher_cnt)
+        # self.task_vector = self.fisher_old.detach().cpu()
         
         self.model.activate_all()
 
