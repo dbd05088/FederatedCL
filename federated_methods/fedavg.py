@@ -80,12 +80,6 @@ def fedavg_create_trainer(model, tokenizer, training_args, data_module, extra_st
     return trainer
 
 def fedavg_aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **kwargs):
-    # exclude scicap - client6 in sc12
-    # num_selection -= 1
-    # selected_ids.remove(2)
-    # # exclude didemosv
-    # selected_ids.remove(3)
-    # breakpoint()
     
     for key in global_state_dict.keys():
         # global_state_dict[key] = sum([local_state_dict_list[client][key] * sample_num_list[client] / sample_this_round for client in selected_ids])

@@ -8,33 +8,14 @@ from models.bunny import BunnyPhiForCausalLM, BunnyStableLMForCausalLM, BunnyQwe
 from transformers import AutoModelForCausalLM, AutoTokenizer, CLIPTextModel, CLIPProcessor, CLIPModel
 import models.llava.conversation as conversation_lib_llava
 import models.bunny.conversation as conversation_lib_bunny
-from transformers import Trainer
 from peft.tuners.lora import LoraLayer
-# from models.bunny.prompt_tuning_model import Bunny_PT
-from models.llava.prompt_tuning_model import Llava_PT
-# from models.llava.llama_feddat import LlavaLlamaAdapterForCausalLM
 from models.duallora.dualloralayer import DualLoraLayer
 from models.dual_ia3.dual_ia3_layer import DualIA3Layer
-from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
-from models.dap_ia3.dapia3layer import DAPIA3Layer
-from models.feddat_lora.tripleloralayer import TripleLoraLayer
 
 from models.llava.ditto import LlavaLlamaFordittoCausalLM
 from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
-# from models.llava.l2p_model import Llava_L2P
-# from models.llava.l2p_layerwise_model import LlavaLlamaL2PForCausalLM
-# from models.llava.dap_model import LlavaLlamaDAPForCausalLM
-# from models.llava.l2p_layerwise_text_model import LlavaLlamaL2PtextForCausalLM
-# from models.llava.l2p_text_model import Llava_L2Ptext
-# from models.llava.dap_attn_model import LlavaLlamaDAPATTNForCausalLM
-# from models.llava.l2p_layerwise_attn_model import LlavaLlamaL2PATTNForCausalLM
-# from models.llava.l2p_layerwise_attn_model2 import LlavaLlamaL2PATTNForCausalLM2
-# from models.llava.dap_ia3 import LlavaLlamaDAPIA3ForCausalLM
-# from models.llava.evoprompt_ia3 import LlavaLlamaEVOIA3ForCausalLM
-from models.llava.llava_ia3_global import LlavaLlamaForOURSIA3PoolCausalLM
-from models.llava.evoprompt_ia3_global import LlavaLlamaOURSGENIA3ForCausalLM
-from models.llava.evoprompt_ia3_global2 import LlavaLlamaOURSGENIA3ForCausalLM2
-from models.llava.evoprompt_ia3_global3 import LlavaLlamaOURSGENIA3ForCausalLM3
+from models.llava.ours_ia3 import LlavaLlamaOURSGENIA3ForCausalLM
+from models.llava.ours_ia3_2 import LlavaLlamaOURSGENIA3ForCausalLM2
 
 from models.llava.L2P2 import LlavaLlamaForL2PIA3CausalLM2
 from models.llava.L2P_T2 import LlavaLlamaForL2PTIA3CausalLM2
@@ -65,9 +46,9 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     attn_implementation = "flash_attention_2"
     assert model_args.vision_tower is not None
     
-    if training_args.mode == 'pfedpg' or training_args.mode == 'fedadapter' or 'dap' in training_args.mode or 'l2p' in training_args.mode:
-        assert training_args.lora_enable == False, "no lora in pFedPG and feddat  and fedadapter"
-    if training_args.mode == 'feddat' or training_args.mode == 'fedadapter':
+    if 'dap' in training_args.mode or 'l2p' in training_args.mode:
+        assert training_args.lora_enable == False, "no lora in pFedPG and feddat"
+    if training_args.mode == 'feddat':
         assert training_args.gradient_accumulation_steps == 1
     
     if "ia3" in training_args.mode:
@@ -132,21 +113,9 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         tokenizer.pad_token = tokenizer.eos_token
     
     if 'llava' in model_args.model_name_or_path.lower():
-        # prompt tuning
-        if training_args.mode == 'pfedpg':
-            assert model_args.model_type != 'mpt'
-            model = Llava_PT.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                prompt_num=training_args.prompt_num,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-            print('load pfedpg')
         
         #############################################################################
-        elif training_args.mode in ['L2P2', 'L2P2_FedAvg', 'L2P2_FedPer']:
+        if training_args.mode in ['L2P2', 'L2P2_FedAvg', 'L2P2_FedPer']:
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaForL2PIA3CausalLM2.from_pretrained(
                 model_args.model_name_or_path,
@@ -343,16 +312,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             )
             print('load Dual LAE-IA3')
         #############################################################################
-        elif training_args.mode == 'ours_pool':
-            assert model_args.model_type != 'mpt'
-            model = LlavaLlamaForOURSIA3PoolCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-            print('load ours pool')
         elif training_args.mode == 'ours_generator':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaOURSGENIA3ForCausalLM.from_pretrained(
@@ -365,7 +324,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator')
-        elif training_args.mode == 'ours_generator2' or training_args.mode == 'ours_generator4':
+        elif training_args.mode == 'ours_generator2':
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaOURSGENIA3ForCausalLM2.from_pretrained(
                 model_args.model_name_or_path,
@@ -376,17 +335,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator2')
-        elif training_args.mode == 'ours_generator3':
-            assert model_args.model_type != 'mpt'
-            model = LlavaLlamaOURSGENIA3ForCausalLM3.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                generator_hidden_dim=training_args.generator_hidden_dim,
-                **bnb_model_from_pretrained_args
-            )
-            print('load ours generator3')
         
         elif 'ditto' == training_args.mode or 'feddat' == training_args.mode or 'fedours' == training_args.mode:
             model = LlavaLlamaFordittoCausalLM.from_pretrained(
@@ -402,16 +350,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 cache_dir=training_args.cache_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-        
-        elif 'mpt' == model_args.model_type:
-            config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
-            config.attn_config['attn_impl'] = training_args.mpt_attn_impl
-            model = LlavaMptForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                config=config,
-                cache_dir=training_args.cache_dir,
                 **bnb_model_from_pretrained_args
             )
         else:
@@ -507,11 +445,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['DUALLORA'] = DualLoraModel
             lora_config.peft_type = 'DUALLORA'
-        # elif training_args.mode in ['feddat']:
-            # from models.feddat_lora.tripleloramodel import TripleLoraModel
-            # from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
-            # PEFT_TYPE_TO_MODEL_MAPPING['TRIPLELORA'] = TripleLoraModel
-            # lora_config.peft_type = 'TRIPLELORA'
         
         # rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
@@ -525,12 +458,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         )
         
         # create pool
-        if training_args.mode == 'ia3_pool':
-            from models.ia3pool.ia3poolmodel import IA3PoolModel
-            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
-            PEFT_TYPE_TO_MODEL_MAPPING['IA3POOL'] = IA3PoolModel
-            ia3_config.peft_type = 'IA3POOL'
-        elif training_args.mode in ['fedsim', 'apfl', 'ditto', 'fedours'] or training_args.mode =='feddat':
+        if training_args.mode in ['fedsim', 'apfl', 'ditto', 'fedours'] or training_args.mode =='feddat':
             from models.dual_ia3.dual_ia3_model import DualIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['DUALIA3'] = DualIA3Model
@@ -568,25 +496,20 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             ia3_config.peft_type = 'EVOIA3'
             ia3_config.generator_output_size = 768
             ia3_config.generator_hidden_feature = training_args.generator_hidden_feature
-        
-        elif training_args.mode in ['ours_pool']:
-            from models.dual_ia3pool.dual_ia3poolmodel import DualIA3PoolModel
-            from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
-            PEFT_TYPE_TO_MODEL_MAPPING['OURSPOOL'] = DualIA3PoolModel
-            ia3_config.peft_type = 'OURSPOOL'
+
         elif training_args.mode in ['ours_generator']:
-            from models.dual_evoia3.dual_evoia3model import DualEVOIA3Model
+            from models.ours_ia3.ours_ia3_model import DualEVOIA3Model
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['OURSGEN'] = DualEVOIA3Model
             ia3_config.peft_type = 'OURSGEN'
             ia3_config.generator_output_size = training_args.generator_output_size
             ia3_config.generator_hidden_feature = training_args.generator_hidden_feature
         elif training_args.mode in ['ours_generator2', 'ours_generator3', 'ours_generator4']:
-            from models.dual_evoia32.dual_evoia3model2 import DualEVOIA3Model2
+            from models.ours_ia3_2.ours_ia3_model2 import DualEVOIA3Model2
             from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING
             PEFT_TYPE_TO_MODEL_MAPPING['OURSGEN2'] = DualEVOIA3Model2
             ia3_config.peft_type = 'OURSGEN2'
-            
+        
         model = get_peft_model(model, ia3_config)
         model = model.to(device=training_args.device, dtype=compute_dtype)
 
@@ -616,28 +539,12 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         vision_tower.select_feature = 'cls_patch'
     
         if '_T' in training_args.mode:
-            # model.base_model.model.text_encoder = CLIPTextModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/text_encoder/").cuda()
-            
             model.base_model.model.clip_encoder = CLIPModel.from_pretrained(model_args.vision_tower).to(device=training_args.device, dtype=compute_dtype)
             
             model.base_model.model.clipprocessor = CLIPProcessor.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipprocessor/")
-            # long clip
-            # model.base_model.model.clip_encoder = CLIPModel.from_pretrained("/home/vision/thkim/FederatedCL/models/clip_models/clipmodel/").to(device='cuda', dtype=torch.bfloat16)
-            # model.base_model.model.clip_encoder.text_model.embeddings.position_embedding = torch.nn.Embedding(248, 768).cuda()
-            # model.base_model.model.clip_encoder.text_model.embeddings.register_buffer(
-            #     "position_ids", torch.arange(248).expand((1, -1)).cuda(), persistent=False
-            # )
-            # model.base_model.model.clip_encoder.config.text_config.max_position_embeddings = 248
-            # model.base_model.model.clip_encoder.load_state_dict(torch.load("/home/vision/thkim/FederatedCL/models/clip_models/longclip_L_transformers.pt", map_location=training_args.device))
-            # model.base_model.model.clip_encoder.to(torch.bfloat16)
-            # model.base_model.model.text_encoder.requires_grad_(False)
+
             model.base_model.model.clip_encoder.requires_grad_(False)
 
-    # if not training_args.is_eval:
-    #     data_args.img_mean = vision_tower.image_processor.image_mean
-    #     data_args.img_std = vision_tower.image_processor.image_std
-    #     vision_tower.image_processor.do_normalize=False
-    # vision_tower.image_processor.do_rescale=False
     data_args.image_processor = vision_tower.image_processor
     
     data_args.is_multimodal = True
@@ -657,34 +564,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         if 'FedDAT' in training_args.mode or 'Ditto' in training_args.mode:
             model.set_state(training_args.set_state)
     
-    elif training_args.mode == 'feddat':
-        if training_args.is_eval:
-            for name, module in model.named_modules():
-                # if isinstance(module, TripleLoraLayer):
-                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    module.set_state('gate')
-                    module.activate_all()
-        else:
-            for name, module in model.named_modules():
-                # if isinstance(module, TripleLoraLayer):
-                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    module.set_state('lora1')
-                    module.activate_all()
-            model.lm_head.requires_grad_(False)
-            for p in model.get_model().mm_projector.parameters():
-                p.requires_grad = False
-    elif training_args.mode == 'fedadapter':
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = True
-        model.lm_head.requires_grad_(False)
-        for n, p in model.named_parameters():
-            if 'adapter_1' in n:
-                p.requires_grad = True
-            elif 'adapter_0' in n or 'adapter_2' in n:
-                p.requires_grad = False
-        model.deactivate_gating()
-        model.set_active_adapter('adapter_1')
-    
     elif training_args.mode in [ 'fedsim', 'ditto', 'apfl', 'feddat', 'fedours']:
         # model.get_model().global_mm_projector = model.get_model().mm_projector
         # model.get_model().local_mm_projector = copy.deepcopy(model.get_model().mm_projector)
@@ -693,10 +572,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             p.requires_grad = False
         
         if training_args.is_eval:
-            for name, module in model.named_modules():
-                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    module.set_state('lora2')
-            
             model.set_state(training_args.set_state)
         else:
             for name, module in model.named_modules():
@@ -712,15 +587,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         for n, p in model.named_parameters():
             if 'lang_prompt' in n :
                 p.requires_grad_(True)
-    elif training_args.mode == 'ours_pool':
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = False
-        model.lm_head.requires_grad_(False)
-        for n, p in model.named_parameters():
-            if 'lang_prompt' in n :
-                p.requires_grad_(True)
-        model.set_state('gate')
-        model.activate_all()
     elif training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2' or training_args.mode == 'ours_generator3' or training_args.mode == 'ours_generator4':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
@@ -746,8 +612,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
     
     if training_args.bits in [4, 8]:
         model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
-    
-    
 
     model.config.mm_use_im_start_end = data_args.mm_use_im_start_end = model_args.mm_use_im_start_end
     model.config.mm_projector_lr = training_args.mm_projector_lr

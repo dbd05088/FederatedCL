@@ -3,8 +3,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from transformers import AutoConfig, AutoModelForCausalLM, \
-                         LlamaConfig, LlamaModel, LlamaForCausalLM
+from transformers import LlamaConfig, LlamaModel, LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
 
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
@@ -12,25 +11,15 @@ from transformers.generation.utils import GenerateOutput
 from transformers.utils import logging
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
 
-
 from models.llava.llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
-
-from models.feddat_adapter import Adapter
 import warnings
-from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
-from models.attention_prompt_generator import prefix_attention
 import torch.nn.functional as F
 from models.empty_ia3.empty_ia3_attn import LlamaEmptyIA3Attention
 from models.empty_ia3.empty_ia3_mlp import LlamaEmptyIA3MLP
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
 
 from models.coda_prompt import CodaPrompt
-
-
-from operator import mul
-import math
-from functools import reduce
 
 logger = logging.get_logger(__name__)
 
@@ -66,28 +55,10 @@ class LlamaDecoderIA3PoolLayer(LlamaDecoderLayer):
         task_id=None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        """
-        Args:
-            hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
-            attention_mask (`torch.FloatTensor`, *optional*):
-                attention mask of size `(batch_size, sequence_length)` if flash attention is used or `(batch_size, 1,
-                query_sequence_length, key_sequence_length)` if default attention is used.
-            output_attentions (`bool`, *optional*):
-                Whether or not to return the attentions tensors of all attention layers. See `attentions` under
-                returned tensors for more detail.
-            use_cache (`bool`, *optional*):
-                If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding
-                (see `past_key_values`).
-            past_key_value (`Tuple(torch.FloatTensor)`, *optional*): cached past key and value projection states
-        """
         if "padding_mask" in kwargs:
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
             )
-        # if task_id is not None and task_id != self.last_task_id:
-        #     self.lang_prompt_ia3_pool.process_task_count()
-        #     self.last_task_id = task_id
-            
         if query_embeds is not None:
             new_query_embeds = self.lang_prompt_ia3_pool(query_embeds)
             

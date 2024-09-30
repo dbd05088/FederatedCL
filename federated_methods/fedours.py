@@ -1,10 +1,4 @@
-from federated_methods.fedavg import LLaVATrainerFEDAVG
 from federated_methods.task_id import LLaVATrainerTaskId
-import copy
-from transformers.trainer import unwrap_model, _is_peft_model, MODEL_FOR_CAUSAL_LM_MAPPING_NAMES, SCHEDULER_NAME
-from easydict import EasyDict as edict
-from utils.optimal_transport import get_wassersteinized_layers_modularized
-
 import torch
 import torch.nn.functional as F
 import torch.distributed as dist
@@ -12,7 +6,6 @@ from torch.utils.data import RandomSampler
 from packaging import version
 from torch import nn
 from utils.train_utils import load_deepspeed
-from models.llava.llava_trainer import LLaVATrainer
 from transformers.utils import logging
 import sys, os, time, shutil
 import math
@@ -37,7 +30,7 @@ from transformers.trainer import (
     is_accelerate_available,
     is_deepspeed_available,
     get_parameter_names,
-    ALL_LAYERNORM_LAYERS
+    ALL_LAYERNORM_LAYERS, SCHEDULER_NAME
 )
 from transformers.integrations import hp_params
 from transformers.trainer_callback import TrainerState
@@ -58,13 +51,7 @@ if is_accelerate_available():
     if is_deepspeed_available():
         from accelerate.utils import DeepSpeedSchedulerWrapper
 
-from models.duallora.dualloralayer import DualLoraLayer
-from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer
-from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
-from collections import OrderedDict
-import numpy as np
 import warnings
-from deepspeed.utils import safe_get_full_optimizer_state
 
 logger = logging.get_logger(__name__)
 
@@ -93,40 +80,73 @@ def fedours_load_state_dict(model, global_state_dict, local_state_dict_list, cli
             load_deepspeed(local_state_dict_list[client_id], model, strict=False)
         else:
             model.load_state_dict(local_state_dict_list[client_id], strict=False)  
-        
-        # gradient based similarity wegithed averaging (exclude own)
-        if extra_state_dict_dict['curr_round'] > 0 and 'task_similarity' in extra_state_dict_dict:
-            # similarity matrix
-            sim = extra_state_dict_dict['task_similarity']
+            
+        # exlude mean
+        if extra_state_dict_dict['curr_round'] > 0:
             new_global_state_dict = {}
-            
-            weights = sim[client_id].clone()
-            
-            weights[client_id] = -1e9
-            # weights = (weights).softmax(dim=0)
-            
-            sim_sum = weights.sum() - weights[client_id]
-            
-            weights[client_id] = sim_sum
-            sim_sum += sim_sum
-            
             for name in global_state_dict.keys():
                 new_param = 0
                 for id in range(training_args.num_clients):
-                    # if id == client_id:
-                    #     continue
-                    new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
-                    
+                    if id == client_id:
+                        continue
+                    new_param += local_state_dict_list[id][name]
+                new_param /= (training_args.num_clients - 1)
                 new_global_state_dict[name] = new_param
-            if (training_args.local_rank == 0 or training_args.local_rank == -1):
-                output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
-                torch.save(new_global_state_dict, output_dir)
         else:
             new_global_state_dict = global_state_dict
         if 'zero3' in training_args.deepspeed:
             load_deepspeed(new_global_state_dict, model, strict=False)
         else:
             model.load_state_dict(new_global_state_dict, strict=False) 
+        
+        # gradient based similarity wegithed averaging (exclude own)
+        # if extra_state_dict_dict['curr_round'] > 0 and 'task_similarity' in extra_state_dict_dict:
+        #     # similarity matrix
+        #     sim = extra_state_dict_dict['task_similarity']
+        #     new_global_state_dict = {}
+            
+        #     weights = sim[client_id].clone()
+            
+        #     weights[client_id] = -1e9
+        #     # weights = (weights).softmax(dim=0)
+            
+        #     # sim_sum = weights.sum() - weights[client_id]
+            
+        #     # # weights[client_id] = sim_sum
+        #     # # sim_sum += sim_sum
+            
+        #     # for name in global_state_dict.keys():
+        #     #     new_param = 0
+        #     #     for id in range(training_args.num_clients):
+        #     #         if id == client_id:
+        #     #             continue
+        #     #         new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
+                    
+        #     #     new_global_state_dict[name] = new_param
+        #     # if (training_args.local_rank == 0 or training_args.local_rank == -1):
+        #     #     output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
+        #     #     torch.save(new_global_state_dict, output_dir)
+                
+        #     threshold = 0.7
+        #     if all(weights < threshold):
+        #         new_global_state_dict = global_state_dict
+        #     else:
+        #         similar_client_id = (weights >= threshold).nonzero(as_tuple=True)[0]
+        #         sim_sum = weights[similar_client_id].sum()
+        #         for name in global_state_dict.keys():
+        #             new_param = 0
+        #             for id in similar_client_id:
+        #                 new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
+        #             new_global_state_dict[name] = new_param
+        #     if (training_args.local_rank == 0 or training_args.local_rank == -1):
+        #         output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
+        #         torch.save(new_global_state_dict, output_dir)
+        # else:
+        #     new_global_state_dict = global_state_dict
+        # if 'zero3' in training_args.deepspeed:
+        #     load_deepspeed(new_global_state_dict, model, strict=False)
+        # else:
+        #     model.load_state_dict(new_global_state_dict, strict=False) 
 
 
 def kl_loss(output, target, temp=2):
@@ -141,6 +161,34 @@ def kl_loss(output, target, temp=2):
     l_kl = l_kl * temp**2
     return l_kl
 
+@torch.no_grad()
+def get_grad_penultimate(logit, label, weight_last, input_penultimate, norm_layer, hidden_states_before_norm):
+    # Compute probabilities using softmax
+    prob = F.softmax(logit, dim=-1).to(torch.bfloat16)
+    
+    # One-hot encode the label
+    oh_label = F.one_hot(label.long(), num_classes=logit.shape[-1]).to(torch.bfloat16)
+
+    # Compute the gradient for the last layer
+    delta = (prob - oh_label) / logit.size(0)
+    
+    # Now, compute the gradient for the penultimate layer
+    grad_penultimate_layer = torch.matmul(delta, weight_last)  # Grad w.r.t. the output of the penultimate layer
+    
+    hidden_states = hidden_states_before_norm.to(torch.float32)
+    variance = hidden_states.pow(2).mean(-1, keepdim=True)
+    norm_factor = torch.rsqrt(variance + norm_layer.variance_epsilon)
+    
+    grad_normalized_hidden_states  = norm_layer.weight * norm_factor * ( 1 - hidden_states * hidden_states / ((variance + norm_layer.variance_epsilon) * hidden_states.size(-1)) )
+    
+    grad = grad_penultimate_layer * grad_normalized_hidden_states.to(torch.bfloat16)
+    
+    # Compute the gradient w.r.t the weights of the penultimate layer using the input to that layer (penultimate input)
+    grad_weights_penultimate = torch.matmul(grad[:,:1].T, input_penultimate) # col # Backprop through penultimate
+    # grad_weights_penultimate = torch.matmul(grad.T, input_penultimate[:,:1]) # row  # Backprop through penultimate
+
+    return grad_weights_penultimate.view(-1)
+
 class LLaVATrainerOURS(LLaVATrainerTaskId):
     def __init__(self, task_id, ema_ratio=0.996, task_vector=None, fisher_old=None, **kwargs):
         super(LLaVATrainerOURS, self).__init__(**kwargs)
@@ -151,7 +199,10 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         
         self.prompt_ema_ratio = 0.99
         self.task_vector=task_vector.cuda() if task_vector is not None else None
-        self.fisher_old = {k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
+        self.fisher_old = fisher_old #{k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
+        self.fisher_cur = 0
+        self.fisher_cnt = 0
+        self.fisher_freq = 2
     
     def compute_loss(self, model, inputs, return_outputs=False):
         # if self.curr_round > 0:
@@ -197,6 +248,9 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         #     self.task_vector = task_vector
         # else:
         #     self.task_vector = self.prompt_ema_ratio * self.task_vector + (1-self.prompt_ema_ratio) * task_vector
+        
+        # pretrained weight fisher info
+        
 
         return (loss, outputs) if return_outputs else loss
     
@@ -622,6 +676,42 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
 
                     model.zero_grad()
                     
+                    # compute fisher online
+                    
+                    # only enable gradient for last transformer block
+                    # for p in self.model.base_model.model.model.layers[-1].self_attn.o_proj.parameters():
+                    #     p.requires_grad = True
+                    # for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
+                    #     p.requires_grad = True
+                    
+                    # if step % self.fisher_freq == 0:
+                    #     with self.model.disable_adapter():
+                    #         inputs = self._prepare_inputs(inputs)
+
+                    #         output = self.model(**inputs)#.loss
+                            
+                    #         shift_labels = self.model.labels[..., 1:]
+                    #         grads = get_grad_penultimate(output.logits[..., :-1, :][shift_labels != -100].detach(), shift_labels[shift_labels != -100].detach(), 
+                    #                                     self.model.base_model.model.lm_head.weight,
+                    #                                     output.penultimate_input[..., :-1, :][shift_labels != -100].detach(),
+                    #                                     self.model.base_model.model.model.norm,
+                    #                                     output.hidden_states_before_norm[..., :-1, :][shift_labels != -100].detach(),)
+                    #         # output.loss.backward()
+                            
+                    #         # grads = []
+                    #         # for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
+                    #         #     breakpoint()
+                    #         #     grads.append(p.grad[:,0].view(-1))
+                    #         # grads = torch.cat(grads)
+                            
+                    #     self.fisher_cur += (grads**2).detach()
+                    #     self.fisher_cnt += 1
+                        
+                    #     # for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
+                    #     #     p.requires_grad = False
+                        
+                    #     model.zero_grad()
+                    
                     self.state.global_step += 1
                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
@@ -784,10 +874,35 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         #         self.task_vector = param #safe_get_full_optimizer_state(param, "exp_avg") #_sq
         # self.task_vector = self.task_vector.flatten().detach().clone().cpu()
         
+        # if self.curr_round > 0:
+        #     with torch.no_grad():
+        #         model_params = OrderedDict(self.model.named_parameters())
+        #         for name, param in model_params.items():
+        #             if 'lang_prompt_downsample_2' in name:
+        #                 target_name = name.replace('lang_prompt_downsample_2', 'lang_prompt_downsample_1')
+        #                 model_params[name].copy_(0.5*param + 0.5*model_params[target_name])
+        #             elif 'ia3_generator_2' in name:
+        #                 target_name = name.replace('ia3_generator_2', 'ia3_generator_1')
+        #                 model_params[name].copy_(0.5*param + 0.5*model_params[target_name])
+        #             elif 'lang_prompt_norm_2' in name:
+        #                 target_name = name.replace('lang_prompt_norm_2', 'lang_prompt_norm_1')
+        #                 model_params[name].copy_(0.5*param + 0.5*model_params[target_name])
+        #             elif 'ia3_l_2' in name:
+        #                 target_name = name.replace('ia3_l_2', 'ia3_l_1')
+        #                 model_params[name].copy_(0.5*param + 0.5*model_params[target_name])
+        
         # self.task_vector = self.task_vector.detach().cpu()
-        self.task_vector = torch.cat((self.model.base_model.model.model.layers[-1].self_attn.k_proj.ia3_l_2['default'].detach().flatten(),
-                                      self.model.base_model.model.model.layers[-1].self_attn.v_proj.ia3_l_2['default'].detach().flatten(),
-                                      self.model.base_model.model.model.layers[-1].mlp.down_proj.ia3_l_2['default'].detach().flatten())).cpu()
+        # k_proj_task_vector = torch.stack([layer.self_attn.k_proj.ia3_l_2['default'].detach().flatten() for layer in self.model.base_model.model.model.layers]).mean(dim=0) - 1
+        # v_proj_task_vector = torch.stack([layer.self_attn.v_proj.ia3_l_2['default'].detach().flatten() for layer in self.model.base_model.model.model.layers]).mean(dim=0) - 1
+        # down_proj_task_vector = torch.stack([layer.mlp.down_proj.ia3_l_2['default'].detach().flatten() for layer in self.model.base_model.model.model.layers]).mean(dim=0) - 1
+        # self.task_vector = torch.cat((k_proj_task_vector,v_proj_task_vector, down_proj_task_vector)).cpu()
+        
+        # self.task_vector = torch.cat((self.model.base_model.model.model.layers[-1].self_attn.k_proj.ia3_l_2['default'].detach().flatten(),
+        #                               self.model.base_model.model.model.layers[-1].self_attn.v_proj.ia3_l_2['default'].detach().flatten(),
+        #                               self.model.base_model.model.model.layers[-1].mlp.down_proj.ia3_l_2['default'].detach().flatten())).cpu() - 1
+        
+        # self.fisher_old = ((self.fisher_cur/self.fisher_cnt) + self.fisher_old) / 2 if self.fisher_old is not None else (self.fisher_cur/self.fisher_cnt)
+        # self.task_vector = self.fisher_old.detach().cpu()
         
         self.model.activate_all()
 

@@ -49,11 +49,12 @@ class PromptMLP(nn.Module):
         self.len = 1
         self.is_forward = is_forward
 
-        non_linearity = nn.ReLU(inplace=True)
-        if activation == "sigmoid":
-            non_linearity = nn.Sigmoid()
-        elif activation == "attention":
-            non_linearity = nn.Softmax(dim=-1)
+        # non_linearity = nn.ReLU(inplace=True)
+        # if activation == "sigmoid":
+        #     non_linearity = nn.Sigmoid()
+        # elif activation == "attention":
+        #     non_linearity = nn.Softmax(dim=-1)
+        non_linearity = nn.SiLU(inplace=True)
 
         self.block = nn.Sequential(
             nn.Linear(self.in_features, self.hidden_features, bias=bias),
@@ -65,6 +66,10 @@ class PromptMLP(nn.Module):
                 lambda m, inp, out: F.dropout(out, p=dropout, training=m.training)
             )
         # self.block[0].apply(init_weights_to_zero)
+        # self.block[0].weight.data = torch.randn(self.block[0].weight.size()) * 0.01
+        
+        # Initialize fc2 to output zeros initially
+        self.block[2].weight.data.fill_(0)
 
     def forward(self, x: torch.Tensor):
         bsz = x.size(0)
@@ -76,15 +81,14 @@ class PromptMLP(nn.Module):
 
         return out
 
-class DAPIA3Layer(BaseTunerLayer):
+class DualEVOIA3Layer2(BaseTunerLayer):
     # All names of layers that may contain adapter weights
-    adapter_layer_names = ("ia3_generator","lang_prompt_film",)
+    adapter_layer_names = ("ia3_generator_1","ia3_generator_2")
 
     def __init__(self, base_layer: nn.Module, is_feedforward: bool, **kwargs) -> None:
         self.base_layer = base_layer
-        self.ia3_generator = nn.ParameterDict({})
-        self.lang_prompt_film = nn.ParameterDict({})
-
+        self.ia3_generator_1 = nn.ParameterDict({})
+        self.ia3_generator_2 = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -105,23 +109,47 @@ class DAPIA3Layer(BaseTunerLayer):
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
         self.in_features = in_features
         self.out_features = out_features
+        
+        self.active_state = 'lora1'
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
-        self.ia3_generator[adapter_name] = PromptMLP(1792,self.in_features,hidden_features=16, is_forward=self.is_feedforward)
-        self.lang_prompt_film[adapter_name] = nn.Linear(64, self.in_features*2)
+        # self.ia3_generator_1[adapter_name] = PromptMLP(512,self.in_features,hidden_features=32, is_forward=self.is_feedforward)
+        # self.ia3_generator_2[adapter_name] = PromptMLP(512,self.in_features,hidden_features=32, is_forward=self.is_feedforward)
         
-        self.to(self.get_base_layer().weight.device)
-        self.set_adapter(self.active_adapters)
+        # self.to(self.get_base_layer().weight.device)
+        # self.set_adapter(self.active_adapters)
+        pass
 
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l.keys():
             # initialize learned vector with torch.ones
             nn.init.constant_(self.ia3_l[adapter_name], 1.0)
 
+    def set_state(self, state):
+        assert state in ['lora1', 'lora2', 'gate'], state
+        self.active_state = state
 
-class Linear(nn.Module, DAPIA3Layer):
+    def activate_all(self):
+        for p in self.ia3_generator_1.parameters():
+            p.requires_grad = True
+        for p in self.ia3_generator_2.parameters():
+            p.requires_grad = True
+
+    def activate_lora1(self):
+        for p in self.ia3_generator_1.parameters():
+            p.requires_grad = True
+        for p in self.ia3_generator_2.parameters():
+            p.requires_grad = False
+    
+    def activate_lora2(self):
+        for p in self.ia3_generator_1.parameters():
+            p.requires_grad = False
+        for p in self.ia3_generator_2.parameters():
+            p.requires_grad = True
+
+class Linear(nn.Module, DualEVOIA3Layer2):
     # (IA)^3 implemented in a dense layer
     def __init__(
         self,
@@ -134,7 +162,7 @@ class Linear(nn.Module, DAPIA3Layer):
         **kwargs,
     ) -> None:
         super().__init__()
-        DAPIA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
+        DualEVOIA3Layer2.__init__(self, base_layer, is_feedforward=is_feedforward)
         self.fan_in_fan_out = fan_in_fan_out
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name
@@ -205,74 +233,58 @@ class Linear(nn.Module, DAPIA3Layer):
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         dtype = previous_dtype = x.dtype
-
+        ia3_scaling = ia3_delta_2 = None
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x)#, *args, **kwargs)
         elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x)#, *args, **kwargs)
         else:
-            task_id_estimated_emb = kwargs['idx'] if 'idx' in kwargs.keys() else None
             query_embeds = kwargs['query_embeds'] if 'query_embeds' in kwargs.keys() else None
             ia3_scaling = 1
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.ia3_generator.keys():
-                    continue
-                dtype = self.ia3_generator[active_adapter].block[0].weight.dtype
+            # for active_adapter in self.active_adapters:
+            #     if active_adapter not in self.ia3_generator_1.keys():
+            #         continue
+                # dtype = self.ia3_generator_1[active_adapter].block[0].weight.dtype
 
-                bs = x.shape[0]
-                if task_id_estimated_emb is not None:
-                    # if labels is not None and attention_mask is not None:
-                    #     new_attention_mask = attention_mask & (labels == IGNORE_INDEX)
-                    # elif attention_mask is not None:
-                    #     new_attention_mask = attention_mask
-                    # elif labels is not None:
-                    #     new_attention_mask = (labels == IGNORE_INDEX)
-                    # else:
-                    #     new_attention_mask = torch.full((x.shape[:-1]), True).to(x.device)
-                    # lang_prompt_norm = self.lang_prompt_norm[active_adapter](x)
-                    # down = self.lang_prompt_downsample[active_adapter](lang_prompt_norm, new_attention_mask)
-                    # film = self.lang_prompt_film[active_adapter](task_id_estimated_emb)
-                    # gamma4 = film[:, :self.in_features]
-                    # beta4 = film[:, self.in_features:]
-                    # gamma_norm = gamma4.norm(p=2, dim=1, keepdim=True).detach()
-                    # beta_norm = beta4.norm(p=2, dim=1, keepdim=True).detach()
+            bs = x.shape[0]
+            if query_embeds is not None:
+                query_embeds_1, query_embeds_2 = query_embeds
+                if self.active_state == 'lora1':
+                    # ia3_delta = self.ia3_generator_1[active_adapter](query_embeds_1)
+                    ia3_delta = ia3_delta_2 = query_embeds_1
+                elif self.active_state == 'lora2':
+                    # ia3_delta = self.ia3_generator_2[active_adapter](query_embeds_2)
+                    ia3_delta = ia3_delta_2 = query_embeds_2
+                elif self.active_state == 'gate':
+                    # ia3_delta_1 = self.ia3_generator_1[active_adapter](query_embeds_1)
+                    ia3_delta_1 = query_embeds_1
 
-                    # gamma4 = gamma4.div(gamma_norm).view(film.size(0), -1, 1)
-                    # beta4 = beta4.div(beta_norm).view(film.size(0), -1, 1)
-                    # down = gamma4 * torch.transpose(down, 2, 1) + beta4
-                    # ia3_delta = torch.transpose(down, 2, 1)
+                    # ia3_delta_2 = self.ia3_generator_2[active_adapter](query_embeds_2)
+                    ia3_delta_2 = query_embeds_2
                     
-                    down = self.ia3_generator[active_adapter](query_embeds)
-                    film = self.lang_prompt_film[active_adapter](task_id_estimated_emb)
-                    gamma4 = film[:, :self.in_features]
-                    beta4 = film[:, self.in_features:]
-                    gamma_norm = gamma4.norm(p=2, dim=1, keepdim=True).detach()
-                    beta_norm = beta4.norm(p=2, dim=1, keepdim=True).detach()
-
-                    gamma4 = gamma4.div(gamma_norm).view(film.size(0), -1, 1)
-                    beta4 = beta4.div(beta_norm).view(film.size(0), -1, 1)
-                    
-                    if self.is_feedforward:
-                        down = gamma4 * torch.transpose(down, 2, 1) + beta4
-                        ia3_delta = torch.transpose(down, 2, 1)
-                    else:
-                        ia3_delta = gamma4 * down + beta4
-                    
-                    if self.is_feedforward:
-                        weight = torch.ones((bs,1, self.in_features)).to(x.device)
-                    else:
-                        weight = torch.ones((bs,self.out_features, 1)).to(x.device)
-                    
-                    ia3 = weight + ia3_delta
-                    
-                    ia3_scaling *= ia3.reshape(bs, -1)
-                    
-                    self.prev_ia3_scaling = ia3_scaling.clone()
+                    # FIXME: gumbel softmax combining
+                    ia3_delta = (ia3_delta_1 + ia3_delta_2)/2
+                    # ia3_delta = selective_masking(ia3_delta_1, ia3_delta_2)
+                    # ia3_delta, gumbel_out = create_mask_gumbel(ia3_delta_1, ia3_delta_2, is_training = self.training)
+                
+                if self.is_feedforward:
+                    weight = torch.ones((bs,1, self.in_features)).to(x.device)
+                    ia3_delta = ia3_delta.reshape((bs,1,self.in_features))
                 else:
-                    ia3_scaling = self.prev_ia3_scaling
-                    # self.prev_ia3_scaling = None
+                    weight = torch.ones((bs,self.in_features, 1)).to(x.device)
+                    ia3_delta = ia3_delta.reshape((bs,self.in_features,1))
+                
+                ia3 = weight + ia3_delta
+                
+                ia3_scaling *= ia3.reshape(bs, -1)
+                
+                self.prev_ia3_scaling = ia3_scaling.clone()
+            else:
+                ia3_scaling = self.prev_ia3_scaling
+                ia3_delta_2 = self.prev_ia3_scaling
+                # self.prev_ia3_scaling = None
 
             if self.is_feedforward:
                 x = x.to(dtype)
@@ -283,6 +295,54 @@ class Linear(nn.Module, DAPIA3Layer):
             else:
                 result = self.base_layer(x)
                 result = result.to(dtype) * ia3_scaling.unsqueeze(1)
-
+                
+            ia3_delta_2 = ia3_delta_2.reshape(bs, -1)
+        
         result = result.to(previous_dtype)
-        return result
+        # return result, (ia3_scaling, ia3_delta_2.reshape(bs, -1))
+        return result, (ia3_scaling, ia3_delta_2)
+
+import torch.nn.functional as F
+def create_mask_gumbel(tensor1, tensor2, tau=1.0, hard=True, is_training=False):
+    # Initialize logits for each condition
+    logits = torch.zeros(tensor1.size(0), tensor1.size(1), 3).to(tensor1.device)  # 3 categories: tensor1, tensor2, average
+    
+    # Condition masks
+    both_greater_than_1 = (tensor1 >= 0) & (tensor2 >= 0)
+    both_smaller_than_1 = (tensor1 <= 0) & (tensor2 <= 0)
+    one_greater_one_smaller = (tensor1 > 0) & (tensor2 < 0) | (tensor1 < 0) & (tensor2 > 0)
+    
+    # For both_greater_than_1
+    indices = both_greater_than_1.nonzero(as_tuple=True)
+    logits[indices[0], indices[1], 0] = (tensor1[indices[0], indices[1]] >= tensor2[indices[0], indices[1]]).float()
+    logits[indices[0], indices[1], 1] = (tensor2[indices[0], indices[1]] >= tensor1[indices[0], indices[1]]).float()
+    
+    # For both_smaller_than_1
+    indices = both_smaller_than_1.nonzero(as_tuple=True)
+    logits[indices[0], indices[1], 0] = (tensor1[indices[0], indices[1]] <= tensor2[indices[0], indices[1]]).float()
+    logits[indices[0], indices[1], 1] = (tensor2[indices[0], indices[1]] <= tensor1[indices[0], indices[1]]).float()
+    
+    # For one_greater_one_smaller 
+    indices = one_greater_one_smaller.nonzero(as_tuple=True)
+    logits[indices[0], indices[1], 2] = 1.0  # Average choice for mixed cases
+    # logits[..., 2] = 1.0
+    
+    # Apply Gumbel-Softmax to get the mask
+    if is_training:
+        gumbel_out = F.gumbel_softmax(logits.to(torch.bfloat16), tau=tau, hard=hard)#.to(torch.bfloat16)
+    else:
+        gumbel_out = logits.to(torch.bfloat16)
+    # Calculate the final result based on gumbel_out                                            
+    # result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * (0.5 * (tensor1 + tensor2))
+    result = gumbel_out[..., 0] * tensor1 + gumbel_out[..., 1] * tensor2 + gumbel_out[..., 2] * tensor2 #-> follow local
+    
+    return result, gumbel_out
+
+def selective_masking(tensor1, tensor2):
+    
+    # mask sign conflict
+    same_sign = (tensor1*tensor2) >= 0
+    
+    
+    result = tensor1*same_sign + tensor2
+    return result

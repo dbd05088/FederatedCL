@@ -3,8 +3,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from transformers import AutoConfig, AutoModelForCausalLM, \
-                         LlamaConfig, LlamaModel, LlamaForCausalLM
+from transformers import LlamaConfig, LlamaModel, LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
 
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
@@ -15,23 +14,15 @@ from transformers.cache_utils import Cache, DynamicCache, StaticCache
 
 from models.llava.llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
-from models.feddat_adapter import Adapter
 import warnings
-from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
-from models.attention_prompt_generator import prefix_attention
-from models.prompt2 import Prompt2
 import torch.nn.functional as F
 from models.empty_ia3.empty_ia3_attn import LlamaEmptyIA3Attention
 from models.empty_ia3.empty_ia3_mlp import LlamaEmptyIA3MLP
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
 
 from models.pool2 import Pool2
-
-
-from operator import mul
 import math
-from functools import reduce
 
 logger = logging.get_logger(__name__)
 

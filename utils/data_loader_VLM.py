@@ -4,7 +4,7 @@ import copy
 import os
 from torch.utils.data import Dataset
 import transformers
-from configuration.VLM_config import DataArguments
+from configuration.VLM_config_new import DataArguments
 from typing import Dict, Sequence
 from PIL import Image
 from dataclasses import dataclass

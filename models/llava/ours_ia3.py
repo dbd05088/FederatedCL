@@ -1,25 +1,9 @@
-#    Copyright 2023 Haotian Liu
-#
-#    Licensed under the Apache License, Version 2.0 (the "License");
-#    you may not use this file except in compliance with the License.
-#    You may obtain a copy of the License at
-#
-#        http://www.apache.org/licenses/LICENSE-2.0
-#
-#    Unless required by applicable law or agreed to in writing, software
-#    distributed under the License is distributed on an "AS IS" BASIS,
-#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#    See the License for the specific language governing permissions and
-#    limitations under the License.
-
-
 from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
-from transformers import AutoConfig, AutoModelForCausalLM, \
-                         LlamaConfig, LlamaModel, LlamaForCausalLM
+from transformers import LlamaConfig, LlamaModel, LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
 
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
@@ -27,24 +11,52 @@ from transformers.generation.utils import GenerateOutput
 from transformers.utils import logging
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
 
-
 from models.llava.llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
-from models.feddat_adapter import Adapter
 import warnings
-from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
-from models.prompt import Prompt
 import torch.nn.functional as F
+from models.ours_ia3.ours_ia3_attn import LlamaEVOIA3Attention
+from models.ours_ia3.ours_ia3_mlp import LlamaEVOIA3MLP
+
+from models.attention_prompt_generator2 import prefix_attention2
+from models.ours_ia3.ours_ia3_layer import DualEVOIA3Layer
 
 logger = logging.get_logger(__name__)
 
+from dataclasses import dataclass
+from transformers.utils import ModelOutput
 
-class LlamaDecoderL2PLayer(LlamaDecoderLayer):
+@dataclass
+class CausalLMOutputWithPast2(ModelOutput):
+    loss: Optional[torch.FloatTensor] = None
+    logits: torch.FloatTensor = None
+    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    ia3_layer: Optional[Tuple[torch.FloatTensor, ...]]=None
+    local_ia3_layer: Optional[Tuple[torch.FloatTensor, ...]]=None
+
+def expand_to_batch(x, batch_size, dim=0):
+    shape = [1 for _ in x.shape]
+    shape.insert(dim, batch_size)
+    return torch.tile(torch.unsqueeze(x, dim=dim), shape).cuda()
+
+class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__(config, layer_idx)
         
-        self.lang_prompt = Prompt(length=20, top_k=5, pool_size=10, embed_dim=config.hidden_size, key_dim=config.hidden_size)
+        self.hidden_size = config.hidden_size
+
+        self.self_attn = LlamaEVOIA3Attention(config=config, layer_idx=layer_idx)
+        self.mlp = LlamaEVOIA3MLP(config)
+        self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        
+        self.lang_prompt_downsample_1 = prefix_attention2(prefix_num=1, output_size=config.generator_output_size, head_dim=config.generator_hidden_dim)
+        self.lang_prompt_norm_1 = nn.LayerNorm(config.hidden_size, eps=1e-6)
+        self.lang_prompt_downsample_2 = prefix_attention2(prefix_num=1, output_size=config.generator_output_size, head_dim=config.generator_hidden_dim)
+        self.lang_prompt_norm_2 = nn.LayerNorm(config.hidden_size, eps=1e-6)
 
     def forward(
         self,
@@ -55,7 +67,8 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
-        image_feature_indices=None,
+        query_embeds=None,
+        labels=None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -76,31 +89,31 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
             )
-        
-        # add prompt
-        bsz = hidden_states.shape[0]
-        if image_feature_indices is not None:
-            image_features = []
-            for i in range(bsz):
-                image_features.append(hidden_states[i,:, :].mean(dim=0))
-                
-            image_features = torch.stack(image_features, dim=0)
-            prompt_pool_output = self.lang_prompt(image_features)
-            selected_prompts = prompt_pool_output['batched_prompt']
-            hidden_states = torch.concat((selected_prompts, hidden_states), dim=1)
-            len_prompt = selected_prompts.shape[1]
+        if query_embeds is not None:
+            if labels is not None and attention_mask is not None:
+                new_attention_mask = attention_mask & (labels == IGNORE_INDEX)
+            elif attention_mask is not None:
+                new_attention_mask = attention_mask
+            elif labels is not None:
+                new_attention_mask = (labels == IGNORE_INDEX)
+            else:
+                new_attention_mask = torch.full((hidden_states.shape[:-1]), True).to(hidden_states.device)
+            lang_prompt_norm = self.lang_prompt_norm_1(hidden_states)
+            new_query_embeds1 = self.lang_prompt_downsample_1(lang_prompt_norm, new_attention_mask)
             
-            if attention_mask is not None:
-                attention_mask = torch.concat((torch.full((bsz, selected_prompts.shape[1]), True).cuda(), attention_mask), dim=1)
-            if position_ids is not None:
-                position_ids = torch.arange(hidden_states.shape[1]).unsqueeze(0).cuda()
-
+            lang_prompt_norm = self.lang_prompt_norm_2(hidden_states)
+            new_query_embeds2 = self.lang_prompt_downsample_2(lang_prompt_norm, new_attention_mask)
+            
+            new_query_embeds = (new_query_embeds1, new_query_embeds2)
+        else:
+            new_query_embeds = None
+        # add prompt
         residual = hidden_states
 
         hidden_states = self.input_layernorm(hidden_states)
 
         # Self Attention
-        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+        hidden_states, self_attn_weights, present_key_value, (ia3_k, ia3_v) = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -108,6 +121,7 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
+            query_embeds=new_query_embeds,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -115,12 +129,9 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        hidden_states, ia3_down = self.mlp(hidden_states,query_embeds=new_query_embeds)
         
-        # remove prompt
-        if image_feature_indices is not None:
-            hidden_states = hidden_states[:,len_prompt:,:]
+        hidden_states = residual + hidden_states
         
         outputs = (hidden_states,)
 
@@ -128,13 +139,14 @@ class LlamaDecoderL2PLayer(LlamaDecoderLayer):
             outputs += (self_attn_weights,)
 
         if use_cache:
-            outputs += (present_key_value,)        
+            outputs += (present_key_value,)
             
-        if image_feature_indices is not None:
-            outputs += (prompt_pool_output['reduce_sim'],)
+        # outputs += (torch.cat((ia3_k, ia3_v, ia3_down), dim=-1),)
+        outputs += (torch.cat((ia3_k[0], ia3_v[0], ia3_down[0]), dim=-1),torch.cat((ia3_k[1], ia3_v[1], ia3_down[1]), dim=-1))
 
         return outputs
-class LlamaL2PModel(LlamaModel):
+
+class LlamaEVOIA3Model(LlamaModel):
     def __init__(self, config: LlamaConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
@@ -142,7 +154,7 @@ class LlamaL2PModel(LlamaModel):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
-            [LlamaDecoderL2PLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [LlamaDecoderEVOIA3Layer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.gradient_checkpointing = False
@@ -162,7 +174,8 @@ class LlamaL2PModel(LlamaModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        image_feature_indices=None,
+        query_embeds=None,
+        labels=None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -211,7 +224,8 @@ class LlamaL2PModel(LlamaModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = None
         
-        l2p_key_losses = 0
+        ia3_layers = []
+        local_ia3_layers = []
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -226,7 +240,8 @@ class LlamaL2PModel(LlamaModel):
                     output_attentions,
                     use_cache,
                     cache_position,
-                    image_feature_indices,
+                    query_embeds,
+                    labels,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -237,7 +252,8 @@ class LlamaL2PModel(LlamaModel):
                     output_attentions=output_attentions,
                     use_cache=use_cache,
                     cache_position=cache_position,
-                    image_feature_indices=image_feature_indices,
+                    query_embeds=query_embeds,
+                    labels=labels,
                 )
 
             hidden_states = layer_outputs[0]
@@ -248,9 +264,9 @@ class LlamaL2PModel(LlamaModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
             
-            if image_feature_indices is not None:
-                l2p_key_losses += layer_outputs[-1]
-
+            ia3_layers.append(layer_outputs[-2])
+            local_ia3_layers.append(layer_outputs[-1])
+            
         hidden_states = self.norm(hidden_states)
 
         # add hidden states from the last decoder layer
@@ -264,26 +280,26 @@ class LlamaL2PModel(LlamaModel):
             )
         if not return_dict:
             return tuple(v for v in [hidden_states, next_cache, all_hidden_states, all_self_attns] if v is not None)
-        return (BaseModelOutputWithPast(
+        return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,
             hidden_states=all_hidden_states,
             attentions=all_self_attns,
-        ), l2p_key_losses)
+        ), (ia3_layers, local_ia3_layers)
 
 
 class LlavaConfig(LlamaConfig):
     model_type = "llava_llama"
 
 
-class LlavaLlamaL2PModel(LlavaMetaModel, LlamaL2PModel):
+class LlavaLlamaEVOIA3Model(LlavaMetaModel, LlamaEVOIA3Model):
     config_class = LlavaConfig
 
     def __init__(self, config: LlamaConfig):
-        super(LlavaLlamaL2PModel, self).__init__(config)
+        super(LlavaLlamaEVOIA3Model, self).__init__(config)
 
 
-class LlamaL2pForCausalLM(LlamaForCausalLM):
+class LlamaEVOIA3ForCausalLM(LlamaForCausalLM):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -297,7 +313,7 @@ class LlamaL2pForCausalLM(LlamaForCausalLM):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        image_feature_indices=None,
+        query_embeds=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -306,7 +322,7 @@ class LlamaL2pForCausalLM(LlamaForCausalLM):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        outputs, l2p_key_losses = self.model(
+        outputs, ia3_layer = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -317,7 +333,8 @@ class LlamaL2pForCausalLM(LlamaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             cache_position=cache_position,
-            image_feature_indices=image_feature_indices,
+            query_embeds=query_embeds,
+            labels=labels,
         )
 
         hidden_states = outputs[0]
@@ -341,35 +358,101 @@ class LlamaL2pForCausalLM(LlamaForCausalLM):
             # Enable model parallelism
             shift_labels = shift_labels.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
-            
-            loss -= 0.1*l2p_key_losses
 
         if not return_dict:
-            output = (logits,) + outputs[1:]
+            output = (logits,) + outputs[1:] + (ia3_layer[0],ia3_layer[1])
             return (loss,) + output if loss is not None else output
 
-        return CausalLMOutputWithPast(
+        return CausalLMOutputWithPast2(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            ia3_layer=ia3_layer[0],
+            local_ia3_layer=ia3_layer[1],
         )
 
 
-class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
+class LlavaLlamaOURSGENIA3ForCausalLM(LlamaEVOIA3ForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
-    def __init__(self, config, prompt_num):
+    def __init__(self, config, generator_output_size, generator_hidden_dim):
         super(LlamaForCausalLM, self).__init__(config)
-        self.model = LlavaLlamaL2PModel(config)
+        config.generator_output_size=generator_output_size
+        config.generator_hidden_dim=generator_hidden_dim
+        self.model = LlavaLlamaEVOIA3Model(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
+        
+        self.prompt_dim = 1792#config.hidden_size*2
+        
+        self.active_state = 'lora2'
+        
+    def set_state(self, state):
+        assert state in ['lora1', 'lora2', 'gate'], state
+        self.active_state = state
+        
+        for name, module in self.model.named_modules():
+            if isinstance(module, DualEVOIA3Layer):
+                module.set_state(state)
+
+    def activate_all(self):
+        # for p in self.lang_prompt_dap_key_embeddings_1.parameters():
+        #     p.requires_grad = True
+        # for p in self.lang_prompt_dap_key_embeddings_2.parameters():
+        #     p.requires_grad = True
+        for layer in self.model.layers:
+            for p in layer.lang_prompt_downsample_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_norm_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_2.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_norm_2.parameters():
+                p.requires_grad = True
+        
+        for name, module in self.model.named_modules():
+            if isinstance(module, DualEVOIA3Layer):
+                module.activate_all()
+
+    def activate_lora1(self):
+        # for p in self.lang_prompt_dap_key_embeddings_1.parameters():
+        #     p.requires_grad = True
+        # for p in self.lang_prompt_dap_key_embeddings_2.parameters():
+        #     p.requires_grad = False
+        for layer in self.model.layers:
+            for p in layer.lang_prompt_downsample_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_norm_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_downsample_2.parameters():
+                p.requires_grad = False
+            for p in layer.lang_prompt_norm_2.parameters():
+                p.requires_grad = False
+            
+        for name, module in self.model.named_modules():
+            if isinstance(module, DualEVOIA3Layer):
+                module.activate_lora1()
     
+    def activate_lora2(self):
+        for layer in self.model.layers:
+            for p in layer.lang_prompt_downsample_1.parameters():
+                p.requires_grad = False
+            for p in layer.lang_prompt_norm_1.parameters():
+                p.requires_grad = False
+            for p in layer.lang_prompt_downsample_2.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_norm_2.parameters():
+                p.requires_grad = True
+        
+        for name, module in self.model.named_modules():
+            if isinstance(module, DualEVOIA3Layer):
+                module.activate_lora2()
     def get_model(self):
         return self.model
     
@@ -388,7 +471,10 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
         image_sizes: Optional[List[List[int]]] = None,
         return_dict: Optional[bool] = None,
         cache_position=None,
-        image_feature_indices=None,
+        task_id=None,
+        task_id_estimated_emb=None,
+        prompt=None,
+        query_embeds=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         
         if inputs_embeds is None:
@@ -399,7 +485,7 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 inputs_embeds,
                 labels,
-                image_feature_indices
+                task_id_estimated_emb
             ) = self.prepare_inputs_labels_for_multimodal(
                 input_ids,
                 position_ids,
@@ -407,9 +493,15 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 labels,
                 images,
-                image_sizes
+                task_id=task_id,
+                prompt=prompt
             )
-        return super().forward(
+            if task_id_estimated_emb is not None:
+                query_embeds, _ = task_id_estimated_emb
+            else:
+                query_embeds=None
+        self.labels = labels
+        outputs = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -420,8 +512,10 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            image_feature_indices=image_feature_indices
+            query_embeds=query_embeds,
         )
+        
+        return outputs
 
     @torch.no_grad()
     def generate(
@@ -429,13 +523,14 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
         inputs: Optional[torch.Tensor] = None,
         images: Optional[torch.Tensor] = None,
         image_sizes: Optional[torch.Tensor] = None,
+        prompt=None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         position_ids = kwargs.pop("position_ids", None)
         attention_mask = kwargs.pop("attention_mask", None)
         if "inputs_embeds" in kwargs:
             raise NotImplementedError("`inputs_embeds` is not supported")
-
+        
         if images is not None:
             (
                 inputs,
@@ -444,7 +539,7 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
                 _,
                 inputs_embeds,
                 _,
-                image_feature_indices
+                task_id_estimated_emb
             ) = self.prepare_inputs_labels_for_multimodal(
                 inputs,
                 position_ids,
@@ -452,9 +547,10 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
                 None,
                 None,
                 images,
-                image_sizes=image_sizes
+                prompt=prompt
             )
-            kwargs["image_feature_indices"] = image_feature_indices
+            query_embeds, _ = task_id_estimated_emb
+            kwargs["query_embeds"] = query_embeds
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
 
@@ -464,12 +560,11 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
             inputs_embeds=inputs_embeds,
             **kwargs
         )
-
+    
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, attention_mask=None,
-                                      inputs_embeds=None, image_feature_indices=None, cache_position=None, **kwargs):
+                                      inputs_embeds=None, query_embeds=None,cache_position=None, **kwargs):
         images = kwargs.pop("images", None)
         image_sizes = kwargs.pop("image_sizes", None)
-        # image_feature_indices = kwargs.pop("image_feature_indices", None)
         
         # With static cache, the `past_key_values` is None
         # TODO joao: standardize interface for the different Cache classes and remove of this if
@@ -497,10 +592,8 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
             # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
             # some of the inputs are exclusively passed as part of the cache (e.g. when passing input_embeds as
             # input)
-            past_length -= 100 # - prompt num
             if attention_mask is not None and attention_mask.shape[1] > input_ids.shape[1]:
                 input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
-                attention_mask = torch.concat((torch.full((attention_mask.shape[0], 100), True).cuda(), attention_mask), dim=1)
             # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
             # input_ids based on the past_length.
             elif past_length < input_ids.shape[1]:
@@ -521,7 +614,7 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past_key_values:
-                position_ids = position_ids[:, -input_ids.shape[1] :] #+ 100
+                position_ids = position_ids[:, -input_ids.shape[1] :]
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
         if inputs_embeds is not None and past_key_values is None:
@@ -536,14 +629,14 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
         if cache_position is None:
             cache_position = torch.arange(past_length, past_length + input_length, device=input_ids.device)
         else:
-            cache_position = cache_position[-input_length:] + 100
+            cache_position = cache_position[-input_length:]
 
         if has_static_cache:
             past_key_values = None
 
         model_inputs.update(
             {
-                "position_ids": position_ids,
+                "position_ids": position_ids ,
                 "cache_position": cache_position,
                 "past_key_values": past_key_values,
                 "use_cache": kwargs.get("use_cache"),
@@ -557,13 +650,20 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
             inputs['images'] = images
         if image_sizes is not None:
             inputs['image_sizes'] = image_sizes
-        if image_feature_indices is not None:
-            inputs['image_feature_indices'] = image_feature_indices
+        if query_embeds is not None:
+            inputs['query_embeds'] = query_embeds
         return inputs
+    
+    def encode_images(self, images):
+        image_features = self.get_model().get_vision_tower()(images)
+        cls_feature = image_features[:, 0]
+        image_features = image_features[:, 1:]
+        image_features = self.get_model().mm_projector(image_features)
+        return image_features, cls_feature
     
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
-        images, image_sizes=None
+        images, task_id=None, prompt=None
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1 or all(img.shape[0] == 0 for img in images):
@@ -573,9 +673,10 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
             if type(images) is list:
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
             concat_images = torch.cat([image for image in images], dim=0)
-            image_features = self.encode_images(concat_images)
+            image_features, cls_features = self.encode_images(concat_images)
             split_sizes = [image.shape[0] for image in images]
             image_features = torch.split(image_features, split_sizes, dim=0)
+            cls_features = torch.split(cls_features, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
             image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
         else:
@@ -619,7 +720,7 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
                 # cur_input_embeds = torch.cat([cur_input_embeds_1, cur_image_features[0:0]], dim=0)
                 new_input_embeds.append(cur_input_embeds)
                 new_labels.append(labels[batch_idx])
-                image_feature_indices.append([])  # No image features for this item
+                image_feature_indices.append([])
                 cur_image_idx += 1
                 continue
 
@@ -632,7 +733,7 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
                 cur_labels_noim.append(cur_labels[image_token_indices[i]+1:image_token_indices[i+1]])
             split_sizes = [x.shape[0] for x in cur_labels_noim]
             cur_input_embeds = self.get_model().embed_tokens(torch.cat(cur_input_ids_noim))
-            cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)
+            cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)        
             cur_new_input_embeds = []
             cur_new_labels = []
             cur_image_feature_indices = []  # To store indices for this item
@@ -707,5 +808,5 @@ class LlavaLlamaL2PtextForCausalLM(LlamaL2pForCausalLM, LlavaMetaForCausalLM):
 
         if _position_ids is None:
             position_ids = None
-
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, image_feature_indices
+        
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (0,0)

@@ -33,7 +33,7 @@ from peft.utils import (
 )
 
 from peft.tuners.ia3.layer import Conv2d
-from models.dual_evoia3.dual_evoia3layer import DualEVOIA3Layer, Linear
+from models.ours_ia3.ours_ia3_layer import DualEVOIA3Layer, Linear
 
 
 class DualEVOIA3Model(BaseTuner):

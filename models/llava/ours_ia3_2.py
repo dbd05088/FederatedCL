@@ -1,25 +1,9 @@
-#    Copyright 2023 Haotian Liu
-#
-#    Licensed under the Apache License, Version 2.0 (the "License");
-#    you may not use this file except in compliance with the License.
-#    You may obtain a copy of the License at
-#
-#        http://www.apache.org/licenses/LICENSE-2.0
-#
-#    Unless required by applicable law or agreed to in writing, software
-#    distributed under the License is distributed on an "AS IS" BASIS,
-#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#    See the License for the specific language governing permissions and
-#    limitations under the License.
-
-
 from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
-from transformers import AutoConfig, AutoModelForCausalLM, \
-                         LlamaConfig, LlamaModel, LlamaForCausalLM
+from transformers import LlamaConfig, LlamaModel, LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaDecoderLayer
 
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
@@ -30,21 +14,14 @@ from transformers.cache_utils import Cache, DynamicCache, StaticCache
 
 from models.llava.llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
-from models.feddat_adapter import Adapter
 import warnings
-from models.llava.language_model.llava_llama import LlavaLlamaForCausalLM
 from models.llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX
 import torch.nn.functional as F
-from models.dual_evoia32.dual_evoia3_attn import LlamaEVOIA3Attention
-from models.dual_evoia3.dual_evoia3_mlp import LlamaEVOIA3MLP
+from models.ours_ia3_2.ours_ia3_attn2 import LlamaEVOIA3Attention
+from models.ours_ia3.ours_ia3_mlp import LlamaEVOIA3MLP
 
 from models.attention_prompt_generator2 import prefix_attention2
-from models.dual_evoia32.dual_evoia3layer2 import DualEVOIA3Layer2
-from models.dual_ia3pool.dual_ia3poollayer import DualIA3PoolLayer
-
-from operator import mul
-import math
-from functools import reduce
+from models.ours_ia3_2.ours_ia3_layer2 import DualEVOIA3Layer2
 
 logger = logging.get_logger(__name__)
 
@@ -167,7 +144,12 @@ class LlamaDecoderEVOIA3Layer(LlamaDecoderLayer):
         if use_cache:
             outputs += (present_key_value,)
         
-        outputs += (torch.cat((ia3_k[0], ia3_v[0], ia3_down[0]), dim=-1),torch.cat((ia3_k[1], ia3_v[1], ia3_down[1]), dim=-1))
+        # outputs += (torch.cat((ia3_k[0], ia3_v[0], ia3_down[0]), dim=-1),torch.cat((ia3_k[1], ia3_v[1], ia3_down[1]), dim=-1))
+        if ia3_k[0] is not None:
+            outputs += (torch.cat((ia3_k[0], ia3_v[0], ia3_down[0]), dim=-1),torch.cat((ia3_k[1], ia3_v[1], ia3_down[1]), dim=-1))
+        else:
+            outputs += (None,None)
+
 
         return outputs
 
@@ -422,7 +404,7 @@ class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausa
         self.active_state = state
         
         for name, module in self.model.named_modules():
-            if isinstance(module, DualEVOIA3Layer2) or isinstance(module, DualIA3PoolLayer):
+            if isinstance(module, DualEVOIA3Layer2):
                 module.set_state(state)
 
     def activate_all(self):
@@ -521,11 +503,10 @@ class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausa
                 prompt=prompt
             )
             if task_id_estimated_emb is not None:
-                query_embeds, reduce_sim = task_id_estimated_emb
+                query_embeds, _ = task_id_estimated_emb
             else:
                 query_embeds=None
-                reduce_sim=0
-
+        self.labels = labels
         outputs = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -574,7 +555,7 @@ class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausa
                 images,
                 prompt=prompt
             )
-            query_embeds, reduce_sim = task_id_estimated_emb
+            query_embeds, _ = task_id_estimated_emb
             kwargs["query_embeds"] = query_embeds
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
@@ -834,23 +815,5 @@ class LlavaLlamaOURSGENIA3ForCausalLM2(LlamaEVOIA3ForCausalLM, LlavaMetaForCausa
 
         if _position_ids is None:
             position_ids = None
-            
-        # key selection
-        # input_features = []
-        # assert prompt is not None
-        # for i in range(new_input_embeds.shape[0]):
-        #     img_feat = cls_features[batch_idx].mean(dim=0)
-        #     text_ids = input_ids[batch_idx]
-        #     text = prompt[batch_idx]
-        #     text_ids = self.clipprocessor(text=[text], return_tensors="pt", padding=True)
-        #     text_ids['input_ids'] = text_ids['input_ids'].cuda()
-        #     text_ids['attention_mask'] = text_ids['attention_mask'].cuda()
-        #     text_ids['input_ids'] = text_ids['input_ids'][:,-248:] if len(text_ids['input_ids'][0]) > 248 else text_ids['input_ids']
-        #     text_ids['attention_mask'] = text_ids['attention_mask'][:,-248:] if len(text_ids['attention_mask'][0]) > 248 else text_ids['attention_mask']
-        #     text_feat = self.text_encoder(**text_ids)[1][0].to(torch.bfloat16)
-        #     input_features.append(torch.concat((img_feat, text_feat)))
-        # input_features = torch.stack(input_features)
-        input_features = 0
-        reduce_sim=0
 
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (input_features,reduce_sim)
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, (0,0)
