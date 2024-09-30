@@ -37,76 +37,70 @@ bash Visual_storytelling.sh
 2. Run the following preprocessing python codes:
 - MMCloze
 ```bash
-python preprocess_RecipeQA_TextCloze.py
-python preprocess_RecipeQA_VisualCloze.py
-python preprocess_COMICS_Panel.py
-python preprocess_COMICS_Dialogue.py
+python ./preprocess/preprocess_RecipeQA_TextCloze.py
+python ./preprocess/preprocess_RecipeQA_VisualCloze.py
+python ./preprocess/preprocess_COMICS_Panel.py
+python ./preprocess/preprocess_COMICS_Dialogue.py
 ```
 - HRVQA
 ```bash
 cd ./dataset/HRVQA/jsons
 python task_split.py
 cd ../../..
-python preprocess_HRVQA.py
+python ./preprocess/preprocess_HRVQA.py
 ```
 - MultiVQA_large
 ```bash
-python preprocess_RecipeQA_ImageCoherence.py
-python preprocess_Fashion200K.py
-python preprocess_NLVR2.py
+python ./preprocess/preprocess_RecipeQA_ImageCoherence.py
+python ./preprocess/preprocess_Fashion200K.py
+python ./preprocess/preprocess_NLVR2.py
 ```
 - MultiVQA_small
 ```bash
-python preprocess_VISION.py
-python preprocess_VizWiz.py
-python preprocess_MIT.py
+python ./preprocess/preprocess_VISION.py
+python ./preprocess/preprocess_VizWiz.py
+python ./preprocess/preprocess_MIT.py
 ```
 - mPLUG
 ```bash
-python preprocess_mPLUG.py
+python ./preprocess/preprocess_mPLUG.py
 ```
 
 - Bongard
 ```bash
-python preprocess_Bongard.py
-python preprocess_Bongard_query.py
-python preprocess_Bongard_HOI.py
-python preprocess_Bongard_HOI_query.py
+python ./preprocess/preprocess_Bongard.py
+python ./preprocess/preprocess_Bongard_query.py
+python ./preprocess/preprocess_Bongard_HOI.py
+python ./preprocess/preprocess_Bongard_HOI_query.py
 ```
 
 - KGQA
 ```bash
-python preprocess_WebQA.py
-python preprocess_TQA.py
-python preprocess_AQUA.py
+python ./preprocess/preprocess_WebQA.py
+python ./preprocess/preprocess_TQA.py
+python ./preprocess/preprocess_AQUA.py
 ```
 
 - Visual_Relation
 ```bash
-python preprocess_SpotDiff.py
-python preprocess_Bird2Words.py
-python preprocess_CLEVR.py
-python preprocess_IEdit.py
+python ./preprocess/preprocess_SpotDiff.py
+python ./preprocess/preprocess_Bird2Words.py
+python ./preprocess/preprocess_CLEVR.py
+python ./preprocess/preprocess_IEdit.py
 ```
 
 - Visual_storytelling
 ```bash
-python preprocess_PororoSV.py
-python preprocess_FlintstonesSV.py
-python preprocess_VIST.py
-python preprocess_AESOP.py
+python ./preprocess/preprocess_PororoSV.py
+python ./preprocess/preprocess_FlintstonesSV.py
+python ./preprocess/preprocess_VIST.py
+python ./preprocess/preprocess_AESOP.py
 ```
 </details>
 
 # How to run
 
 1. Train
-- Client for-loop running: `bash train_VLM.sh`
-    - Arguments:
-        - NOTE: Experiment name **All the models are saved in client_states_$NOTE folder**
-        - MODE: Name of method (method in `federated_methods/method_manager.py`)
-        - NUM_ITER: Number of updates per round in each client
-
 - Client for-loop continual-learning: `bash train_VLM_CL.sh`
     - Arguments:
         - NOTE: Experiment name **All the models are saved in client_states_$NOTE folder**
@@ -142,17 +136,17 @@ python preprocess_AESOP.py
         
 # Baseline list
 
-- L2P (layerwise, visual feature only) -> done
-- CODA_Prompt                           -> hyperparameter searching
-- DAP                                   -> done
-- EvoPrompt                             -> done
-- L2P_T (concat visual + text feature) -> done
-- CODA_Prompt_T                         -> hyperparameter searching
-- DAP_T                                 -> done
-- EvoPrompt_T                           -> done
-- LAE                                   -> done
+- L2P (layerwise, visual feature only)
+- CODA_Prompt                           
+- DAP                                   
+- EvoPrompt                             
+- L2P_T (concat visual + text feature) 
+- CODA_Prompt_T                         
+- DAP_T                                 
+- EvoPrompt_T                           
+- LAE                                   
 - Federated methods combined version
-    - FedAvg, Ditto, Feddat, ...
+    - FedAvg, FedPer, Ditto, Feddat, ...
 - L2P_FedAvg / L2P_T_FedAvg
 - CODA_Prompt_FedAvg / CODA_Prompt_T_FedAvg
 - DAP_FedAvg / DAP_T_FedAvg
