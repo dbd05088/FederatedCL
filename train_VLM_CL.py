@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from configuration.VLM_config_new import ModelArguments, DataArguments, TrainingArguments
 import transformers
-from utils.train_utils import get_VLMmodel, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, safe_save_model_for_hf_trainer, load_deepspeed
+from utils.train_utils import get_VLMmodel, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3
 
 from federated_methods.method_manager import select_method
 from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
@@ -121,21 +121,21 @@ def main():
         if curr_round > 0 and training_args.use_task_vector:
             
             # cosine sim matrix
-            # task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
-            # sim = torch.matmul(task_vector,
-            #                 torch.transpose(task_vector, 1, 0))
-            # sim = torch.transpose(sim, 1, 0)
+            task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
+            sim = torch.matmul(task_vector,
+                            torch.transpose(task_vector, 1, 0))
+            sim = torch.transpose(sim, 1, 0)
             # sim = (sim+1)/2 # normalize -1~1 to 0~1
             
             
             # l2 distance matrix
-            task_vector = torch.stack(task_vectors)
+            # task_vector = torch.stack(task_vectors)
 
-            # Compute pairwise squared differences
-            diff = task_vector.unsqueeze(1) - task_vector.unsqueeze(0)
+            # # Compute pairwise squared differences
+            # diff = task_vector.unsqueeze(1) - task_vector.unsqueeze(0)
             
-            # Compute L2 distance matrix by summing the squared differences and taking the square root
-            sim = 1 / torch.sqrt(torch.sum(diff ** 2, dim=2))
+            # # Compute L2 distance matrix by summing the squared differences and taking the square root
+            # sim = 1 / torch.sqrt(torch.sum(diff ** 2, dim=2))
             
             extra_state_dict_dict['task_similarity'] = sim
             print("task similarity matrix:")
@@ -285,19 +285,20 @@ def main():
             torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
             
     if training_args.use_task_vector:
-        # task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
-        # sim = torch.matmul(task_vector,
-        #                 torch.transpose(task_vector, 1, 0))
-        # sim = torch.transpose(sim, 1, 0)
+        task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
+        sim = torch.matmul(task_vector,
+                        torch.transpose(task_vector, 1, 0))
+        sim = torch.transpose(sim, 1, 0)
+        # sim = (sim+1)/2
         
         # l2 distance matrix
-        task_vector = torch.stack(task_vectors)
+        # task_vector = torch.stack(task_vectors)
 
-        # Compute pairwise squared differences
-        diff = task_vector.unsqueeze(1) - task_vector.unsqueeze(0)
+        # # Compute pairwise squared differences
+        # diff = task_vector.unsqueeze(1) - task_vector.unsqueeze(0)
         
-        # Compute L2 distance matrix by summing the squared differences and taking the square root
-        sim = 1 / torch.sqrt(torch.sum(diff ** 2, dim=2))
+        # # Compute L2 distance matrix by summing the squared differences and taking the square root
+        # sim = 1 / torch.sqrt(torch.sum(diff ** 2, dim=2))
         
         extra_state_dict_dict['task_similarity'] = sim
         extra_state_dict_dict['curr_round'] += 1
