@@ -82,71 +82,100 @@ def fedours_load_state_dict(model, global_state_dict, local_state_dict_list, cli
             model.load_state_dict(local_state_dict_list[client_id], strict=False)  
             
         # exlude mean
-        if extra_state_dict_dict['curr_round'] > 0:
-            new_global_state_dict = {}
-            for name in global_state_dict.keys():
-                new_param = 0
-                for id in range(training_args.num_clients):
-                    if id == client_id:
-                        continue
-                    new_param += local_state_dict_list[id][name]
-                new_param /= (training_args.num_clients - 1)
-                new_global_state_dict[name] = new_param
-        else:
-            new_global_state_dict = global_state_dict
-        if 'zero3' in training_args.deepspeed:
-            load_deepspeed(new_global_state_dict, model, strict=False)
-        else:
-            model.load_state_dict(new_global_state_dict, strict=False) 
-        
-        # gradient based similarity wegithed averaging (exclude own)
-        # if extra_state_dict_dict['curr_round'] > 0 and 'task_similarity' in extra_state_dict_dict:
-        #     # similarity matrix
-        #     sim = extra_state_dict_dict['task_similarity']
+        # if extra_state_dict_dict['curr_round'] > 0:
         #     new_global_state_dict = {}
-            
-        #     weights = sim[client_id].clone()
-            
-        #     weights[client_id] = -1e9
-        #     # weights = (weights).softmax(dim=0)
-            
-        #     # sim_sum = weights.sum() - weights[client_id]
-            
-        #     # # weights[client_id] = sim_sum
-        #     # # sim_sum += sim_sum
-            
-        #     # for name in global_state_dict.keys():
-        #     #     new_param = 0
-        #     #     for id in range(training_args.num_clients):
-        #     #         if id == client_id:
-        #     #             continue
-        #     #         new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
-                    
-        #     #     new_global_state_dict[name] = new_param
-        #     # if (training_args.local_rank == 0 or training_args.local_rank == -1):
-        #     #     output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
-        #     #     torch.save(new_global_state_dict, output_dir)
-                
-        #     threshold = 0.7
-        #     if all(weights < threshold):
-        #         new_global_state_dict = global_state_dict
-        #     else:
-        #         similar_client_id = (weights >= threshold).nonzero(as_tuple=True)[0]
-        #         sim_sum = weights[similar_client_id].sum()
-        #         for name in global_state_dict.keys():
-        #             new_param = 0
-        #             for id in similar_client_id:
-        #                 new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
-        #             new_global_state_dict[name] = new_param
-        #     if (training_args.local_rank == 0 or training_args.local_rank == -1):
-        #         output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
-        #         torch.save(new_global_state_dict, output_dir)
+        #     for name in global_state_dict.keys():
+        #         new_param = 0
+        #         for id in range(training_args.num_clients):
+        #             if id == client_id:
+        #                 continue
+        #             new_param += local_state_dict_list[id][name]
+        #         new_param /= (training_args.num_clients - 1)
+        #         new_global_state_dict[name] = new_param
         # else:
         #     new_global_state_dict = global_state_dict
         # if 'zero3' in training_args.deepspeed:
         #     load_deepspeed(new_global_state_dict, model, strict=False)
         # else:
         #     model.load_state_dict(new_global_state_dict, strict=False) 
+        
+        # gradient based similarity wegithed averaging (exclude own)
+        if extra_state_dict_dict['curr_round'] > 0 and 'task_similarity' in extra_state_dict_dict:
+            # similarity matrix
+            sim = extra_state_dict_dict['task_similarity']
+            new_global_state_dict = {}
+            
+            weights = sim[client_id].clone()
+            
+            # weights[client_id] = -1e9
+            # weights = (weights).softmax(dim=0)
+            
+            sim_sum = weights.sum() - weights[client_id]
+            
+            # # weights[client_id] = sim_sum
+            # # sim_sum += sim_sum
+            
+            for name in global_state_dict.keys():
+                new_param = 0
+                if 'lora1' in name:
+                    target_key = name.replace('lora1', 'lora2')
+                elif 'ia3_l_1' in name:
+                    target_key = name.replace('ia3_l_1', 'ia3_l_2')
+                elif 'ia3_generator_1' in name:
+                    target_key = name.replace('ia3_generator_1', 'ia3_generator_2')
+                elif 'lang_prompt_dap_key_embeddings_1' in name:
+                    target_key = name.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
+                elif 'lang_prompt_downsample_1' in name:
+                    target_key = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
+                elif 'lang_prompt_norm_1' in name:
+                    target_key = name.replace('lang_prompt_norm_1', 'lang_prompt_norm_2')
+                elif 'lang_prompt_ia3_pool_1' in name:
+                    target_key = name.replace('lang_prompt_ia3_pool_1', 'lang_prompt_ia3_pool_2')
+                
+                for id in range(training_args.num_clients):
+                    if id == client_id:
+                        continue
+                    new_param += weights[id]*local_state_dict_list[id][target_key] / sim_sum
+                    
+                new_global_state_dict[name] = new_param
+            if (training_args.local_rank == 0 or training_args.local_rank == -1):
+                output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
+                torch.save(new_global_state_dict, output_dir)
+                
+            # threshold = 0.7
+            # if all(weights < threshold):
+            #     new_global_state_dict = global_state_dict
+            # else:
+            #     similar_client_id = (weights >= threshold).nonzero(as_tuple=True)[0]
+            #     sim_sum = weights[similar_client_id].sum()
+            #     for name in global_state_dict.keys():
+            #         new_param = 0
+            #         if 'lora1' in name:
+            #             target_key = name.replace('lora1', 'lora2')
+            #         elif 'ia3_l_1' in name:
+            #             target_key = name.replace('ia3_l_1', 'ia3_l_2')
+            #         elif 'ia3_generator_1' in name:
+            #             target_key = name.replace('ia3_generator_1', 'ia3_generator_2')
+            #         elif 'lang_prompt_dap_key_embeddings_1' in name:
+            #             target_key = name.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
+            #         elif 'lang_prompt_downsample_1' in name:
+            #             target_key = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
+            #         elif 'lang_prompt_norm_1' in name:
+            #             target_key = name.replace('lang_prompt_norm_1', 'lang_prompt_norm_2')
+            #         elif 'lang_prompt_ia3_pool_1' in name:
+            #             target_key = name.replace('lang_prompt_ia3_pool_1', 'lang_prompt_ia3_pool_2')
+            #         for id in similar_client_id:
+            #             new_param += weights[id]*local_state_dict_list[id][target_key] / sim_sum
+            #         new_global_state_dict[name] = new_param
+            # if (training_args.local_rank == 0 or training_args.local_rank == -1):
+            #     output_dir = os.path.join(training_args.state_dir, f"{client_id}_client_global_model_round{extra_state_dict_dict['curr_round']}.pth")
+            #     torch.save(new_global_state_dict, output_dir)
+        else:
+            new_global_state_dict = global_state_dict
+        if 'zero3' in training_args.deepspeed:
+            load_deepspeed(new_global_state_dict, model, strict=False)
+        else:
+            model.load_state_dict(new_global_state_dict, strict=False) 
 
 
 def kl_loss(output, target, temp=2):
@@ -831,6 +860,15 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         # for the embedding layer by removing the forward post hook.
         if self.neftune_noise_alpha is not None:
             self._deactivate_neftune(self.model)
+
+        # remove momentum for l2p before saving
+        if 'L2P' in self.args.mode and self.task_id is not None:
+            for key in self.optimizer.state.keys():
+                if 'exp_avg' not in self.optimizer.state[key]:
+                    continue
+                self.optimizer.state[key]['exp_avg'][self.optimizer.state[key]['exp_avg']!=0] = 0.0
+                self.optimizer.state[key]['exp_avg_sq'][self.optimizer.state[key]['exp_avg_sq']!=0] = 0.0
+
 
         if self.args.save_optim:
             output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'

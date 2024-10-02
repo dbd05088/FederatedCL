@@ -62,7 +62,7 @@ def OURS_set_state_dict(model, global_state_dict, local_state_dict_list, trainin
     # shard layer = 'lora1', 'lora3'
     keys_to_del = []
     for k in global_state_dict.keys():
-        if 'lora2' in k or 'ia3_l_2' in k or 'ia3_generator_2' in k or 'lang_prompt_dap_key_embeddings_2' in k or 'lang_prompt_downsample_2' in k or 'lang_prompt_norm_2' in k or 'lang_prompt_downsample_kv_2' in k or 'lang_prompt_downsample_mlp_2' in k:
+        if 'lora2' in k or 'ia3_l_2' in k or 'ia3_generator_2' in k or 'lang_prompt_ia3_pool_2' in k or 'lang_prompt_dap_key_embeddings_2' in k or 'lang_prompt_downsample_2' in k or 'lang_prompt_norm_2' in k or 'lang_prompt_downsample_kv_2' in k or 'lang_prompt_downsample_mlp_2' in k:
             keys_to_del.append(k)
     for k in keys_to_del:
         del global_state_dict[k]
@@ -104,7 +104,10 @@ def OURS_aggregate_state_dict(global_state_dict, local_state_dict_list, selected
         elif 'lang_prompt_norm_1' in key:
             target_key = key.replace('lang_prompt_norm_1', 'lang_prompt_norm_2')
             global_state_dict[key] = sum([local_state_dict_list[client][target_key] / num_selection for client in selected_ids]) 
-
+        elif 'lang_prompt_ia3_pool_1' in key:
+            target_key = key.replace('lang_prompt_ia3_pool_1', 'lang_prompt_ia3_pool_2')
+            global_state_dict[key] = sum([local_state_dict_list[client][target_key] / num_selection for client in selected_ids]) 
+        
 def OURS_GEN_ema_distill_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict):
     task_id = extra_state_dict_dict['task_id'] if 'task_id' in extra_state_dict_dict else None
     ema_ratio = training_args.ema_ratio
@@ -174,10 +177,25 @@ def OURS_GEN_load_state_dict(model, global_state_dict, local_state_dict_list, cl
             
             for name in global_state_dict.keys():
                 new_param = 0
+                if 'lora1' in name:
+                    target_key = name.replace('lora1', 'lora2')
+                elif 'ia3_l_1' in name:
+                    target_key = name.replace('ia3_l_1', 'ia3_l_2')
+                elif 'ia3_generator_1' in name:
+                    target_key = name.replace('ia3_generator_1', 'ia3_generator_2')
+                elif 'lang_prompt_dap_key_embeddings_1' in name:
+                    target_key = name.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
+                elif 'lang_prompt_downsample_1' in name:
+                    target_key = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
+                elif 'lang_prompt_norm_1' in name:
+                    target_key = name.replace('lang_prompt_norm_1', 'lang_prompt_norm_2')
+                elif 'lang_prompt_ia3_pool_1' in name:
+                    target_key = name.replace('lang_prompt_ia3_pool_1', 'lang_prompt_ia3_pool_2')
+                
                 for id in range(training_args.num_clients):
                     # if id == client_id:
                     #     continue
-                    new_param += weights[id]*local_state_dict_list[id][name] / sim_sum
+                    new_param += weights[id]*local_state_dict_list[id][target_key] / sim_sum
                     
                 new_global_state_dict[name] = new_param
             

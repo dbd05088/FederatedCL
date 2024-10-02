@@ -151,7 +151,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load L2P_Dual-IA3')
-        elif training_args.mode in ['L2P_T2_FedDAT', 'L2P_T2_Ditto']:
+        elif training_args.mode in ['L2P_T2_FedDAT', 'L2P_T2_Ditto', 'L2P_T2_fedours']:
             assert model_args.model_type != 'mpt'
             model = LlavaLlamaForL2PTIA3DualCausalLM2.from_pretrained(
                 model_args.model_name_or_path,
@@ -561,7 +561,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             if 'lang_prompt' in n :
                 p.requires_grad_(True)
         
-        if 'FedDAT' in training_args.mode or 'Ditto' in training_args.mode:
+        if 'FedDAT' in training_args.mode or 'Ditto' in training_args.mode or 'fedours' in training_args.mode:
             model.set_state(training_args.set_state)
     
     elif training_args.mode in [ 'fedsim', 'ditto', 'apfl', 'feddat', 'fedours']:
