@@ -47,7 +47,6 @@ def main():
     logger = logging.getLogger()
 
     os.makedirs(f"results/{training_args.mode}/{training_args.note}", exist_ok=True)
-    os.makedirs(f"tensorboard/{training_args.mode}/{training_args.note}", exist_ok=True)
     fileHandler = logging.FileHandler(f'results/{training_args.mode}/{training_args.note}/seed_{training_args.seed}.log', mode="w")
 
     formatter = logging.Formatter(
@@ -67,7 +66,7 @@ def main():
 
     model, tokenizer, data_args = get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data_args)
 
-    train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
+    train_datalists, _ = get_datalists(training_args, training_args.scenario)
     
     # select functions
     set_state_dict, load_state_dict, create_trainer, aggregate_state_dict, extra_modules = select_method(training_args.mode)
@@ -110,8 +109,6 @@ def main():
     last_task_id = [-1 for _ in range(training_args.num_clients)]
     fisher_olds = [None for _ in range(training_args.num_clients)]
     task_vectors = [None for _ in range(training_args.num_clients)]
-    # original_weights = OrderedDict(model.named_parameters())['base_model.model.model.layers.31.lang_prompt_downsample_2.oproj.weight'].clone().detach().cpu().flatten()
-
     
     lr_step = (init_lr - final_lr)/total_rounds
     mm_lr_step = (mm_init_lr - mm_final_lr)/total_rounds
@@ -127,24 +124,14 @@ def main():
             sim = torch.transpose(sim, 1, 0)
             # sim = (sim+1)/2 # normalize -1~1 to 0~1
             
-            
-            # l2 distance matrix
-            # task_vector = torch.stack(task_vectors)
-
-            # # Compute pairwise squared differences
-            # diff = task_vector.unsqueeze(1) - task_vector.unsqueeze(0)
-            
-            # # Compute L2 distance matrix by summing the squared differences and taking the square root
-            # sim = 1 / torch.sqrt(torch.sum(diff ** 2, dim=2))
-            
             extra_state_dict_dict['task_similarity'] = sim
             print("task similarity matrix:")
             print(sim)
         
         # clients turn
         cids = np.arange(training_args.num_clients).tolist()
-        num_selection = int(round(training_args.num_clients*frac_clients)) #4#
-        selected_ids = sorted(random.sample(cids, num_selection)) #[0,1,2,3]#
+        num_selection = int(round(training_args.num_clients*frac_clients)) 
+        selected_ids = sorted(random.sample(cids, num_selection)) 
         if training_args.local_rank == 0 or training_args.local_rank == -1: 
             logger.info(f"Round {curr_round} | selected_ids: {selected_ids}\n")
         
@@ -178,6 +165,11 @@ def main():
                     if isinstance(m, CodaPrompt):
                         m.process_task_count(task_id)
                 last_task_id[client_id] = task_id
+                
+                # update global_state_dict
+                for name, param in model.named_parameters():
+                    if name in global_state_dict.keys():
+                        global_state_dict[name].copy_(param.detach().cpu())
             
             iteration = 0
             datalist = []
@@ -215,8 +207,6 @@ def main():
                 logger.info(f'Round {curr_round} | train client {client_id} | num samples {len(sub_dataset)}')
 
             # ===== Train local model on the client side =====
-            
-            # if training_args.mode == 'ours_generator4' or training_args.mode == 'ours_generator':
             if training_args.use_fisher:
                 extra_state_dict_dict['fisher_old'] = fisher_olds[client_id]
                 
@@ -226,11 +216,9 @@ def main():
 
             results = trainer.train()
             training_loss[client_id].append(results.training_loss)
-            # if training_args.mode == 'ours_generator4' or training_args.mode == 'ours_generator':
             if training_args.use_fisher:
                 fisher_olds[client_id] = trainer.fisher_old
             
-            # if training_args.mode == 'ours_generator':
             if training_args.use_task_vector:
                 task_vectors[client_id] = trainer.task_vector #- original_weights
             
@@ -268,11 +256,6 @@ def main():
             if local_state_dict is not None:
                 local_state_dict_list[client_id] = copy.deepcopy(local_state_dict)
             
-            if training_args.mode == 'scaffold':
-                local_auxiliary, auxiliary_delta = trainer.get_auxiliary_param()
-                extra_state_dict_dict['auxiliary_model_list'][client_id] = local_auxiliary
-                extra_state_dict_dict['auxiliary_delta_dict'][client_id] = auxiliary_delta
-            
             trainer.deepspeed.empty_partition_cache()
             del trainer
             logger.info(f"done Round {curr_round} client {client_id} | elapsed time {datetime.timedelta(seconds=int(time.time() - start_time))} | ")
@@ -290,15 +273,6 @@ def main():
                         torch.transpose(task_vector, 1, 0))
         sim = torch.transpose(sim, 1, 0)
         # sim = (sim+1)/2
-        
-        # l2 distance matrix
-        # task_vector = torch.stack(task_vectors)
-
-        # # Compute pairwise squared differences
-        # diff = task_vector.unsqueeze(1) - task_vector.unsqueeze(0)
-        
-        # # Compute L2 distance matrix by summing the squared differences and taking the square root
-        # sim = 1 / torch.sqrt(torch.sum(diff ** 2, dim=2))
         
         extra_state_dict_dict['task_similarity'] = sim
         extra_state_dict_dict['curr_round'] += 1

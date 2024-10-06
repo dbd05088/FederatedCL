@@ -2,9 +2,6 @@ import torch
 from utils.train_utils import load_deepspeed
 
 def fedper_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
-    # choice1: not distribute mm_projector
-    
-    # choice2: not distribute last 3/half lora layers
     layer_num = []
     for k in global_state_dict.keys():
         if 'layers.' in k:
@@ -12,48 +9,10 @@ def fedper_set_state_dict(model, global_state_dict, local_state_dict_list, train
     layer_num = sorted(list(set(layer_num)))
     
     layers_to_del = layer_num[-1:]
-    # layers_to_del = layer_num[-len(layer_num)//2:]
+    
     keys_to_del = []
     for k in global_state_dict.keys():
         if 'layers.' in k and int(k.split('.')[4]) in layers_to_del:
-            keys_to_del.append(k)
-    for k in keys_to_del:
-        del global_state_dict[k]
-    return {}
-
-def fedper_half_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
-    # choice1: not distribute mm_projector
-    
-    # choice2: not distribute last 3/half lora layers
-    layer_num = []
-    for k in global_state_dict.keys():
-        layer_num.append(int(k.split('.')[4]))
-    layer_num = sorted(list(set(layer_num)))
-    
-    # layers_to_del = layer_num[-3:]
-    layers_to_del = layer_num[-len(layer_num)//2:]
-    keys_to_del = []
-    for k in global_state_dict.keys():
-        if int(k.split('.')[4]) in layers_to_del:
-            keys_to_del.append(k)
-    for k in keys_to_del:
-        del global_state_dict[k]
-    return {}
-
-def fedper_8_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
-    # choice1: not distribute mm_projector
-    
-    # choice2: not distribute last 3/half lora layers
-    layer_num = []
-    for k in global_state_dict.keys():
-        layer_num.append(int(k.split('.')[4]))
-    layer_num = sorted(list(set(layer_num)))
-    
-    layers_to_del = layer_num[-8:]
-    # layers_to_del = layer_num[-len(layer_num)//2:]
-    keys_to_del = []
-    for k in global_state_dict.keys():
-        if int(k.split('.')[4]) in layers_to_del:
             keys_to_del.append(k)
     for k in keys_to_del:
         del global_state_dict[k]

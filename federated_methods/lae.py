@@ -160,10 +160,10 @@ class LLaVATrainerLAE(LLaVATrainerFEDAVG):
             else:
                 debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
 
-        # OURS:
+        ##########################################################################################################
         self.model.set_lae_state('lora2')
         self.model.activate_lora2()
-        
+        ###########################################################################################################
         delay_optimizer_creation = is_sagemaker_mp_enabled() or self.is_fsdp_xla_enabled or self.is_fsdp_enabled
 
         # We need to reset the scheduler, as its parameters may be different on subsequent calls
@@ -502,6 +502,7 @@ class LLaVATrainerLAE(LLaVATrainerFEDAVG):
                     if self.args.is_wsd == 'WSD' and math.ceil(self.state.epoch*steps_in_epoch) == math.ceil(self.args.decay_ratio*steps_in_epoch):
                         self.global_weight = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
                     
+                    ##########################################################################################################
                     # ema update
                     if optimizer_was_run:
                         with torch.no_grad():
@@ -512,6 +513,9 @@ class LLaVATrainerLAE(LLaVATrainerFEDAVG):
                                 if 'ia3_l_2' in name:
                                     target_name = name.replace('ia3_l_2', 'ia3_l_1')
                                     model_params[target_name].copy_(self.ema_ratio*model_params[target_name] + (1-self.ema_ratio)*param)
+                                    
+                    ##########################################################################################################             
+                    
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:
                     self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
@@ -612,44 +616,3 @@ class LLaVATrainerLAE(LLaVATrainerFEDAVG):
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
     
-    # only load deepspeeed optimizer
-    def _load_optimizer_and_scheduler(self, checkpoint):
-        """If optimizer and scheduler states exist, load them."""
-        if checkpoint is None:
-            return
-
-        if self.is_deepspeed_enabled:
-            from deepspeed.runtime.state_dict_factory import SDLoaderFactory
-            from deepspeed.runtime.pipe.module import PipelineModule
-            latest_tag = "latest"
-            latest_path = os.path.join(checkpoint, latest_tag)
-            if os.path.isfile(latest_path):
-                with open(latest_path, "r") as fd:
-                    tag = fd.read().strip()
-                    
-            ckpt_list = self.model_wrapped._get_all_ckpt_names(checkpoint, tag)
-            sd_loader = SDLoaderFactory.get_sd_loader(ckpt_list, checkpoint_engine=self.model_wrapped.checkpoint_engine)
-
-            is_pipe_parallel = isinstance(self.model_wrapped.module, PipelineModule)
-
-            mp_rank = 0 if self.model_wrapped.mpu is None else self.model_wrapped.mpu.get_model_parallel_rank()
-            load_path, checkpoint_state, _ = sd_loader.load(self.model_wrapped.mp_world_size, mp_rank, is_pipe_parallel=is_pipe_parallel)
-            self.model_wrapped.loaded_checkpoint_dp_world_size = checkpoint_state['dp_world_size']
-            self.model_wrapped.loaded_checkpoint_mp_world_size = checkpoint_state['mp_world_size']
-            
-            zero_sd_list = self.model_wrapped._get_all_zero_checkpoints(checkpoint, tag)
-            self.model_wrapped.optimizer.load_state_dict(state_dict_list=zero_sd_list,
-                                       load_optimizer_states=True,
-                                       load_from_fp32_weights=self.model_wrapped.zero_load_from_fp32_weights(),
-                                       checkpoint_folder=None,
-                                       load_serial=None)
-            
-            # deepspeed loads optimizer/lr_scheduler together with the model in deepspeed_init
-            if not isinstance(self.lr_scheduler, DeepSpeedSchedulerWrapper):
-                with warnings.catch_warnings(record=True) as caught_warnings:
-                    self.lr_scheduler.load_state_dict(torch.load(os.path.join(checkpoint, SCHEDULER_NAME)))
-                reissue_pt_warnings(caught_warnings)
-            return
-
-        else:
-            super()._load_optimizer_and_scheduler(checkpoint)

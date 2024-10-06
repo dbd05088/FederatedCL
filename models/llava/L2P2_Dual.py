@@ -754,6 +754,10 @@ class LlavaLlamaForL2PIA3DualCausalLM2(LlamaDAPForCausalLM, LlavaMetaForCausalLM
                 idx_local = prompt_mask
                 task_id = idx_local.cpu()[0]
                 idx_local = expand_to_batch(idx_local, input_features.shape[0]).squeeze(dim=-1)
+                
+                idx_global = prompt_mask
+                task_id = idx_global.cpu()[0]
+                idx_global = expand_to_batch(idx_global, input_features.shape[0]).squeeze(dim=-1)
         
         
         idx_local = idx_local.unsqueeze(-1) if len(idx_local.shape) == 1 else idx_local

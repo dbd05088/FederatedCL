@@ -53,10 +53,6 @@ if is_accelerate_available():
     if is_deepspeed_available():
         from accelerate.utils import DeepSpeedSchedulerWrapper
 
-from models.duallora.dualloralayer import DualLoraLayer
-from collections import OrderedDict
-import numpy as np
-
 logger = logging.get_logger(__name__)
 
 def fedavg_load_state_dict(model, global_state_dict, local_state_dict_list, client_id, training_args, extra_state_dict_dict):
@@ -80,12 +76,8 @@ def fedavg_create_trainer(model, tokenizer, training_args, data_module, extra_st
     return trainer
 
 def fedavg_aggregate_state_dict(global_state_dict, local_state_dict_list, selected_ids, num_selection, training_args, **kwargs):
-    
     for key in global_state_dict.keys():
-        # global_state_dict[key] = sum([local_state_dict_list[client][key] * sample_num_list[client] / sample_this_round for client in selected_ids])
         global_state_dict[key] = sum([local_state_dict_list[client][key] / num_selection for client in selected_ids])
-
-
 
 class LLaVATrainerFEDAVG(LLaVATrainer):
     def __init__(self, client_id, curr_round, **kwargs):
@@ -96,6 +88,12 @@ class LLaVATrainerFEDAVG(LLaVATrainer):
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
     ):
+        '''
+        most lines are original transformer trainer code
+        lines surrounded with
+        ##############################################################################################################
+        are added lines
+        '''
         self.accelerator.free_memory()
         self._train_batch_size = batch_size
         if self.args.auto_find_batch_size:
@@ -268,11 +266,13 @@ class LLaVATrainerFEDAVG(LLaVATrainer):
 
         # Check if saved optimizer or scheduler states exist
         self._load_optimizer_and_scheduler(resume_from_checkpoint)
-        
-        # FIXME
+        #############################################################################################################
+
         if self.args.save_optim and self.curr_round > 0:
             output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
             self._load_optimizer_and_scheduler(output_dir)
+            
+        ##############################################################################################################
         # important: at this point:
         # self.model         is the Transformers Model
         # self.model_wrapped is DDP(Transformers Model), Deepspeed(Transformers Model),
@@ -607,10 +607,11 @@ class LLaVATrainerFEDAVG(LLaVATrainer):
         if self.neftune_noise_alpha is not None:
             self._deactivate_neftune(self.model)
 
+        ##############################################################################################################
         if self.args.save_optim:
             output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
             self._save_optimizer_and_scheduler(output_dir)
-
+        ##############################################################################################################
         return TrainOutput(self.state.global_step, train_loss, metrics)
     
     def _load_optimizer_and_scheduler(self, checkpoint):

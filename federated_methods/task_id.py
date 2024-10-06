@@ -1,31 +1,12 @@
-from torch.utils.data import RandomSampler
-from packaging import version
 from torch import nn
 from federated_methods.fedavg import LLaVATrainerFEDAVG
 from transformers.utils import logging
 from transformers import Trainer
 from transformers.trainer import (
     is_sagemaker_mp_enabled, 
-    _is_peft_model, 
-    is_accelerate_available,
-    is_deepspeed_available,
+    _is_peft_model,
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES, unwrap_model
 )
-
-if is_accelerate_available():
-    from accelerate import skip_first_batches
-    from accelerate import __version__ as accelerate_version
-    from accelerate.utils import (
-        DistributedType
-    )
-
-    DATA_SAMPLERS = [RandomSampler]
-    if version.parse(accelerate_version) > version.parse("0.23.0"):
-        from accelerate.data_loader import SeedableRandomSampler
-
-        DATA_SAMPLERS += [SeedableRandomSampler]
-    if is_deepspeed_available():
-        from accelerate.utils import DeepSpeedSchedulerWrapper
 
 logger = logging.get_logger(__name__)
     
@@ -51,16 +32,11 @@ class LLaVATrainerTaskId(LLaVATrainerFEDAVG):
         self.task_id = task_id
     
     def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        How the loss is computed by Trainer. By default, all models return the loss in the first element.
-
-        Subclass and override for custom behavior.
-        """
         if self.label_smoother is not None and "labels" in inputs:
             labels = inputs.pop("labels")
         else:
             labels = None
-        
+        ##############################################################################################################
         if 'prompt' in inputs:
             text_prompt = inputs.pop('prompt')
         else:
@@ -70,6 +46,7 @@ class LLaVATrainerTaskId(LLaVATrainerFEDAVG):
             outputs = model(**inputs, task_id=self.task_id, prompt=text_prompt) if text_prompt is not None else model(**inputs, task_id=self.task_id)
         else:
             outputs = model(**inputs, prompt=text_prompt) if text_prompt is not None else model(**inputs)
+        ##############################################################################################################
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:

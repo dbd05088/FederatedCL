@@ -1,6 +1,5 @@
 import torch
-from utils.train_utils import load_deepspeed
-from models.llava.llava_trainer import LLaVATrainer
+from federated_methods.fedavg import LLaVATrainerFEDAVG
   
 def fedprox_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
     return {
@@ -14,11 +13,13 @@ def fedprox_create_trainer(model, tokenizer, training_args, data_module, extra_s
         packing=True,
         max_seq_length=training_args.model_max_length,
         **data_module,
+        client_id = extra_state_dict_dict['client_id'],
+        curr_round = extra_state_dict_dict['curr_round'],
         global_state=extra_state_dict_dict['global_state'],
         )
     return trainer
 
-class LLaVATrainerFEDPROX(LLaVATrainer):
+class LLaVATrainerFEDPROX(LLaVATrainerFEDAVG):
     def __init__(self, global_state, **kwargs):
         super(LLaVATrainerFEDPROX, self).__init__(**kwargs)
         self.global_state = global_state
@@ -26,7 +27,7 @@ class LLaVATrainerFEDPROX(LLaVATrainer):
     
     def compute_loss(self, model, inputs, return_outputs=False):
 
-        return_values = super(LLaVATrainer, self).compute_loss(model, inputs, return_outputs=return_outputs)
+        return_values = super(LLaVATrainerFEDAVG, self).compute_loss(model, inputs, return_outputs=return_outputs)
 
         if return_outputs:
             loss, outputs = return_values

@@ -887,6 +887,10 @@ class LlavaLlamaDAPDualForCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM):
                 task_id = idx_local.cpu()[0]
                 idx_local = expand_to_batch(idx_local, input_features.shape[0]).squeeze(dim=-1)
                 
+                idx_global = prompt_mask
+                task_id = idx_global.cpu()[0]
+                idx_global = expand_to_batch(idx_global, input_features.shape[0]).squeeze(dim=-1)
+                
         task_id_estimated_emb_1 = self.lang_prompt_dap_emb_1(idx_global)
         task_id_estimated_emb_2 = self.lang_prompt_dap_emb_1(idx_local)
         

@@ -61,17 +61,20 @@ if is_accelerate_available():
 logger = logging.get_logger(__name__)
 
 def ditto_set_state_dict(model, global_state_dict, local_state_dict_list, training_args):
-    # layers_to_del = layer_num[-len(layer_num)//2:]
     keys_to_del = []
     for k in global_state_dict.keys():
-        if 'lora2' in k or 'lang_prompt_dap_key_embeddings_2' in k or 'lang_prompt_ia3_pool_2' in k or 'ia3_l_2' in k:
+        if 'lora2' in k or 'lang_prompt_dap_key_embeddings_2' in k or 'lang_prompt_ia3_pool_2' in k or 'ia3_l_2' in k \
+            or 'lang_prompt_downsample_k_2' in k or 'lang_prompt_downsample_v_2' in k or 'lang_prompt_downsample_mlp_2' in k \
+            or 'lang_prompt_film_2' in k or 'lang_prompt_dap_emb_2' in k or 'lang_prompt_downsample_2' in k:
             keys_to_del.append(k)
     for k in keys_to_del:
         del global_state_dict[k]
     
     local_keys_to_del = []
     for k in local_state_dict_list[0].keys():
-        if 'lora1' in k or 'lang_prompt_dap_key_embeddings_1' in k or 'lang_prompt_ia3_pool_1' in k or 'ia3_l_1' in k:
+        if 'lora1' in k or 'lang_prompt_dap_key_embeddings_1' in k or 'lang_prompt_ia3_pool_1' in k or 'ia3_l_1' in k \
+            or 'lang_prompt_downsample_k_1' in k or 'lang_prompt_downsample_v_1' in k or 'lang_prompt_downsample_mlp_1' in k \
+            or 'lang_prompt_film_1' in k or 'lang_prompt_dap_emb_1' in k or 'lang_prompt_downsample_1' in k:
             local_keys_to_del.append(k)
     for client_id in range(training_args.num_clients):
         for k in local_keys_to_del:
@@ -141,28 +144,69 @@ class LLaVATrainerDITTO(LLaVATrainerTaskId):
             loss_local, local_outputs = super(LLaVATrainerDITTO, self).compute_loss(model, inputs, return_outputs=True) 
 
             # Apply FedProx Loss
-            # model_params = OrderedDict(model.module.named_parameters())
-            for name, param in model.module.named_parameters():
-            # for name, param in model_params.items():
-                # only trainable parameters
-                if not param.requires_grad:
-                    continue
-                # if 'lora2' in name:
-                #     target_name = name.replace('lora2', 'lora1')
-                #     loss += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
-                if 'lang_prompt_ia3_pool_2' in name:
-                    target_name = name.replace('lang_prompt_ia3_pool_2', 'lang_prompt_ia3_pool_1')
-                    loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
-                elif 'lang_prompt_dap_key_embeddings_2' in name:
-                    target_name = name.replace('lang_prompt_dap_key_embeddings_2', 'lang_prompt_dap_key_embeddings_1')
-                    loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
-                elif 'ia3_l_2' in name:
-                    target_name = name.replace('ia3_l_2', 'ia3_l_1')
-                    loss_local += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
-            # model.module.base_model.model.model.mm_projector = None
+            loss_local += self.ditto_loss(model)
+            
             return (loss_local, local_outputs) if return_outputs else loss_local
 
-
+    def ditto_loss(self, model):
+        mode = self.args.mode
+        loss = 0
+        
+        if 'L2P' in mode:
+            for name, param in model.module.named_parameters():
+                if not param.requires_grad:
+                    continue
+                if 'lang_prompt_ia3_pool_2' in name:
+                    target_name = name.replace('lang_prompt_ia3_pool_2', 'lang_prompt_ia3_pool_1')
+                    
+                    loss += self.mu / 2 * (torch.norm(param[(self.task_id)*self.args.prompt_top_k:(self.task_id+1)*self.args.prompt_top_k] - self.global_state[target_name][(self.task_id)*self.args.prompt_top_k:(self.task_id+1)*self.args.prompt_top_k])) ** 2
+                elif 'lang_prompt_dap_key_embeddings_2' in name:
+                    target_name = name.replace('lang_prompt_dap_key_embeddings_2', 'lang_prompt_dap_key_embeddings_1')
+                    loss += self.mu / 2 * (torch.norm(param[(self.task_id)*self.args.prompt_top_k:(self.task_id+1)*self.args.prompt_top_k] - self.global_state[target_name][(self.task_id)*self.args.prompt_top_k:(self.task_id+1)*self.args.prompt_top_k])) ** 2
+        elif 'CodaPrompt' in mode:
+            pt = int(self.args.pool_size / (self.args.num_tasks))
+            s = int(self.task_id * pt)
+            f = int((self.task_id + 1) * pt)
+            
+            for name, param in model.module.named_parameters():
+                if not param.requires_grad:
+                    continue
+                if 'lang_prompt_ia3_pool_2' in name:
+                    target_name = name.replace('lang_prompt_ia3_pool_2', 'lang_prompt_ia3_pool_1')
+                    loss += self.mu / 2 * (torch.norm(param[s:f] - self.global_state[target_name][s:f])) ** 2
+        elif 'DAP' in mode:
+            for name, param in model.module.named_parameters():
+                if not param.requires_grad:
+                    continue
+                if 'lang_prompt_downsample_k_2' in name:
+                    target_name = name.replace('lang_prompt_downsample_k_2', 'lang_prompt_downsample_k_1')
+                    loss += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
+                elif 'lang_prompt_downsample_v_2' in name:
+                    target_name = name.replace('lang_prompt_downsample_v_2', 'lang_prompt_downsample_v_1')
+                    loss += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
+                elif 'lang_prompt_downsample_mlp_2' in name:
+                    target_name = name.replace('lang_prompt_downsample_mlp_2', 'lang_prompt_downsample_mlp_1')
+                    loss += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
+                elif 'lang_prompt_film_2' in name:
+                    target_name = name.replace('lang_prompt_film_2', 'lang_prompt_film_1')
+                    loss += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
+                elif 'lang_prompt_dap_key_embeddings_2' in name:
+                    target_name = name.replace('lang_prompt_dap_key_embeddings_2', 'lang_prompt_dap_key_embeddings_1')
+                    loss += self.mu / 2 * (torch.norm(param[self.task_id] - self.global_state[target_name][self.task_id])) ** 2
+                elif 'lang_prompt_dap_emb_2' in name:
+                    target_name = name.replace('lang_prompt_dap_emb_2', 'lang_prompt_dap_emb_1')
+                    loss += self.mu / 2 * (torch.norm(param[self.task_id] - self.global_state[target_name][self.task_id])) ** 2
+        else:
+            for name, param in model.module.named_parameters():
+                if not param.requires_grad:
+                    continue
+                if 'lang_prompt_downsample_2' in name:
+                    target_name = name.replace('lang_prompt_downsample_2', 'lang_prompt_downsample_1')
+                    loss += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
+                elif 'ia3_l_2' in name:
+                    target_name = name.replace('ia3_l_2', 'ia3_l_1')
+                    loss += self.mu / 2 * (torch.norm(param - self.global_state[target_name])) ** 2
+        return loss
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
     ):

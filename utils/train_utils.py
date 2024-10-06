@@ -9,8 +9,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, CLIPTextModel, CLI
 import models.llava.conversation as conversation_lib_llava
 import models.bunny.conversation as conversation_lib_bunny
 from peft.tuners.lora import LoraLayer
-from models.duallora.dualloralayer import DualLoraLayer
-from models.dual_ia3.dual_ia3_layer import DualIA3Layer
 
 from models.llava.ditto import LlavaLlamaFordittoCausalLM
 from models.llava.llava_fedsim import FEDSIMLlavaLlamaForCausalLM
@@ -335,7 +333,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
                 **bnb_model_from_pretrained_args
             )
             print('load ours generator2')
-        
+        ################################################################################
         elif 'ditto' == training_args.mode or 'feddat' == training_args.mode or 'fedours' == training_args.mode:
             model = LlavaLlamaFordittoCausalLM.from_pretrained(
                 model_args.model_name_or_path,
@@ -404,9 +402,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
 
     # FIXME
     if training_args.bits >= 16:
-        # print(training_args.device)
         model = model.to(training_args.device)
-    
     
     if training_args.bits in [4, 8]:
         from peft import prepare_model_for_kbit_training
@@ -565,20 +561,12 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             model.set_state(training_args.set_state)
     
     elif training_args.mode in [ 'fedsim', 'ditto', 'apfl', 'feddat', 'fedours']:
-        # model.get_model().global_mm_projector = model.get_model().mm_projector
-        # model.get_model().local_mm_projector = copy.deepcopy(model.get_model().mm_projector)
-        # model.get_model().mm_projector = None
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         
-        if training_args.is_eval:
-            model.set_state(training_args.set_state)
-        else:
-            for name, module in model.named_modules():
-                if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    module.set_state('lora1')
-                    module.activate_all()
-            model.lm_head.requires_grad_(False)
+        model.set_state(training_args.set_state)
+        model.activate_all()
+        model.lm_head.requires_grad_(False)
     
     elif 'ia3' in training_args.mode:
         for p in model.get_model().mm_projector.parameters():
@@ -587,6 +575,7 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         for n, p in model.named_parameters():
             if 'lang_prompt' in n :
                 p.requires_grad_(True)
+                
     elif training_args.mode == 'ours_generator' or training_args.mode == 'ours_generator2' or training_args.mode == 'ours_generator3' or training_args.mode == 'ours_generator4':
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
@@ -606,9 +595,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
         for p in model.get_model().mm_projector.parameters():
             p.requires_grad = False
         model.lm_head.requires_grad_(False)
-        # for n, p in model.named_parameters():
-        #     if 'vision_model' not in n:
-        #         p.requires_grad_(True)
     
     if training_args.bits in [4, 8]:
         model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
@@ -626,8 +612,6 @@ def get_VLMmodel(model_args, training_args, bnb_model_from_pretrained_args, data
             if isinstance(module, LoraLayer)or isinstance(module, torch.nn.LayerNorm):
                 if training_args.bf16:
                     module = module.to(torch.bfloat16)
-            # if 'norm' in name and 'vision_tower' not in name:
-            #     module = module.to(torch.float32)
             if 'lm_head' in name or 'embed_tokens' in name:
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:

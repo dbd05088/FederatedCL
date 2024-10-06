@@ -81,13 +81,13 @@ class LlamaDecoderIA3PoolLayer(LlamaDecoderLayer):
         
         if query_embeds is not None:
             if self.active_state == 'lora1':
-                new_query_embeds, _ = self.lang_prompt_ia3_pool_1(query_embeds)
+                new_query_embeds = self.lang_prompt_ia3_pool_1(query_embeds)
             elif self.active_state == 'lora2':
-                new_query_embeds, _ = self.lang_prompt_ia3_pool_2(query_embeds)
+                new_query_embeds = self.lang_prompt_ia3_pool_2(query_embeds)
             
             elif self.active_state == 'gate':
-                new_query_embeds_1, _ = self.lang_prompt_ia3_pool_1(query_embeds)
-                new_query_embeds_2, _ = self.lang_prompt_ia3_pool_2(query_embeds)
+                new_query_embeds_1 = self.lang_prompt_ia3_pool_1(query_embeds)
+                new_query_embeds_2 = self.lang_prompt_ia3_pool_2(query_embeds)
             
                 new_query_embeds = (new_query_embeds_1 + new_query_embeds_2) / 2
             
@@ -369,6 +369,33 @@ class LlavaLlamaForCodaIA3DualCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM
 
         # Initialize weights and apply final processing
         self.post_init()
+    
+    def set_state(self, state):
+        assert state in ['lora1', 'lora2', 'gate'], state
+        self.active_state = state
+        for layer in self.model.layers:
+            layer.active_state = state
+
+    def activate_all(self):
+        for layer in self.model.layers:
+            for p in layer.lang_prompt_ia3_pool_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_ia3_pool_2.parameters():
+                p.requires_grad = True
+        
+    def activate_lora1(self):
+        for layer in self.model.layers:
+            for p in layer.lang_prompt_ia3_pool_1.parameters():
+                p.requires_grad = True
+            for p in layer.lang_prompt_ia3_pool_2.parameters():
+                p.requires_grad = False
+    
+    def activate_lora2(self):
+        for layer in self.model.layers:
+            for p in layer.lang_prompt_ia3_pool_1.parameters():
+                p.requires_grad = False
+            for p in layer.lang_prompt_ia3_pool_2.parameters():
+                p.requires_grad = True
         
     def get_model(self):
         return self.model
@@ -648,7 +675,7 @@ class LlavaLlamaForCodaIA3DualCausalLM(LlamaDAPForCausalLM, LlavaMetaForCausalLM
         
 
         input_features = []
-        assert prompt is not None
+        
         with torch.no_grad():
             for i in range(new_input_embeds.shape[0]):
                 img_feat = cls_features[i].mean(dim=0)
