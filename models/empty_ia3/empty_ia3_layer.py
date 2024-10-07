@@ -180,9 +180,9 @@ class Linear(nn.Module, EmptyIA3Layer):
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x)#, *args, **kwargs)
         elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x)#, *args, **kwargs)
         else:
             query_embeds = kwargs['query_embeds'] if 'query_embeds' in kwargs.keys() else None
             ia3_scaling = 1
@@ -202,15 +202,15 @@ class Linear(nn.Module, EmptyIA3Layer):
                 ia3_scaling = self.prev_ia3_scaling
                 # self.prev_ia3_scaling = None
 
-        if self.is_feedforward:
-            x = x.to(dtype)
-            # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
-            # e.g. bf16 vs fp32. Is that okay?
-            interm = (x * ia3_scaling.unsqueeze(1)).to(self.get_base_layer().weight.dtype)
-            result = self.base_layer(interm)
-        else:
-            result = self.base_layer(x)
-            result = result.to(dtype) * ia3_scaling.unsqueeze(1)
+            if self.is_feedforward:
+                x = x.to(dtype)
+                # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
+                # e.g. bf16 vs fp32. Is that okay?
+                interm = (x * ia3_scaling.unsqueeze(1)).to(self.get_base_layer().weight.dtype)
+                result = self.base_layer(interm)
+            else:
+                result = self.base_layer(x)
+                result = result.to(dtype) * ia3_scaling.unsqueeze(1)
 
         result = result.to(previous_dtype)
         return result

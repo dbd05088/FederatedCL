@@ -23,7 +23,7 @@ subset_folder = os.path.join(dir, 'test')
 if not os.path.exists(subset_folder):
     os.makedirs(subset_folder)
 
-invalid_file = open('./mPLUG_invalid.txt', 'r')
+invalid_file = open('./preprocess/mPLUG_invalid.txt', 'r')
 invalid_img_files = invalid_file.readlines()
 invalid_file.close()
 
