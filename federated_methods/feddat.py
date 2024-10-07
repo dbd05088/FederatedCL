@@ -783,4 +783,10 @@ class LLaVATrainerFEDDAT(LLaVATrainerTaskId):
             
         # feddat: make adapter_2 frozen
         self.model.activate_all()
+        
+        ##############################################################################################################
+        if self.args.save_optim:
+            output_dir = f'client_states_{self.args.note}/client_{self.client_id}/'
+            self._save_optimizer_and_scheduler(output_dir)
+        ##############################################################################################################
         return TrainOutput(self.state.global_step, train_loss, metrics)
