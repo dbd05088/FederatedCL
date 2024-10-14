@@ -98,6 +98,89 @@ python ./preprocess/preprocess_AESOP.py
 ```
 </details>
 
+-----------------------------------------------------------------
+## New data instruction
+
+1. In `dataset` folder, run the following script files:
+```bash
+bash Fashion.sh
+bash HRVQA.sh
+bash Pair_TF.sh
+bash KGQA.sh
+bash Bongard.sh
+bash iconqa.sh
+bash CoInstruct.sh
+bash Visual_Relation.sh
+bash Visual_storytelling.sh
+bash MultiVQA_small.sh
+```
+
+2. Run the following preprocessing python codes:
+- Fashion
+```bash
+python ./preprocess/preprocess_Fashion200K.py
+```
+- HRVQA
+```bash
+cd ./dataset/HRVQA/jsons
+python task_split.py
+cd ../../..
+python ./preprocess/preprocess_HRVQA.py
+```
+- Pair_TF
+```bash
+python ./preprocess/preprocess_NLVR2.py
+python ./preprocess/preprocess_PatternCom.py
+```
+
+- KGQA
+```bash
+python ./preprocess/preprocess_WebQA.py
+python ./preprocess/preprocess_TQA.py
+python ./preprocess/preprocess_AQUA.py
+```
+
+- Bongard
+```bash
+python ./preprocess/preprocess_Bongard2.py
+python ./preprocess/preprocess_Bongard_query.py
+python ./preprocess/preprocess_Bongard_HOI.py
+python ./preprocess/preprocess_Bongard_HOI_query.py
+```
+
+- IconQA
+```bash
+python ./preprocess/preprocess_iconqa.py
+```
+
+- CoInstruct
+```bash
+python ./preprocess/preprocess_coinstruct.py
+```
+
+- Visual_Relation
+```bash
+python ./preprocess/preprocess_SpotDiff.py
+python ./preprocess/preprocess_Bird2Words.py
+python ./preprocess/preprocess_CLEVR.py
+python ./preprocess/preprocess_IEdit.py
+```
+
+- Visual_storytelling
+```bash
+python ./preprocess/preprocess_PororoSV.py
+python ./preprocess/preprocess_FlintstonesSV.py
+python ./preprocess/preprocess_VIST.py
+python ./preprocess/preprocess_AESOP.py
+```
+
+- MultiVQA_small
+```bash
+python ./preprocess/preprocess_VISION.py
+python ./preprocess/preprocess_VizWiz.py
+python ./preprocess/preprocess_MIT.py
+```
+
 # How to run
 
 1. Train

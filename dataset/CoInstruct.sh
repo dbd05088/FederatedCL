@@ -1,0 +1,1 @@
+huggingface-cli download q-future/Co-Instruct-DB --local-dir Co-Instruct-DB --repo-type dataset

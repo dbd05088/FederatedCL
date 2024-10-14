@@ -101,5 +101,5 @@ def save_dataset(dataset_name, output_folder, subset_name, max_num=None):
 # Usage example
 output_folder = 'dataset/Bongard-HOI'
 
-save_dataset('Bongard-HOI', output_folder, 'test', 1000)
-save_dataset('Bongard-HOI', output_folder, 'train', 4000)
+save_dataset('Bongard-HOI', output_folder, 'test', 2000)
+save_dataset('Bongard-HOI', output_folder, 'train', 10000)

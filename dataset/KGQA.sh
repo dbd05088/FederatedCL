@@ -35,3 +35,7 @@ mv ArtVQA/AQUA/*.json AQUA
 rm -rf ArtVQA
 cd AQUA
 mv Images images
+
+gdrive files download 1jXip1cW30g7g7MfXvb4cI2iGa_qqgYDM
+tar -xvf dvqa.tar
+rm dvqa.tar

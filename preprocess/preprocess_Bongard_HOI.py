@@ -86,5 +86,5 @@ def save_dataset(dataset_name, output_folder, subset_name, max_samples):
 # Usage example
 output_folder = 'dataset/Bongard-HOI'
 
-save_dataset('Bongard-HOI', output_folder, 'test', max_samples=1000)
-save_dataset('Bongard-HOI', output_folder, 'train', max_samples=4000)
+save_dataset('Bongard-HOI', output_folder, 'test', max_samples=2000)
+save_dataset('Bongard-HOI', output_folder, 'train', max_samples=10000)

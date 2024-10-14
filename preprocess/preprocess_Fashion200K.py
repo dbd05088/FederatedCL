@@ -86,19 +86,20 @@ train_task3, test_task3 = split_data(task3_data)
 train_task4, test_task4 = split_data(task4_data)
 
 # Combine all train and test data
-train_data_0 = train_task1 + train_task4
-test_data_0 = test_task1 + test_task4
-train_data_1 = train_task2 + train_task3
-test_data_1 = test_task2 + test_task3
+# train_data_0 = train_task1 + train_task4
+# test_data_0 = test_task1 + test_task4
+# train_data_1 = train_task2 + train_task3
+# test_data_1 = test_task2 + test_task3
 
 # Shuffle the combined data
 # np.random.shuffle(train_data)
 # np.random.shuffle(test_data)
 
-print(f"Task 1 (Guessing number) items: {len(task1_data)}")
-print(f"Task 2 (T/F with two images) items: {len(task2_data)}")
-print(f"Task 3 (T/F with three images) items: {len(task3_data)}")
-print(f"Task 4 (T/F with four images) items: {len(task4_data)}")
+print(f"Task 1 (Guessing number) items: {len(task1_data)} {len(train_task1)} {len(test_task1)}")
+print(f"Task 2 (T/F with two images) items: {len(task2_data)} {len(train_task2)} {len(test_task2)}")
+print(f"Task 3 (T/F with three images) items: {len(task3_data)} {len(train_task3)} {len(test_task3)}")
+print(f"Task 4 (T/F with four images) items: {len(task4_data)} {len(train_task4)} {len(test_task4)}")
+
 # print(f"Total train items: {len(train_data)}")
 # print(f"Total test items: {len(test_data)}")
 
@@ -110,17 +111,37 @@ print(f"Task 4 (T/F with four images) items: {len(task4_data)}")
 # if len(test_json_data) > 2000:
 #     test_json_data = np.random.choice(test_json_data, size=2000, replace=False).tolist()
 
-print(len(train_data_0))
-print(len(test_data_0))
-print(len(train_data_1))
-print(len(test_data_1))
+# print(len(train_data_0))
+# print(len(test_data_0))
+# print(len(train_data_1))
+# print(len(test_data_1))
+
+# with open(f'{dir}/train/dataset-0.json', 'w') as json_file:
+#     json.dump(train_data_0, json_file, indent=4)
+# with open(f'{dir}/test/dataset-0.json', 'w') as json_file:
+#     json.dump(test_data_0, json_file, indent=4)
+
+# with open(f'{dir}/train/dataset-1.json', 'w') as json_file:
+#     json.dump(train_data_1, json_file, indent=4)
+# with open(f'{dir}/test/dataset-1.json', 'w') as json_file:
+#     json.dump(test_data_1, json_file, indent=4)
 
 with open(f'{dir}/train/dataset-0.json', 'w') as json_file:
-    json.dump(train_data_0, json_file, indent=4)
+    json.dump(train_task1, json_file, indent=4)
 with open(f'{dir}/test/dataset-0.json', 'w') as json_file:
-    json.dump(test_data_0, json_file, indent=4)
+    json.dump(test_task1, json_file, indent=4)
 
 with open(f'{dir}/train/dataset-1.json', 'w') as json_file:
-    json.dump(train_data_1, json_file, indent=4)
+    json.dump(train_task2, json_file, indent=4)
 with open(f'{dir}/test/dataset-1.json', 'w') as json_file:
-    json.dump(test_data_1, json_file, indent=4)
+    json.dump(test_task2, json_file, indent=4)
+    
+with open(f'{dir}/train/dataset-2.json', 'w') as json_file:
+    json.dump(train_task3, json_file, indent=4)
+with open(f'{dir}/test/dataset-2.json', 'w') as json_file:
+    json.dump(test_task3, json_file, indent=4)
+
+with open(f'{dir}/train/dataset-3.json', 'w') as json_file:
+    json.dump(train_task4, json_file, indent=4)
+with open(f'{dir}/test/dataset-3.json', 'w') as json_file:
+    json.dump(test_task4, json_file, indent=4)
