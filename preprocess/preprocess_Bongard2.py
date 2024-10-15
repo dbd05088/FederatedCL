@@ -21,7 +21,7 @@ num_combination_per_sample = 14
 prompts = f'''Given {num_per_set} "positive" images and {num_per_set} "negative" images, where "positive" images can be summarized as 1 "common" sentence and "negative" images cannot, the "common" sentence describes a set of concepts that are common to "positive" images. Your job is to find the "common" concept within the "positive" images. You must choose your answer from the Choice List.'''
 
 clip_encoder = CLIPModel.from_pretrained("./clip-vit-large-patch14-336").to(device="cuda", dtype=torch.bfloat16)
-clipprocessor = CLIPProcessor.from_pretrained("./FederatedCL/models/clip_models/clipprocessor/")
+clipprocessor = CLIPProcessor.from_pretrained("./models/clip_models/clipprocessor/")
 
 
 
