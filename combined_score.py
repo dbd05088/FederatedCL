@@ -4,21 +4,13 @@ import csv
 from collections import defaultdict
 import os
 
-mode = 'L2P_T2'
-# Method = 'llava_zeroshot_full'
-# Method = 'PT_fullmem_sc20_lr1e-2_4tasks_5rounds_itr125'
-# Method = 'fedavg_exscicap_1e-4_bs16_itr100_constant_round10_0'
-# Method = 'sft_llava_sc12_lr1e-4_bs16_itr100_constant_round10'
-# Method = 'fedper_8_llava_sc12_lr1e-4_bs16_itr100_constant_round10'
-# Method = 'apfl_sc12_lr1e-4_1e-6_itr100_round10'
-# Method = 'ditto_ia3_lr3e-3_sc20_4tasks_5rounds_itr125'
-# Method = 'ditto_lora_lr5e-5_sc20_4tasks_5rounds_itr125'
-# Method='fedper_ia3_lr3e-3_sc20_4tasks_5rounds_itr125'
-Method='L2P_T2_3_12_lr1e-2_sc20_4tasks_5rounds_itr125'
+mode = 'CodaPrompt_T'
+Method='CodaPrompt_T_40_1_bs4_saveoptim_lr5e-4_sc20_4tasks_5rounds_fixitr100'
+
 num_rounds = 20
 is_client = True
 
-scenario_num = 20
+scenario_num = 0
 with open(f"./scenarios/scenario-{scenario_num}.json") as fp:
     scenario = json.load(fp)
 
@@ -40,7 +32,10 @@ for client_data in scenario:
         if data['type'] == 'multi-choice':
             score = result['accuracy']
         elif data['type'] == 'open-ended':
-            score = result['ROUGE_L'][0]
+            if data['metric'] == 'F1':
+                score = 2*(result['precision']*result['recall']) / (result['precision'] + result['recall'])
+            elif data['metric'] == 'RougeL':
+                score = result['ROUGE_L'][0]
         
         scores[data_name] = score
         client_scores[id].append(score)
