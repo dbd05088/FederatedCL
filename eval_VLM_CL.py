@@ -364,7 +364,7 @@ def main():
     
     train_datalists, test_datalists = get_datalists(training_args, training_args.scenario)
     
-    batch_size = 1 if 'l2p' in training_args.mode or 'dap' in training_args.mode or 'LAE' in training_args.mode else 2
+    batch_size = 2 if 'l2p' in training_args.mode or 'dap' in training_args.mode or 'LAE' in training_args.mode else 4
     
     logger.info(f'Evaluatiing clients and server at round {training_args.round_to_eval}')
     start_time = time.time()
@@ -384,51 +384,50 @@ def main():
         
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
-            if train_datalists[client_id][training_args.round_to_eval-1]['train_cnt'] > data_info['eval_cnt']:
-                # breakpoint()
-                if not training_args.zeroshot:
-                    model.load_state_dict(client_state_dict, strict=False)
+            # if train_datalists[client_id][training_args.round_to_eval-1]['train_cnt'] > data_info['eval_cnt']:
+            if not training_args.zeroshot:
+                model.load_state_dict(client_state_dict, strict=False)
+                
+                if ('ours_generator' in training_args.mode or 'fedours' in training_args.mode) and training_args.use_task_vector:
+                    logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_global_model_round{training_args.round_to_eval}.pth')
+                    personal_global_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_global_model_round{training_args.round_to_eval}.pth', map_location='cpu')
+                    model.load_state_dict(personal_global_state_dict, strict=False)
+            # model.load_state_dict(server_state_dict, strict=False)
+            if training_args.mode in ['apfl', 'ditto']:
+                # for name, module in model.named_modules():
+                #     if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
+                #         module.set_state('lora2')
+                model.set_state('lora2')
+                # model.base_model.model.model.mm_projector = model.base_model.model.model.local_mm_projector
+            dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
+            if not training_args.eval_server:
+                if training_args.mode not in ['fedsim', 'feddat']:
                     
-                    if ('ours_generator' in training_args.mode or 'fedours' in training_args.mode) and training_args.use_task_vector:
-                        logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_global_model_round{training_args.round_to_eval}.pth')
-                        personal_global_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_global_model_round{training_args.round_to_eval}.pth', map_location='cpu')
-                        model.load_state_dict(personal_global_state_dict, strict=False)
-                # model.load_state_dict(server_state_dict, strict=False)
+                    if data_info['type'] == 'open-ended':
+                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+                    elif data_info['type'] == 'multi-choice':
+                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+                    else:
+                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+            if training_args.eval_server and data_info['data_name'] not in server_eval_key:
+                if not training_args.zeroshot:
+                    model.load_state_dict(server_state_dict, strict=False)
                 if training_args.mode in ['apfl', 'ditto']:
                     # for name, module in model.named_modules():
                     #     if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                    #         module.set_state('lora2')
-                    model.set_state('lora2')
-                    # model.base_model.model.model.mm_projector = model.base_model.model.model.local_mm_projector
-                dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
-                if not training_args.eval_server:
-                    if training_args.mode not in ['fedsim', 'feddat']:
-                        
-                        if data_info['type'] == 'open-ended':
-                            evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
-                        elif data_info['type'] == 'multi-choice':
-                            evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
-                        else:
-                            evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
-                if training_args.eval_server and data_info['data_name'] not in server_eval_key:
-                    if not training_args.zeroshot:
-                        model.load_state_dict(server_state_dict, strict=False)
-                    if training_args.mode in ['apfl', 'ditto']:
-                        # for name, module in model.named_modules():
-                        #     if isinstance(module, DualLoraLayer) or isinstance(module, DualIA3Layer):
-                        #         module.set_state('lora1')
-                        model.set_state('lora1')
-                        # model.base_model.model.model.mm_projector = model.base_model.model.model.global_mm_projector
-                # #     if data_info['data_name'] in CHOICE_DATA: 
-                # #         evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
-                # #     else:
-                    if data_info['type'] == 'open-ended':
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
-                    elif data_info['type'] == 'multi-choice':
-                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
-                    else:
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
-                    server_eval_key.append(data_info['data_name'])
+                    #         module.set_state('lora1')
+                    model.set_state('lora1')
+                    # model.base_model.model.model.mm_projector = model.base_model.model.model.global_mm_projector
+            # #     if data_info['data_name'] in CHOICE_DATA: 
+            # #         evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None)
+            # #     else:
+                if data_info['type'] == 'open-ended':
+                    evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
+                elif data_info['type'] == 'multi-choice':
+                    evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
+                else:
+                    evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
+                server_eval_key.append(data_info['data_name'])
     
     logger.info(f"elapsed time {datetime.timedelta(seconds=int(time.time() - start_time))} | ")
 def get_datalists(args, scenario_num):
