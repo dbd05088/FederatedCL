@@ -41,15 +41,15 @@ for idx in range(total_len):
     new_item = {}
     new_item['id'] = item['sample_id']
     new_item['image'] = [os.path.join(dir, f'full/images', img) for img in item['task_instance']['images_path']]
-    if len(new_item['image']) > 12:
+    if len(new_item['image']) > 8:
         continue
-    else:
-        try:
-            for img in new_item['image']:
-                image = Image.open(img)
-        except:
-            print(img)
-            continue
+    # else:
+        # try:
+        #     for img in new_item['image']:
+        #         image = Image.open(img)
+        # except:
+        #     print(img)
+        #     continue
     question = item['task_instance']['context']
     choice_list = item['task_instance']['choice_list']
     # Create the string with the selected choices
