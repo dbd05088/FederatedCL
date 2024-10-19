@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # CIL CONFIG
-NOTE="L2P_T2_1_4_bs4_saveoptim_lr3e-3_sc20_4tasks_5rounds_fixitr100"
-MODE="L2P_T2"
+NOTE="sft_bs4_lr3e-3_saveoptim_sc0_4tasks_5rounds_fixitr100"
+MODE="sft"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 
 # fed args
-SCENARIO=20
+SCENARIO=0
 NUM_ROUNDS=5
 NUM_TASKS=4
 NUM_CLIENTS=10
@@ -39,9 +39,11 @@ else
 fi
 
 # ROUND_TO_EVALS=$2
-ROUND_TO_EVALS=(20)
+ROUND_TO_EVALS=(2)
+ITER_TO_EVAL=75
 
 for ((index=0; index<${#ROUND_TO_EVALS[@]}; index++)); do
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     CUDA_VISIBLE_DEVICES=$1 python eval_VLM_CL.py \
         --is_eval True \
         --model_name_or_path $MODEL_NAME \
@@ -69,11 +71,12 @@ for ((index=0; index<${#ROUND_TO_EVALS[@]}; index++)); do
         --generator_hidden_feature 8 \
         --key_embed_size 64 \
         --prompt_top_k 1 \
-        --pool_size 4 \
+        --pool_size 40 \
         --set_state "gate" \
-        --is_prompt True \
+        --is_prompt False \
         --use_task_vector False \
         --round_to_eval ${ROUND_TO_EVALS[$index]} \
-        --output_dir "./nohup" > ./nohup/${NOTE}_eval_round${ROUND_TO_EVALS[$index]}.log 2>&1 &
+        --eval_iter $ITER_TO_EVAL \
+        --output_dir "./nohup" > ./nohup/${NOTE}_eval_round${ROUND_TO_EVALS[$index]}_iter${ITER_TO_EVAL}.log 2>&1 &
 done
 # --eval_period $EVAL_PERIOD
