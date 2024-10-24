@@ -1,23 +1,23 @@
 #!/bin/bash
 
 # CIL CONFIG
-NOTE="sft_bs4_lr3e-3_saveoptim_sc0_4tasks_5rounds_fixitr100"
-MODE="sft"
+NOTE="fedours_bs4_saveoptim_lr6e-3_lastdownmean_freq5_fishercossimsoftmax_mean_sc0_4tasks_5rounds_fixitr100"
+MODE="fedours"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 
 # fed args
-SCENARIO=0
+SCENARIO=1
 NUM_ROUNDS=5
-NUM_TASKS=4
-NUM_CLIENTS=10
+NUM_TASKS=7
+NUM_CLIENTS=1
 MODEL_MAX_LEN=20000
 MAX_NEW_TOKENS=512
 
 
 if [ "$MODEL_ARCH" == "llava" ]; then
-    MODEL_NAME="./llava-v1.5-7b"
+    MODEL_NAME="liuhaotian/llava-v1.5-7b"
     VERSION="v1"
-    VISION_TOWER="./clip-vit-large-patch14-336"
+    VISION_TOWER="openai/clip-vit-large-patch14-336"
     MODEL_TYPE="llama"
     BITS=16
 
@@ -39,8 +39,8 @@ else
 fi
 
 # ROUND_TO_EVALS=$2
-ROUND_TO_EVALS=(2)
-ITER_TO_EVAL=75
+ROUND_TO_EVALS=(20)
+ITER_TO_EVAL=0
 
 for ((index=0; index<${#ROUND_TO_EVALS[@]}; index++)); do
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
@@ -62,7 +62,8 @@ for ((index=0; index<${#ROUND_TO_EVALS[@]}; index++)); do
         --tf32 True \
         --note $NOTE \
         --mode $MODE \
-        --eval_server False \
+        --eval_server True \
+        --unseen_task True \
         --zeroshot False \
         --lora_enable False \
         --ia3_enable True \
@@ -77,6 +78,6 @@ for ((index=0; index<${#ROUND_TO_EVALS[@]}; index++)); do
         --use_task_vector False \
         --round_to_eval ${ROUND_TO_EVALS[$index]} \
         --eval_iter $ITER_TO_EVAL \
-        --output_dir "./nohup" > ./nohup/${NOTE}_eval_round${ROUND_TO_EVALS[$index]}_iter${ITER_TO_EVAL}.log 2>&1 &
+        --output_dir "./nohup" #> ./nohup/${NOTE}_eval_round${ROUND_TO_EVALS[$index]}_iter${ITER_TO_EVAL}.log 2>&1 &
 done
 # --eval_period $EVAL_PERIOD

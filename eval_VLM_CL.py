@@ -381,6 +381,20 @@ def main():
     if not training_args.zeroshot and training_args.eval_server:
         logger.info(f'load ./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth')
         server_state_dict = torch.load(f'./client_states_{training_args.note}/server_model_round{training_args.round_to_eval-1}.pth', map_location='cpu')
+        
+    if training_args.eval_server and training_args.unseen_task:
+        test_datalist = test_datalists[0]
+        model.load_state_dict(server_state_dict, strict=False)
+        for data_info in test_datalist:
+            print(data_info['data_name'])
+            dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
+            if data_info['type'] == 'open-ended':
+                evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
+            elif data_info['type'] == 'multi-choice':
+                evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
+            else:
+                evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
+    
     for client_id in range(training_args.num_clients):
         if training_args.eval_client:
             if client_id != training_args.eval_client:

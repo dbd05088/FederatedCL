@@ -94,7 +94,7 @@ def process_choose_txt(output_folder, subset_name, size):
         json.dump(json_data_list_2, json_file, indent=4)
 
 def process_choose_img(output_folder, subset_name, size):
-    answer_list = ["Image A", "Image B", "Image C", "Image D", "Image E", "Image F", "Image G"]
+    answer_list = ["Image A", "Image B", "Image C", "Image D"]
     
     subset_folder = os.path.join(output_folder, subset_name)
     image_subfolder = os.path.join(output_folder, 'images')
@@ -117,6 +117,9 @@ def process_choose_img(output_folder, subset_name, size):
         folder_name = folder.split('/')[-1]
         
         question = data['question']
+        choice_imgs = data['choices']
+        if len(choice_imgs) >= 5:
+            continue
         answer = answer_list[data['answer']]
         
         query_img_path = f'{folder}/image.png'
@@ -132,9 +135,7 @@ def process_choose_img(output_folder, subset_name, size):
             print(query_img_path)
             continue
         
-        choice_imgs = data['choices']
-        if len(choice_imgs) >= 3:
-            continue
+        
         fail = False
         for choice_img in choice_imgs:
             try:
@@ -178,13 +179,13 @@ def process_choose_img(output_folder, subset_name, size):
         else:
             json_data_list_2.append(json_data)
     
-    json_output_path = os.path.join(output_folder, subset_name, 'dataset-0.json')
+    json_output_path = os.path.join(output_folder, subset_name, 'dataset-4.json')
     json_data_list_1 = np.random.choice(json_data_list_1, replace=False, size=min(size, len(json_data_list_1))).tolist()
     print(len(json_data_list_1))
     with open(json_output_path, 'w') as json_file:
         json.dump(json_data_list_1, json_file, indent=4)
     
-    json_output_path = os.path.join(output_folder, subset_name, 'dataset-1.json')
+    json_output_path = os.path.join(output_folder, subset_name, 'dataset-5.json')
     json_data_list_2 = np.random.choice(json_data_list_2, replace=False, size=min(size, len(json_data_list_2))).tolist()
     print(len(json_data_list_2))
     with open(json_output_path, 'w') as json_file:
@@ -274,10 +275,10 @@ output_folder = 'dataset/iconqa'
 # subtasks = ['choose_img', 'choose_txt', 'fill_in_blank']
 # grades = ['grade2', 'grade1', 'kindergarten', 'prek']
 
-# process_choose_img(output_folder, 'test', 2000)
+process_choose_img(output_folder, 'test', 2000)
 process_choose_txt(output_folder, 'test', 2000)
 process_choose_fillblank(output_folder, 'test', 2000)
 
-# process_choose_img(output_folder, 'train', 10000)
+process_choose_img(output_folder, 'train', 10000)
 process_choose_txt(output_folder, 'train', 10000)
 process_choose_fillblank(output_folder, 'train', 10000)

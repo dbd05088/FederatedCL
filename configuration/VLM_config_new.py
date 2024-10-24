@@ -38,7 +38,8 @@ class TrainingArguments(transformers.TrainingArguments):
     is_prompt: bool = False
     round_to_eval: int = None
     eval_temp: float = 0.2
-    eval_server: bool = True
+    eval_server: bool = False
+    unseen_task: bool = False
     eval_client: int = field(default=None)
     eval_iter: int = field(default=None)
     zeroshot: bool = False
