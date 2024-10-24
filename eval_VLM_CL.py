@@ -394,6 +394,7 @@ def main():
                 evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
             else:
                 evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, None, batch_size)
+        return
     
     for client_id in range(training_args.num_clients):
         if training_args.eval_client:
