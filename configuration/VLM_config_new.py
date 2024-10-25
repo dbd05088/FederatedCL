@@ -135,3 +135,6 @@ class TrainingArguments(transformers.TrainingArguments):
     
     use_task_vector:bool = False
     use_fisher:bool = False
+    
+    load_checkpoint:str = None
+    fedours:bool = False

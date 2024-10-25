@@ -1,17 +1,17 @@
 #!/bin/bash
 # CIL CONFIG
-NOTE="ours_generator_512_8_8_bs4_saveoptim_l2distill0.1_fishernormmerge_lr3e-4_sc22_4tasks_5rounds_itr125" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="ours_generator"
+NOTE="debug"
+MODE="fedours"
 MODEL_ARCH="llava" # llava bunny_3b bunny_8b
 RND_SEED=1
 
 # fed args
-SCENARIO=22
-NUM_ROUNDS=5
-NUM_TASKS=4
+SCENARIO=2
+NUM_ROUNDS=1
+NUM_TASKS=1
 NUM_CLIENTS=4
 MODEL_MAX_LEN=20000
-NUM_ITER=125
+NUM_ITER=250
 MEMORY_SIZE=100000
 IS_STREAMONLY=True
 
@@ -23,20 +23,20 @@ USE_PROMPT=False
 
 SAVE_OPTIM=True
 
-USE_TASK_VECTOR=False
+USE_TASK_VECTOR=True
 USE_FISHER=True
 
-GENERATOR_OUTPUT_SIZE=512
+GENERATOR_OUTPUT_SIZE=1024
 GENERATOR_HIDDEN_DIM=8
 GENERATOR_HIDDEN_FEATURE=8
 KEY_EMBED_SIZE=64
-POOL_SIZE=12
-PROMPT_TOP_K=3
+POOL_SIZE=4
+PROMPT_TOP_K=1
 EMA_RATIO=0.9
 
 BATCHSIZE=4
 
-LR=3e-4
+LR=6e-3
 MM_PROJECTOR_LR=$LR #3e-4
 FINAL_LR=$LR #3e-4
 MM_FINAL_LR=$LR #3e-4
@@ -70,6 +70,10 @@ else
 fi
 # --master_port 29500
 # --num_gpus=4
+
+LOAD_CHECKPOINT="client_states_fedours_bs4_saveoptim_lr6e-3_lastdownmean_freq5_fishercossimsoftmax_mean_sc0_4tasks_5rounds_fixitr100/server_model_round4.pth"
+
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 deepspeed --master_port 29504 \
     --include localhost:4 \
     train_VLM_CL.py \
@@ -122,7 +126,9 @@ deepspeed --master_port 29504 \
     --save_optim $SAVE_OPTIM \
     --use_task_vector $USE_TASK_VECTOR \
     --use_fisher $USE_FISHER \
-    --output_dir "./results/test/" > ./nohup/${NOTE}.log 2>&1 &
+    --load_checkpoint $LOAD_CHECKPOINT \
+    --fedours False \
+    --output_dir "./results/test/" #> ./nohup/${NOTE}.log 2>&1 &
 
 # --eval_period $EVAL_PERIOD
 # lr_scheduler_type

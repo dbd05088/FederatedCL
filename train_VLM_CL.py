@@ -78,7 +78,19 @@ def main():
     
     if training_args.gradient_checkpointing:
         training_args.gradient_checkpointing_kwargs = {'use_reentrant':False}
-
+    
+    
+    if training_args.load_checkpoint is not None:
+        logger.info(f'load {training_args.load_checkpoint}')
+        server_state_dict = torch.load(training_args.load_checkpoint, map_location='cpu')
+        
+        with torch.no_grad():
+            model.load_state_dict(server_state_dict, strict=False)
+    
+    ### for ours
+    if training_args.fedours:
+        pass
+    
     global_state_dict = get_peft_state_maybe_zero_3(
                 model.named_parameters(), training_args.lora_bias
             )
