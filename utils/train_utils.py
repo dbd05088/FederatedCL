@@ -762,3 +762,37 @@ def load_deepspeed(state_dict, module: nn.Module, prefix="", strict=True):
     for name, child in module._modules.items():
         if child is not None:
             load_deepspeed(state_dict, child, prefix + name + ".")
+
+import random
+def get_task_vectors(model, tokenizer, train_datalists, training_args, data_args, create_trainer, global_state_dict, make_supervised_data_module):
+    random.seed(training_args.seed)
+    client_task_vectors = []
+    for client_id in range(len(train_datalists)):
+        datalist = train_datalists[client_id][0]['datalist']
+        
+        sub_datalist = random.sample(datalist, 4*5)
+        
+        data_module = make_supervised_data_module(client_data=sub_datalist, # sub_dataset
+                                                tokenizer=tokenizer,
+                                                data_args=copy.deepcopy(data_args))
+    
+        extra_state_dict_dict = {}
+        extra_state_dict_dict['client_id']=0
+        extra_state_dict_dict['curr_round']=0
+        extra_state_dict_dict['fisher_freq'] = 1
+        trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
+
+        results = trainer.train()
+        
+        task_vector = trainer.task_vector
+        
+        client_task_vectors.append(task_vector)
+        
+        trainer.deepspeed.empty_partition_cache()
+        del trainer
+        
+        with torch.no_grad():
+            model.load_state_dict(global_state_dict, strict=False)
+    
+    extra_state_dict_dict['fisher_freq']=5
+    return client_task_vectors

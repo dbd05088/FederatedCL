@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from configuration.VLM_config_new import ModelArguments, DataArguments, TrainingArguments
 import transformers
-from utils.train_utils import get_VLMmodel, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3
+from utils.train_utils import get_VLMmodel, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, get_task_vectors, load_deepspeed
 
 from federated_methods.method_manager import select_method
 from utils.data_loader_VLM import LazySupervisedDataset, DataCollatorForSupervisedDataset
@@ -80,16 +80,31 @@ def main():
         training_args.gradient_checkpointing_kwargs = {'use_reentrant':False}
     
     
-    if training_args.load_checkpoint is not None:
+    if training_args.load_checkpoint is not None and not training_args.fedours:
         logger.info(f'load {training_args.load_checkpoint}')
         server_state_dict = torch.load(training_args.load_checkpoint, map_location='cpu')
         
         with torch.no_grad():
             model.load_state_dict(server_state_dict, strict=False)
     
-    ### for ours
-    if training_args.fedours:
-        pass
+        if 'fedours' in training_args.load_checkpoint and training_args.mode != 'fedours':
+            local_state_dict = {}
+            for k in server_state_dict.keys():
+                new_k = k.replace('ia3_l_1', 'ia3_l')
+                local_state_dict[new_k] = server_state_dict[k]
+            
+            server_state_dict = local_state_dict
+        
+        with torch.no_grad():
+            model.load_state_dict(server_state_dict, strict=False)
+            
+        if training_args.mode == 'fedours':
+            local_state_dict = {}
+            for k in server_state_dict.keys():
+                new_k = k.replace('ia3_l_1', 'ia3_l_2')
+                local_state_dict[new_k] = server_state_dict[k]
+            
+            model.load_state_dict(local_state_dict, strict=False)
     
     global_state_dict = get_peft_state_maybe_zero_3(
                 model.named_parameters(), training_args.lora_bias
@@ -98,6 +113,17 @@ def main():
         model.named_parameters()
     )
     global_state_dict.update(non_lora_state_dict)
+    
+    if training_args.mode == 'fedours' and training_args.fedours:
+        logger.info(f'load task vector {training_args.load_checkpoint}')
+        tv_weights = torch.load(training_args.load_checkpoint, map_location='cpu')
+        prev_task_vectors = tv_weights['task_vectors']
+        prev_local_state_dict_list = tv_weights['local_state_dict_list']
+        
+        current_task_vectors = get_task_vectors(model, tokenizer, train_datalists, training_args, data_args, create_trainer, global_state_dict, make_supervised_data_module)
+    else:
+        current_task_vectors = None
+    
     local_state_dict_list = [copy.deepcopy(global_state_dict) for i in range(training_args.num_clients)]
     old_local_state_dict_list = [copy.deepcopy(local_state_dict_list[i]) for i in range(len(local_state_dict_list))]
     local_state_dict_keys = local_state_dict_list[0].keys()
@@ -128,7 +154,9 @@ def main():
         old_local_state_dict_list = [copy.deepcopy(local_state_dict_list[i]) for i in range(len(local_state_dict_list))]
         
         if curr_round > 0 and training_args.use_task_vector:
-            
+            path = os.path.join(training_args.state_dir, f"round{curr_round}_task_vector_local_weights.pth")
+            tv_weight = {'task_vectors': task_vectors, 'local_state_dict_list': old_local_state_dict_list}
+            torch.save(tv_weight, path)
             # cosine sim matrix
             task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
             sim = torch.matmul(task_vector,
@@ -171,6 +199,51 @@ def main():
             
             load_state_dict(model, global_state_dict, old_local_state_dict_list, client_id, training_args, extra_state_dict_dict)
             print('model loading done')
+            
+            if training_args.fedours and training_args.mode == 'fedours':
+                task_vector = F.normalize(torch.stack(prev_task_vectors + [current_task_vectors[client_id]], dim=0), dim=-1)
+                sim = torch.matmul(task_vector,
+                                torch.transpose(task_vector, 1, 0))
+                sim = torch.transpose(sim, 1, 0)
+                
+                print(sim)
+                
+                new_global_state_dict = {}
+            
+                weights = sim[-1][:-1].clone()
+                
+                weights = (weights).softmax(dim=0)
+                
+                sim_sum = weights.sum()
+                
+                for name in global_state_dict.keys():
+                    new_param = 0
+                    if 'lora1' in name:
+                        target_key = name.replace('lora1', 'lora2')
+                    elif 'ia3_l_1' in name:
+                        target_key = name.replace('ia3_l_1', 'ia3_l_2')
+                    elif 'ia3_generator_1' in name:
+                        target_key = name.replace('ia3_generator_1', 'ia3_generator_2')
+                    elif 'lang_prompt_dap_key_embeddings_1' in name:
+                        target_key = name.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
+                    elif 'lang_prompt_downsample_1' in name:
+                        target_key = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
+                    elif 'lang_prompt_norm_1' in name:
+                        target_key = name.replace('lang_prompt_norm_1', 'lang_prompt_norm_2')
+                    elif 'lang_prompt_ia3_pool_1' in name:
+                        target_key = name.replace('lang_prompt_ia3_pool_1', 'lang_prompt_ia3_pool_2')
+                    
+                    for id in range(len(prev_local_state_dict_list)):
+                        new_param += weights[id]*prev_local_state_dict_list[id][target_key] / sim_sum
+                        
+                    new_global_state_dict[name] = new_param
+                    new_global_state_dict[target_key] = new_param
+                
+                if 'zero3' in training_args.deepspeed:
+                    load_deepspeed(new_global_state_dict, model, strict=False)
+                else:
+                    model.load_state_dict(new_global_state_dict, strict=False) 
+                
             
             if 'CodaPrompt' in training_args.mode and task_id is not None and task_id != last_task_id[client_id]:
                 for n, m in model.named_modules():
