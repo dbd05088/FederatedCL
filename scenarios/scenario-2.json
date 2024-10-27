@@ -2,13 +2,13 @@
     {
         "client_id": 0,
         "datasets":[
-            {"dataset": "ALFRED","subset_id": 0, "type":"open-ended", "metric":"F1"}
+            {"dataset": "ALFRED","subset_id": 0, "type":"open-ended", "metric":"RougeL"}
         ]
     },
     {
         "client_id": 1,
         "datasets":[
-            {"dataset": "DiDeMoSV","subset_id": 0, "type":"open-ended", "metric":"F1"}
+            {"dataset": "DiDeMoSV","subset_id": 0, "type":"open-ended", "metric":"RougeL"}
         ]
     },
     {
