@@ -44,10 +44,10 @@ def split_q_instruct(datalist, output_folder, train_samples, test_samples):
     json_data_list_test = json_data_list_1[-int(test_samples/2):] + json_data_list_2[-int(test_samples/2):]
     
     json_data_list_2_train = json_data_list_3[:int(train_samples)]
-    json_data_list_2_test = json_data_list_3[:int(test_samples)]
+    json_data_list_2_test = json_data_list_3[-int(test_samples):]
     
     json_data_list_3_train = json_data_list_4[:int(train_samples)]
-    json_data_list_3_test = json_data_list_4[:int(test_samples)]
+    json_data_list_3_test = json_data_list_4[-int(test_samples):]
     
     # Save the JSON data list to a file
     json_output_path = os.path.join(train_folder, f'dataset-0.json')
@@ -112,13 +112,13 @@ def split_multi_q_instruct(datalist, output_folder, train_samples, test_samples)
     
     
     json_data_list_train = json_data_list_1[:int(train_samples)]
-    json_data_list_test = json_data_list_1[:int(test_samples)]
+    json_data_list_test = json_data_list_1[-int(test_samples):]
     
     json_data_list_2_train = json_data_list_2[:int(train_samples)]
-    json_data_list_2_test = json_data_list_2[:int(test_samples)]
+    json_data_list_2_test = json_data_list_2[-int(test_samples):]
     
     json_data_list_3_train = json_data_list_3[:int(train_samples)]
-    json_data_list_3_test = json_data_list_3[:int(test_samples)]
+    json_data_list_3_test = json_data_list_3[-int(test_samples):]
     
     # Save the JSON data list to a file
     json_output_path = os.path.join(train_folder, f'dataset-3.json')
@@ -151,14 +151,106 @@ def split_multi_q_instruct(datalist, output_folder, train_samples, test_samples)
     # with open(json_output_path, 'w') as json_file:
     #     json.dump(json_data_list_3_test, json_file, indent=4)
 
+def split_compare_qna(datalist, output_folder, train_samples, test_samples):
+    train_folder = os.path.join(output_folder, 'train')
+    test_folder = os.path.join(output_folder, 'test')
+    if not os.path.exists(train_folder):
+        os.makedirs(train_folder)
+    if not os.path.exists(test_folder):
+        os.makedirs(test_folder)
+    
+    json_data_list_1 = []
+    json_data_list_2 = []
+    json_data_list_3 = []
+    
+    for item in datalist:
+        if isinstance(item['image'], list):
+            item['image'] = [output_folder + '/' + img for img in item['image']]
+        
+        if len(item['image']) == 2:
+            json_data_list_1.append(item)
+        elif len(item['image']) == 3:
+            json_data_list_2.append(item)
+        elif len(item['image']) == 4:
+            json_data_list_3.append(item)
+    
+    print(len(json_data_list_1), len(json_data_list_2), len(json_data_list_3))
+    # Shuffle the final list to mix types
+    random.shuffle(json_data_list_1)
+    random.shuffle(json_data_list_2)
+    random.shuffle(json_data_list_3)
+    
+    
+    json_data_list_train = json_data_list_1[:int(train_samples)]
+    json_data_list_test = json_data_list_1[-int(test_samples):]
+    
+    json_data_list_2_train = json_data_list_2[:int(train_samples)]
+    json_data_list_2_test = json_data_list_2[-int(test_samples):]
+    
+    json_data_list_3_train = json_data_list_3[:int(train_samples)]
+    json_data_list_3_test = json_data_list_3[-int(test_samples):]
+    
+    # Save the JSON data list to a file
+    json_output_path = os.path.join(train_folder, f'dataset-5.json')
+    print(f"Total samples: {len(json_data_list_train)}")
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list_train, json_file, indent=4)
+        
+    json_output_path = os.path.join(test_folder, f'dataset-5.json')
+    print(f"Total samples: {len(json_data_list_test)}")
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list_test, json_file, indent=4)
 
+    json_output_path = os.path.join(train_folder, f'dataset-6.json')
+    print(f"Total samples: {len(json_data_list_2_train)}")
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list_2_train, json_file, indent=4)
+        
+    json_output_path = os.path.join(test_folder, f'dataset-6.json')
+    print(f"Total samples: {len(json_data_list_2_test)}")
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list_2_test, json_file, indent=4)
+
+    json_output_path = os.path.join(train_folder, f'dataset-7.json')
+    print(f"Total samples: {len(json_data_list_3_train)}")
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list_3_train, json_file, indent=4)
+        
+    json_output_path = os.path.join(test_folder, f'dataset-7.json')
+    print(f"Total samples: {len(json_data_list_3_test)}")
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list_3_test, json_file, indent=4)
+    
+    random.shuffle(json_data_list_1)
+    random.shuffle(json_data_list_2)
+    random.shuffle(json_data_list_3)
+    json_data_list_4_train = json_data_list_1[:3333] + json_data_list_2[:3333] + json_data_list_3[:3333]
+    json_data_list_4_test = json_data_list_1[-666:] + json_data_list_2[-666:] + json_data_list_3[-666:]
+    
+    json_output_path = os.path.join(train_folder, f'dataset-8.json')
+    print(f"Total samples: {len(json_data_list_4_train)}")
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list_4_train, json_file, indent=4)
+        
+    json_output_path = os.path.join(test_folder, f'dataset-8.json')
+    print(f"Total samples: {len(json_data_list_4_test)}")
+    with open(json_output_path, 'w') as json_file:
+        json.dump(json_data_list_4_test, json_file, indent=4)
+    
+
+    
 with open('./dataset/Co-Instruct-DB/coinstruct_562k_llava_format.json', 'r') as fp:
     datalist = json.load(fp)
 
+breakpoint()
+
 original_q_instruct = datalist[:200277]
 multi_q_instruct = datalist[200277:302409]
+compare_general = datalist[302409:332301]
+compare_qna = datalist[332301:]
 
 split_q_instruct(original_q_instruct, 'dataset/Co-Instruct-DB', 10000, 2000)
 
 split_multi_q_instruct(multi_q_instruct, 'dataset/Co-Instruct-DB', 10000, 2000)
 
+split_compare_qna(compare_qna, 'dataset/Co-Instruct-DB', 10000, 2000)
