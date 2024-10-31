@@ -514,6 +514,13 @@ class LLaVATrainerFEDAVG(LLaVATrainer):
                     if self.args.is_wsd == 'WSD' and math.ceil(self.state.epoch*steps_in_epoch) == math.ceil(self.args.decay_ratio*steps_in_epoch):
                         self.global_weight = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
                     
+                    # save client model
+                    if step % 5 == 0:
+                        output_dir = os.path.join(self.args.state_dir, f"{self.client_id}_client_model_round{self.curr_round+1}_itr{step}.pth")
+                        state_dict = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+                        
+                        if (self.args.local_rank == 0 or self.args.local_rank == -1):
+                            torch.save(state_dict, output_dir)
 
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:

@@ -353,6 +353,10 @@ def main():
             torch.save(global_state_dict, os.path.join(training_args.state_dir, f"server_model_round{curr_round}.pth"))
             
     if training_args.use_task_vector:
+        path = os.path.join(training_args.state_dir, f"round{curr_round+1}_task_vector_local_weights.pth")
+        tv_weight = {'task_vectors': task_vectors, 'local_state_dict_list': local_state_dict_list}
+        torch.save(tv_weight, path)
+        
         task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
         sim = torch.matmul(task_vector,
                         torch.transpose(task_vector, 1, 0))

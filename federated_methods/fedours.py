@@ -69,6 +69,7 @@ def fedours_ema_distill_create_trainer(model, tokenizer, training_args, data_mod
         ema_ratio=ema_ratio,
         task_vector=extra_state_dict_dict['task_vector'] if 'task_vector' in extra_state_dict_dict else None,
         fisher_old=extra_state_dict_dict['fisher_old'] if 'fisher_old' in extra_state_dict_dict else None,
+        fisher_freq=extra_state_dict_dict['fisher_freq'] if 'fisher_freq' in extra_state_dict_dict else 5,
         **data_module,
         )
     return trainer
@@ -107,8 +108,8 @@ def fedours_load_state_dict(model, global_state_dict, local_state_dict_list, cli
             
             weights = sim[client_id].clone()
             
-            # weights[client_id] = -1e9
-            # weights = (weights).softmax(dim=0)
+            weights[client_id] = -1e9
+            weights = (weights/0.5).softmax(dim=0)
             
             sim_sum = weights.sum() - weights[client_id]
             
@@ -213,13 +214,14 @@ def get_grad_penultimate(logit, label, weight_last, input_penultimate, norm_laye
     grad = grad_penultimate_layer * grad_normalized_hidden_states.to(torch.bfloat16)
     
     # Compute the gradient w.r.t the weights of the penultimate layer using the input to that layer (penultimate input)
-    grad_weights_penultimate = torch.matmul(grad[:,:1].T, input_penultimate) # col # Backprop through penultimate
+    # grad_weights_penultimate = torch.matmul(grad[:,:1].T, input_penultimate) # col # Backprop through penultimate
     # grad_weights_penultimate = torch.matmul(grad.T, input_penultimate[:,:1]) # row  # Backprop through penultimate
-
+    grad_weights_penultimate = torch.matmul(grad.T, input_penultimate).mean(dim=-1)
+    
     return grad_weights_penultimate.view(-1)
 
 class LLaVATrainerOURS(LLaVATrainerTaskId):
-    def __init__(self, task_id, ema_ratio=0.996, task_vector=None, fisher_old=None, **kwargs):
+    def __init__(self, task_id, ema_ratio=0.996, task_vector=None, fisher_old=None, fisher_freq=5, **kwargs):
         super(LLaVATrainerOURS, self).__init__(**kwargs)
         self.task_id = task_id
         self.ema_ratio = ema_ratio
@@ -231,7 +233,7 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         self.fisher_old = fisher_old #{k:p.cuda() for k, p in fisher_old.items()} if fisher_old is not None else None
         self.fisher_cur = 0
         self.fisher_cnt = 0
-        self.fisher_freq = 2
+        self.fisher_freq = fisher_freq
     
     def compute_loss(self, model, inputs, return_outputs=False):
         # if self.curr_round > 0:
@@ -707,39 +709,36 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                     
                     # compute fisher online
                     
-                    # only enable gradient for last transformer block
-                    # for p in self.model.base_model.model.model.layers[-1].self_attn.o_proj.parameters():
-                    #     p.requires_grad = True
-                    # for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
-                    #     p.requires_grad = True
-                    
-                    # if step % self.fisher_freq == 0:
-                    #     with self.model.disable_adapter():
-                    #         inputs = self._prepare_inputs(inputs)
+                    if step % self.fisher_freq == 0:
+                        # for p in self.model.base_model.model.model.layers[15].mlp.down_proj.base_layer.parameters():
+                        #     p.requires_grad = True
+                        with self.model.disable_adapter():
+                            inputs = self._prepare_inputs(inputs)
 
-                    #         output = self.model(**inputs)#.loss
+                            output = self.model(**inputs)#.loss
                             
-                    #         shift_labels = self.model.labels[..., 1:]
-                    #         grads = get_grad_penultimate(output.logits[..., :-1, :][shift_labels != -100].detach(), shift_labels[shift_labels != -100].detach(), 
-                    #                                     self.model.base_model.model.lm_head.weight,
-                    #                                     output.penultimate_input[..., :-1, :][shift_labels != -100].detach(),
-                    #                                     self.model.base_model.model.model.norm,
-                    #                                     output.hidden_states_before_norm[..., :-1, :][shift_labels != -100].detach(),)
-                    #         # output.loss.backward()
+                            shift_labels = self.model.labels[..., 1:]
+                            grads = get_grad_penultimate(output.logits[..., :-1, :][shift_labels != -100].detach(), shift_labels[shift_labels != -100].detach(), 
+                                                        self.model.base_model.model.lm_head.weight,
+                                                        output.penultimate_input[..., :-1, :][shift_labels != -100].detach(),
+                                                        self.model.base_model.model.model.norm,
+                                                        output.hidden_states_before_norm[..., :-1, :][shift_labels != -100].detach(),)
+                            # output.loss.backward()
                             
-                    #         # grads = []
-                    #         # for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
-                    #         #     breakpoint()
-                    #         #     grads.append(p.grad[:,0].view(-1))
-                    #         # grads = torch.cat(grads)
+                            # grads = []
+                            # for p in self.model.base_model.model.model.layers[15].mlp.down_proj.base_layer.parameters():
+                            #     grads.append(p.grad)#[:,0].view(-1))
+                            #     # grads = p.grad
+                            # grads = torch.cat(grads)
                             
-                    #     self.fisher_cur += (grads**2).detach()
-                    #     self.fisher_cnt += 1
+                        # self.fisher_cur += (grads**2).detach()
+                        self.fisher_cur += (grads).detach()
+                        self.fisher_cnt += 1
                         
-                    #     # for p in self.model.base_model.model.model.layers[-1].mlp.down_proj.base_layer.parameters():
-                    #     #     p.requires_grad = False
+                        # for p in self.model.base_model.model.model.layers[15].mlp.down_proj.base_layer.parameters():
+                        #     p.requires_grad = False
                         
-                    #     model.zero_grad()
+                        model.zero_grad()
                     
                     self.state.global_step += 1
                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
@@ -749,7 +748,16 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
                     if self.args.is_wsd == 'WSD' and math.ceil(self.state.epoch*steps_in_epoch) == math.ceil(self.args.decay_ratio*steps_in_epoch):
                         self.global_weight = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
                     
-                    
+                    # save client model
+                    if step % 5 == 0:
+                        output_dir = os.path.join(self.args.state_dir, f"{self.client_id}_client_model_round{self.curr_round+1}_itr{step}.pth")
+                        self.model.activate_all()
+                        state_dict = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+                        
+                        if (self.args.local_rank == 0 or self.args.local_rank == -1):
+                            torch.save(state_dict, output_dir)
+                        
+                        self.model.activate_lora2()
                     # ema update
                     # if optimizer_was_run and self.curr_round > 0:
                     #     with torch.no_grad():
@@ -939,8 +947,8 @@ class LLaVATrainerOURS(LLaVATrainerTaskId):
         #                               self.model.base_model.model.model.layers[-1].self_attn.v_proj.ia3_l_2['default'].detach().flatten(),
         #                               self.model.base_model.model.model.layers[-1].mlp.down_proj.ia3_l_2['default'].detach().flatten())).cpu() - 1
         
-        # self.fisher_old = ((self.fisher_cur/self.fisher_cnt) + self.fisher_old) / 2 if self.fisher_old is not None else (self.fisher_cur/self.fisher_cnt)
-        # self.task_vector = self.fisher_old.detach().cpu()
+        self.fisher_old = ((self.fisher_cur/self.fisher_cnt) + self.fisher_old) / 2 if self.fisher_old is not None else (self.fisher_cur/self.fisher_cnt)
+        self.task_vector = self.fisher_old.detach().cpu()
         
         self.model.activate_all()
 
