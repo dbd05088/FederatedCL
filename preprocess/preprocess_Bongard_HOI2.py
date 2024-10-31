@@ -52,7 +52,7 @@ def save_dataset(dataset_name, output_folder, subset_name, max_samples):
                 "conversations": [
                     {
                         "from": "human",
-                        "value": f"{prompts}\nImage A: <image>, Image B: <image>, Image C: <image>, Image D: <image>\nChoice List: [Image A, Image B, Image C, Image D]. Your answer is: "
+                        "value": f"{prompts}\nImage A: <image>, Image B: <image>, Image C: <image>, Image D: <image>\nChoice list:[Image A, Image B, Image C, Image D]. Your answer is: "
                     },
                     { 
                         "from": "gpt",

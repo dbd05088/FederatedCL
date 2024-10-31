@@ -65,7 +65,7 @@ def save_dataset_train(dataset_name, output_folder):
     train_json_data_list = split_data(train_json_data_list, cmc, 'cmc', 'train')
     train_json_data_list = split_data(train_json_data_list, robo, 'robo', 'train')
     train_json_data_list = split_data(train_json_data_list, rw, 'rw', 'train')
-    
+    print(len(train_json_data_list))
     # Save the JSON data list to a file
     json_output_path = os.path.join(output_folder, 'train', 'dataset-0.json')
     with open(json_output_path, 'w') as json_file:
@@ -105,6 +105,7 @@ def save_dataset_test(dataset_name, output_folder):
     test_json_data_list = split_data(test_json_data_list, robo, 'robo', 'test')
     test_json_data_list = split_data(test_json_data_list, rw, 'rw', 'test')
     
+    print(len(test_json_data_list))
     # Save the JSON data list to a file
     json_output_path = os.path.join(output_folder, 'test', 'dataset-0.json')
     with open(json_output_path, 'w') as json_file:
