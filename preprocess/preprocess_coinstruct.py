@@ -151,7 +151,7 @@ def split_multi_q_instruct(datalist, output_folder, train_samples, test_samples)
     # with open(json_output_path, 'w') as json_file:
     #     json.dump(json_data_list_3_test, json_file, indent=4)
 
-yes_no_choice_list = '\nChoice list: [Yes, No]. You must choose your answer from the Choice List. '
+yes_no_choice_list = '\nChoice list:[Yes, No]. You must choose your answer from the Choice List. '
 
 two_image_choice_list = '\nChoice list:[First image, Second image, None of the images, Both images]. You must choose your answer from the Choice List. '
 three_image_choice_list = '\nChoice list:[First image, Second image, Third image, None of the images, All images]. You must choose your answer from the Choice List. '
