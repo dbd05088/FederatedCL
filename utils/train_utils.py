@@ -764,13 +764,14 @@ def load_deepspeed(state_dict, module: nn.Module, prefix="", strict=True):
             load_deepspeed(state_dict, child, prefix + name + ".")
 
 import random
-def get_task_vectors(model, tokenizer, train_datalists, training_args, data_args, create_trainer, global_state_dict, make_supervised_data_module):
+from federated_methods.fedours import fedours_ema_distill_create_trainer
+def get_task_vectors(model, tokenizer, train_datalists, training_args, data_args, global_state_dict, make_supervised_data_module):
     random.seed(training_args.seed)
     client_task_vectors = []
     for client_id in range(len(train_datalists)):
         datalist = train_datalists[client_id][0]['datalist']
         
-        sub_datalist = random.sample(datalist, 4*5)
+        sub_datalist = random.sample(datalist, 4*20)
         
         data_module = make_supervised_data_module(client_data=sub_datalist, # sub_dataset
                                                 tokenizer=tokenizer,
@@ -780,7 +781,7 @@ def get_task_vectors(model, tokenizer, train_datalists, training_args, data_args
         extra_state_dict_dict['client_id']=0
         extra_state_dict_dict['curr_round']=0
         extra_state_dict_dict['fisher_freq'] = 1
-        trainer = create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
+        trainer = fedours_ema_distill_create_trainer(model, tokenizer, training_args, data_module, extra_state_dict_dict)
 
         results = trainer.train()
         

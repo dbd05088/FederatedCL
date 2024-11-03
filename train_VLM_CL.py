@@ -114,13 +114,13 @@ def main():
     )
     global_state_dict.update(non_lora_state_dict)
     
-    if training_args.mode == 'fedours' and training_args.fedours:
+    if training_args.fedours: #training_args.mode == 'fedours' and 
         logger.info(f'load task vector {training_args.load_checkpoint}')
         tv_weights = torch.load(training_args.load_checkpoint, map_location='cpu')
         prev_task_vectors = tv_weights['task_vectors']
         prev_local_state_dict_list = tv_weights['local_state_dict_list']
         
-        current_task_vectors = get_task_vectors(model, tokenizer, train_datalists, training_args, data_args, create_trainer, global_state_dict, make_supervised_data_module)
+        current_task_vectors = get_task_vectors(model, tokenizer, train_datalists, training_args, data_args, global_state_dict, make_supervised_data_module)
     else:
         current_task_vectors = None
     
@@ -158,11 +158,23 @@ def main():
             tv_weight = {'task_vectors': task_vectors, 'local_state_dict_list': old_local_state_dict_list}
             torch.save(tv_weight, path)
             # cosine sim matrix
-            task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
-            sim = torch.matmul(task_vector,
-                            torch.transpose(task_vector, 1, 0))
-            sim = torch.transpose(sim, 1, 0)
+            # task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
+            # sim = torch.matmul(task_vector,
+            #                 torch.transpose(task_vector, 1, 0))
+            # sim = torch.transpose(sim, 1, 0)
             # sim = (sim+1)/2 # normalize -1~1 to 0~1
+            
+            # vectorize cosine sim and then average them
+            sims = []
+            for grad_idx in range(task_vectors[0].shape[-1]):
+                task_vector = F.normalize(torch.stack([tv[:,grad_idx] for tv in task_vectors], dim=0), dim=-1)
+                sim = torch.matmul(task_vector,
+                                torch.transpose(task_vector, 1, 0))
+                sim = torch.transpose(sim, 1, 0)
+                sims.append(sim)
+            
+            sim = torch.stack(sims, dim=0).mean(dim=0)
+            
             
             extra_state_dict_dict['task_similarity'] = sim
             print("task similarity matrix:")
@@ -200,11 +212,21 @@ def main():
             load_state_dict(model, global_state_dict, old_local_state_dict_list, client_id, training_args, extra_state_dict_dict)
             print('model loading done')
             
-            if training_args.fedours and training_args.mode == 'fedours':
-                task_vector = F.normalize(torch.stack(prev_task_vectors + [current_task_vectors[client_id]], dim=0), dim=-1)
-                sim = torch.matmul(task_vector,
-                                torch.transpose(task_vector, 1, 0))
-                sim = torch.transpose(sim, 1, 0)
+            if training_args.fedours:
+                # task_vector = F.normalize(torch.stack(prev_task_vectors + [current_task_vectors[client_id]], dim=0), dim=-1)
+                # sim = torch.matmul(task_vector,
+                #                 torch.transpose(task_vector, 1, 0))
+                # sim = torch.transpose(sim, 1, 0)
+                
+                sims = []
+                for grad_idx in range(prev_task_vectors[0].shape[-1]):
+                    task_vector = F.normalize(torch.stack([tv[:,grad_idx] for tv in prev_task_vectors] + [current_task_vectors[client_id][:,grad_idx]], dim=0), dim=-1)
+                    sim = torch.matmul(task_vector,
+                                    torch.transpose(task_vector, 1, 0))
+                    sim = torch.transpose(sim, 1, 0)
+                    sims.append(sim)
+                
+                sim = torch.stack(sims, dim=0).mean(dim=0)
                 
                 print(sim)
                 
@@ -212,32 +234,48 @@ def main():
             
                 weights = sim[-1][:-1].clone()
                 
-                weights = (weights).softmax(dim=0)
+                weights = (weights/0.2).softmax(dim=0)
                 
                 sim_sum = weights.sum()
                 
                 for name in global_state_dict.keys():
                     new_param = 0
-                    if 'lora1' in name:
-                        target_key = name.replace('lora1', 'lora2')
-                    elif 'ia3_l_1' in name:
-                        target_key = name.replace('ia3_l_1', 'ia3_l_2')
-                    elif 'ia3_generator_1' in name:
-                        target_key = name.replace('ia3_generator_1', 'ia3_generator_2')
-                    elif 'lang_prompt_dap_key_embeddings_1' in name:
-                        target_key = name.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
-                    elif 'lang_prompt_downsample_1' in name:
-                        target_key = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
-                    elif 'lang_prompt_norm_1' in name:
-                        target_key = name.replace('lang_prompt_norm_1', 'lang_prompt_norm_2')
-                    elif 'lang_prompt_ia3_pool_1' in name:
-                        target_key = name.replace('lang_prompt_ia3_pool_1', 'lang_prompt_ia3_pool_2')
-                    
+                    if training_args.mode == 'fedours':
+                        if 'lora1' in name:
+                            target_key = name.replace('lora1', 'lora2')
+                        elif 'ia3_l_1' in name:
+                            target_key = name.replace('ia3_l_1', 'ia3_l_2')
+                        elif 'ia3_generator_1' in name:
+                            target_key = name.replace('ia3_generator_1', 'ia3_generator_2')
+                        elif 'lang_prompt_dap_key_embeddings_1' in name:
+                            target_key = name.replace('lang_prompt_dap_key_embeddings_1', 'lang_prompt_dap_key_embeddings_2')
+                        elif 'lang_prompt_downsample_1' in name:
+                            target_key = name.replace('lang_prompt_downsample_1', 'lang_prompt_downsample_2')
+                        elif 'lang_prompt_norm_1' in name:
+                            target_key = name.replace('lang_prompt_norm_1', 'lang_prompt_norm_2')
+                        elif 'lang_prompt_ia3_pool_1' in name:
+                            target_key = name.replace('lang_prompt_ia3_pool_1', 'lang_prompt_ia3_pool_2')
+                    else:
+                        if 'lora' in name:
+                            target_key = name.replace('lora', 'lora2')
+                        elif 'ia3_l' in name:
+                            target_key = name.replace('ia3_l', 'ia3_l_2')
+                        elif 'ia3_generator' in name:
+                            target_key = name.replace('ia3_generator', 'ia3_generator_2')
+                        elif 'lang_prompt_dap_key_embeddings' in name:
+                            target_key = name.replace('lang_prompt_dap_key_embeddings', 'lang_prompt_dap_key_embeddings_2')
+                        elif 'lang_prompt_downsample' in name:
+                            target_key = name.replace('lang_prompt_downsample', 'lang_prompt_downsample_2')
+                        elif 'lang_prompt_norm' in name:
+                            target_key = name.replace('lang_prompt_norm', 'lang_prompt_norm_2')
+                        elif 'lang_prompt_ia3_pool' in name:
+                            target_key = name.replace('lang_prompt_ia3_pool', 'lang_prompt_ia3_pool_2')
                     for id in range(len(prev_local_state_dict_list)):
                         new_param += weights[id]*prev_local_state_dict_list[id][target_key] / sim_sum
-                        
+                    
                     new_global_state_dict[name] = new_param
-                    new_global_state_dict[target_key] = new_param
+                    if training_args.mode == 'fedours': 
+                        new_global_state_dict[target_key] = new_param
                 
                 if 'zero3' in training_args.deepspeed:
                     load_deepspeed(new_global_state_dict, model, strict=False)
@@ -357,11 +395,21 @@ def main():
         tv_weight = {'task_vectors': task_vectors, 'local_state_dict_list': local_state_dict_list}
         torch.save(tv_weight, path)
         
-        task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
-        sim = torch.matmul(task_vector,
-                        torch.transpose(task_vector, 1, 0))
-        sim = torch.transpose(sim, 1, 0)
+        # task_vector = F.normalize(torch.stack(task_vectors, dim=0), dim=-1)
+        # sim = torch.matmul(task_vector,
+        #                 torch.transpose(task_vector, 1, 0))
+        # sim = torch.transpose(sim, 1, 0)
         # sim = (sim+1)/2
+        
+        sims = []
+        for grad_idx in range(task_vectors[0].shape[-1]):
+            task_vector = F.normalize(torch.stack([tv[:,grad_idx] for tv in task_vectors], dim=0), dim=-1)
+            sim = torch.matmul(task_vector,
+                            torch.transpose(task_vector, 1, 0))
+            sim = torch.transpose(sim, 1, 0)
+            sims.append(sim)
+        
+        sim = torch.stack(sims, dim=0).mean(dim=0)
         
         extra_state_dict_dict['task_similarity'] = sim
         extra_state_dict_dict['curr_round'] += 1
