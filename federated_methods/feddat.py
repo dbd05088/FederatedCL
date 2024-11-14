@@ -69,14 +69,14 @@ def feddat_set_state_dict(model, global_state_dict, local_state_dict_list, train
     for k in keys_to_del:
         del global_state_dict[k]
     
-    local_keys_to_del = []
-    for k in local_state_dict_list[0].keys():
-        # if 'lora1' in k or 'lora3' in k:
-        if 'lora1' in k or 'ia3_l_1' in k or 'lang_prompt_ia3_pool_1' in k:
-            local_keys_to_del.append(k)
-    for client_id in range(training_args.num_clients):
-        for k in local_keys_to_del:
-            del local_state_dict_list[client_id][k]
+    # local_keys_to_del = []
+    # for k in local_state_dict_list[0].keys():
+    #     # if 'lora1' in k or 'lora3' in k:
+    #     if 'lora1' in k or 'ia3_l_1' in k or 'lang_prompt_ia3_pool_1' in k:
+    #         local_keys_to_del.append(k)
+    # for client_id in range(training_args.num_clients):
+    #     for k in local_keys_to_del:
+    #         del local_state_dict_list[client_id][k]
     # for name, module in model.named_modules():
     #     if isinstance(module, TripleLoraLayer):
     #         module.deactivate_lora3()
@@ -688,6 +688,17 @@ class LLaVATrainerFEDDAT(LLaVATrainerTaskId):
                     self.state.global_step += 1
                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
+                    
+                    # save client model
+                    if step % 5 == 0:
+                        output_dir = os.path.join(self.args.state_dir, f"{self.client_id}_client_model_round{self.curr_round+1}_itr{step}.pth")
+                        self.model.activate_all()
+                        state_dict = {k: t.detach().cpu().clone() for k, t in self.model.named_parameters() if t.requires_grad}
+                        
+                        if (self.args.local_rank == 0 or self.args.local_rank == -1):
+                            torch.save(state_dict, output_dir)
+                        
+                        # self.model.activate_lora2()
 
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:
