@@ -402,12 +402,16 @@ def main():
                 continue
         # load client weight
         if not training_args.zeroshot:
-            if training_args.eval_iter is not None:
-                logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}_itr{training_args.eval_iter}.pth')
-                client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}_itr{training_args.eval_iter}.pth', map_location='cpu')    
-            else:
-                logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
-                client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
+            try:
+                if training_args.eval_iter is not None:
+                    logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}_itr{training_args.eval_iter}.pth')
+                    client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}_itr{training_args.eval_iter}.pth', map_location='cpu')    
+                else:
+                    logger.info(f'load ./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth')
+                    client_state_dict = torch.load(f'./client_states_{training_args.note}/{client_id}_client_model_round{training_args.round_to_eval}.pth', map_location='cpu')
+            except Exception as e:
+                print(e)
+                continue
         
         test_datalist = test_datalists[client_id]
         for data_info in test_datalist:
@@ -428,14 +432,17 @@ def main():
                 # model.base_model.model.model.mm_projector = model.base_model.model.model.local_mm_projector
             dataset = GenerationDataset(data_info['data'], tokenizer, data_args)
             if not training_args.eval_server:
-                if training_args.mode not in ['fedsim', 'feddat']:
+                # if training_args.mode not in ['fedsim', 'feddat']:
+                if os.path.isfile(f"./eval_results/{training_args.mode}/{training_args.note}/client{client_id}_round{training_args.round_to_eval}_iter{training_args.eval_iter}_{data_info['data_name']}.json"):
+                    print('output file already exist')
+                    continue
                     
-                    if data_info['type'] == 'open-ended':
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
-                    elif data_info['type'] == 'multi-choice':
-                        evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
-                    else:
-                        evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+                if data_info['type'] == 'open-ended':
+                    evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+                elif data_info['type'] == 'multi-choice':
+                    evaluate_choices(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
+                else:
+                    evaluate(dataset, data_info['data_name'], training_args.round_to_eval, model, tokenizer, device, model_args, training_args, logger, client_id, batch_size)
             if training_args.eval_server and data_info['data_name'] not in server_eval_key:
                 if not training_args.zeroshot:
                     model.load_state_dict(server_state_dict, strict=False)
